@@ -1,0 +1,205 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 428" width="100%" height="100%" role="img" aria-label="웹 콘솔 기억 관리 탭 동작 시뮬레이션">
+  <style>
+    .outer { fill: #0b0e13; stroke: #243041; stroke-width: 1.5; }
+    .topbar { fill: #121720; stroke: #243041; stroke-width: 1; }
+    .card { fill: #121720; stroke: #243041; stroke-width: 1; }
+    .sub { fill: #161d28; stroke: #263346; stroke-width: 1; }
+    .sub-hi { fill: rgba(56, 189, 248, 0.10); stroke: rgba(56, 189, 248, 0.45); stroke-width: 1.2; }
+    .sub-ok { fill: rgba(16, 185, 129, 0.10); stroke: rgba(16, 185, 129, 0.45); stroke-width: 1.2; }
+    .sub-warn { fill: rgba(245, 158, 11, 0.10); stroke: rgba(245, 158, 11, 0.45); stroke-width: 1.2; }
+    .sub-err { fill: rgba(239, 68, 68, 0.10); stroke: rgba(239, 68, 68, 0.48); stroke-width: 1.2; }
+    .pill-idle { fill: #18202c; stroke: #263346; stroke-width: 1; }
+    .pill-act { fill: rgba(56, 189, 248, 0.16); stroke: rgba(56, 189, 248, 0.55); stroke-width: 1.2; }
+    .b-ok { fill: rgba(16, 185, 129, 0.16); stroke: rgba(16, 185, 129, 0.45); stroke-width: 1; }
+    .b-err { fill: rgba(239, 68, 68, 0.16); stroke: rgba(239, 68, 68, 0.45); stroke-width: 1; }
+    .b-warn { fill: rgba(245, 158, 11, 0.16); stroke: rgba(245, 158, 11, 0.45); stroke-width: 1; }
+    .b-info { fill: rgba(56, 189, 248, 0.16); stroke: rgba(56, 189, 248, 0.45); stroke-width: 1; }
+    .b-mut { fill: rgba(100, 116, 139, 0.18); stroke: rgba(100, 116, 139, 0.4); stroke-width: 1; }
+    .sans { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", Roboto, sans-serif; }
+    .mono { font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; }
+    .t-pri { fill: #f1f5f9; }
+    .t-sec { fill: #94a3b8; }
+    .t-mut { fill: #64748b; }
+    .t-acc { fill: #38bdf8; }
+    .t-ok { fill: #34d399; }
+    .t-warn { fill: #fbbf24; }
+    .t-err { fill: #f87171; }
+    .btn-pri { fill: #0284c7; stroke: #38bdf8; stroke-width: 1; }
+
+    /* 12s loop across 3 frames (4s per frame) */
+    .f1, .f2, .f3 { opacity: 0; }
+    .f1 { animation: loop1 12s infinite; }
+    .f2 { animation: loop2 12s infinite; }
+    .f3 { animation: loop3 12s infinite; }
+    @keyframes loop1 { 0%, 31% { opacity: 1; } 34%, 100% { opacity: 0; } }
+    @keyframes loop2 { 0%, 32% { opacity: 0; } 34%, 65% { opacity: 1; } 68%, 100% { opacity: 0; } }
+    @keyframes loop3 { 0%, 66% { opacity: 0; } 68%, 98% { opacity: 1; } 100% { opacity: 0; } }
+  </style>
+  <rect class="outer" x="1" y="1" width="998" height="426" rx="12" />
+  <rect class="topbar" x="1" y="1" width="998" height="46" rx="12" />
+  <rect x="1" y="34" width="998" height="13" fill="#121720" />
+  <line x1="1" y1="47" x2="999" y2="47" stroke="#243041" stroke-width="1" />
+
+  <!-- Brand + Port -->
+  <rect class="b-info" x="16" y="12" width="136" height="24" rx="5" />
+  <text x="84" y="28" text-anchor="middle" class="mono t-acc" font-size="11" font-weight="700">memorize :18095</text>
+
+  <!-- 5 Console Tabs -->
+  <rect class="pill-act" x="166" y="12" width="104" height="24" rx="5" />
+  <text x="218.0" y="28" text-anchor="middle" class="sans t-acc" font-size="11" font-weight="700">기억 관리</text>
+  <rect class="pill-idle" x="278" y="12" width="96" height="24" rx="5" />
+  <text x="326.0" y="28" text-anchor="middle" class="sans t-sec" font-size="11" font-weight="600">진행 현황</text>
+  <rect class="pill-idle" x="382" y="12" width="102" height="24" rx="5" />
+  <text x="433.0" y="28" text-anchor="middle" class="sans t-sec" font-size="11" font-weight="600">가드레일</text>
+  <rect class="pill-idle" x="492" y="12" width="92" height="24" rx="5" />
+  <text x="538.0" y="28" text-anchor="middle" class="sans t-sec" font-size="11" font-weight="600">추론 엔진</text>
+  <rect class="pill-idle" x="592" y="12" width="134" height="24" rx="5" />
+  <text x="659.0" y="28" text-anchor="middle" class="sans t-sec" font-size="11" font-weight="600">임계값 · 테스트</text>
+
+  <!-- Topbar right indicator -->
+  <rect class="b-mut" x="836" y="12" width="148" height="24" rx="5" />
+  <text x="910" y="28" text-anchor="middle" class="mono t-sec" font-size="10.2" font-weight="600">자동 재생 · 4초/단계</text>
+
+  <rect class="sub" x="16" y="58" width="314" height="28" rx="6" />
+  <g class="f1">
+    <rect class="sub-hi" x="16" y="58" width="314" height="28" rx="6" />
+  </g>
+  <text x="173" y="76" text-anchor="middle" class="sans t-pri" font-size="11" font-weight="600">1단계: 스코프 필터 &amp; 2D 트리맵</text>
+  <rect class="sub" x="343" y="58" width="314" height="28" rx="6" />
+  <g class="f2">
+    <rect class="sub-hi" x="343" y="58" width="314" height="28" rx="6" />
+  </g>
+  <text x="500" y="76" text-anchor="middle" class="sans t-pri" font-size="11" font-weight="600">2단계: 원칙 고정 &amp; 개인 기억 읽기</text>
+  <rect class="sub" x="670" y="58" width="314" height="28" rx="6" />
+  <g class="f3">
+    <rect class="sub-hi" x="670" y="58" width="314" height="28" rx="6" />
+  </g>
+  <text x="827" y="76" text-anchor="middle" class="sans t-pri" font-size="11" font-weight="600">3단계: AI 유사 기억 병합</text>
+
+  <!-- KPI Row (Animated counters in Frame 2 & 3) -->
+  <rect class="card" x="16" y="96" width="170" height="52" rx="7" />
+  <text x="28" y="114" class="sans t-sec" font-size="10.5">활성 기억</text>
+  <text x="28" y="138" class="mono t-ok f1" font-size="18" font-weight="700">14</text>
+  <text x="28" y="138" class="mono t-ok f2" font-size="18" font-weight="700">15</text>
+  <text x="28" y="138" class="mono t-ok f3" font-size="18" font-weight="700">14</text>
+
+  <rect class="card" x="196" y="96" width="170" height="52" rx="7" />
+  <text x="208" y="114" class="sans t-sec" font-size="10.5">고정 원칙</text>
+  <text x="208" y="138" class="mono t-warn f1" font-size="18" font-weight="700">3</text>
+  <text x="208" y="138" class="mono t-warn f2" font-size="18" font-weight="700">4</text>
+  <text x="208" y="138" class="mono t-warn f3" font-size="18" font-weight="700">4</text>
+
+  <rect class="card" x="376" y="96" width="170" height="52" rx="7" />
+  <text x="388" y="114" class="sans t-sec" font-size="10.5">폐기 이력</text>
+  <text x="388" y="138" class="mono t-sec f1" font-size="18" font-weight="700">4</text>
+  <text x="388" y="138" class="mono t-sec f2" font-size="18" font-weight="700">4</text>
+  <text x="388" y="138" class="mono t-acc f3" font-size="18" font-weight="700">6</text>
+
+  <!-- Right Action Bar -->
+  <rect class="card" x="556" y="96" width="428" height="52" rx="7" />
+  <rect class="sub" x="568" y="110" width="18" height="18" rx="3" />
+  <g class="f2"><rect class="b-info" x="568" y="110" width="18" height="18" rx="3" /><path d="M572 119 L576 123 L582 115" fill="none" stroke="#38bdf8" stroke-width="2" /></g>
+  <g class="f3"><rect class="b-info" x="568" y="110" width="18" height="18" rx="3" /><path d="M572 119 L576 123 L582 115" fill="none" stroke="#38bdf8" stroke-width="2" /></g>
+  <text x="593" y="123" class="sans t-pri" font-size="10.5">프로젝트에서 personal 함께 읽기</text>
+
+  <rect class="btn-pri" x="806" y="109" width="76" height="24" rx="5" />
+  <text x="844" y="125" text-anchor="middle" class="sans t-pri" font-size="10.5" font-weight="700">+ 기억 추가</text>
+  <rect class="pill-idle f1" x="890" y="109" width="84" height="24" rx="5" />
+  <rect class="pill-idle f2" x="890" y="109" width="84" height="24" rx="5" />
+  <rect class="pill-act f3" x="890" y="109" width="84" height="24" rx="5" />
+  <text x="932" y="125" text-anchor="middle" class="sans t-pri" font-size="10.5" font-weight="600">AI 병합 정리</text>
+
+  <!-- Left Card: 2D Squarified Treemap -->
+  <rect class="card" x="16" y="158" width="350" height="254" rx="8" />
+  <text x="28" y="180" class="sans t-pri" font-size="11.5" font-weight="700">스코프 분포 2D 트리맵</text>
+  <rect class="b-info" x="28" y="192" width="194" height="140" rx="5" />
+  <text x="38" y="212" class="mono t-acc" font-size="10.5" font-weight="700">arch / build</text>
+  <text x="38" y="229" class="mono t-sec" font-size="10">42%</text>
+  <rect class="b-ok" x="228" y="192" width="124" height="140" rx="5" />
+  <text x="236" y="212" class="mono t-ok" font-size="10" font-weight="700">security / auth</text>
+  <text x="236" y="229" class="mono t-sec" font-size="10">31%</text>
+  <rect class="b-warn" x="28" y="338" width="212" height="60" rx="5" />
+  <text x="38" y="362" class="mono t-warn" font-size="10.5" font-weight="700">testing (18%)</text>
+  <rect class="b-mut" x="246" y="338" width="106" height="60" rx="5" />
+  <text x="254" y="362" class="mono t-sec" font-size="10" font-weight="700">pref (9%)</text>
+
+  <!-- Right Card: Memory Table -->
+  <rect class="card" x="376" y="158" width="608" height="254" rx="8" />
+  <rect class="sub" x="388" y="170" width="584" height="26" rx="4" />
+  <text x="400" y="187" class="mono t-mut" font-size="10" font-weight="700">ID</text>
+  <text x="444" y="187" class="mono t-mut" font-size="10" font-weight="700">SCOPE</text>
+  <text x="556" y="187" class="mono t-mut" font-size="10" font-weight="700">STATE</text>
+  <text x="634" y="187" class="mono t-mut" font-size="10" font-weight="700">CONTENT</text>
+
+  <!-- Row #1 (Static across steps) -->
+  <rect class="sub" x="388" y="202" width="584" height="34" rx="5" />
+  <text x="400" y="223" class="mono t-pri" font-size="10.5">#1</text>
+  <text x="444" y="223" class="mono t-acc" font-size="10.5">project:app</text>
+  <rect class="b-warn" x="556" y="210" width="60" height="18" rx="4" />
+  <text x="586" y="223" text-anchor="middle" class="mono t-warn" font-size="9.5" font-weight="700">PINNED</text>
+  <text x="634" y="223" class="sans t-pri" font-size="11">Go 빌드 시 CGO 사용 금지</text>
+
+  <!-- Frame 1: Regular Rows #4, #7, #9 -->
+  <g class="f1">
+    <rect class="sub" x="388" y="242" width="584" height="34" rx="5" />
+    <text x="400" y="263" class="mono t-pri" font-size="10.5">#4</text>
+    <text x="444" y="263" class="mono t-acc" font-size="10.5">project:app</text>
+    <rect class="b-ok" x="556" y="250" width="60" height="18" rx="4" />
+    <text x="586" y="263" text-anchor="middle" class="mono t-ok" font-size="9.5" font-weight="700">ACTIVE</text>
+    <text x="634" y="263" class="sans t-pri" font-size="11">HttpOnly 세션 쿠키 인증 사용</text>
+
+    <rect class="sub" x="388" y="282" width="584" height="34" rx="5" />
+    <text x="400" y="303" class="mono t-pri" font-size="10.5">#7</text>
+    <text x="444" y="303" class="mono t-acc" font-size="10.5">project:app</text>
+    <rect class="b-ok" x="556" y="290" width="60" height="18" rx="4" />
+    <text x="586" y="303" text-anchor="middle" class="mono t-ok" font-size="9.5" font-weight="700">ACTIVE</text>
+    <text x="634" y="303" class="sans t-pri" font-size="11">단위 테스트는 테이블 기반 패턴 사용</text>
+
+    <rect class="sub" x="388" y="322" width="584" height="34" rx="5" />
+    <text x="400" y="343" class="mono t-pri" font-size="10.5">#9</text>
+    <text x="444" y="343" class="mono t-acc" font-size="10.5">project:app</text>
+    <rect class="b-ok" x="556" y="330" width="60" height="18" rx="4" />
+    <text x="586" y="343" text-anchor="middle" class="mono t-ok" font-size="9.5" font-weight="700">ACTIVE</text>
+    <text x="634" y="343" class="sans t-pri" font-size="11">테스트 케이스를 테이블 스펙으로 묶어 작성</text>
+  </g>
+
+  <!-- Frame 2: #4 promoted to PINNED + #12 personal injected -->
+  <g class="f2">
+    <rect class="sub-hi" x="388" y="242" width="584" height="34" rx="5" />
+    <text x="400" y="263" class="mono t-pri" font-size="10.5">#4</text>
+    <text x="444" y="263" class="mono t-acc" font-size="10.5">project:app</text>
+    <rect class="b-warn" x="556" y="250" width="60" height="18" rx="4" />
+    <text x="586" y="263" text-anchor="middle" class="mono t-warn" font-size="9.5" font-weight="700">PINNED</text>
+    <text x="634" y="263" class="sans t-pri" font-size="11" font-weight="600">HttpOnly 세션 쿠키 인증 사용</text>
+
+    <rect class="sub-ok" x="388" y="282" width="584" height="34" rx="5" />
+    <text x="400" y="303" class="mono t-ok" font-size="10.5">#12</text>
+    <text x="444" y="303" class="mono t-ok" font-size="10.5">personal</text>
+    <rect class="b-ok" x="556" y="290" width="60" height="18" rx="4" />
+    <text x="586" y="303" text-anchor="middle" class="mono t-ok" font-size="9.5" font-weight="700">INCLUDED</text>
+    <text x="634" y="303" class="sans t-ok" font-size="11" font-weight="600">견과류 알레르기 — 땅콩 재료 제외</text>
+  </g>
+
+  <!-- Frame 3: AI Merge Result Banner & Merged Rule #15 -->
+  <g class="f3">
+    <rect class="sub" x="388" y="242" width="584" height="34" rx="5" />
+    <text x="400" y="263" class="mono t-pri" font-size="10.5">#4</text>
+    <text x="444" y="263" class="mono t-acc" font-size="10.5">project:app</text>
+    <rect class="b-warn" x="556" y="250" width="60" height="18" rx="4" />
+    <text x="586" y="263" text-anchor="middle" class="mono t-warn" font-size="9.5" font-weight="700">PINNED</text>
+    <text x="634" y="263" class="sans t-pri" font-size="11">HttpOnly 세션 쿠키 인증 사용</text>
+
+    <rect class="sub-ok" x="388" y="282" width="584" height="34" rx="5" />
+    <text x="400" y="303" class="mono t-ok" font-size="10.5">#15</text>
+    <text x="444" y="303" class="mono t-acc" font-size="10.5">project:app</text>
+    <rect class="b-info" x="556" y="290" width="60" height="18" rx="4" />
+    <text x="586" y="303" text-anchor="middle" class="mono t-acc" font-size="9.5" font-weight="700">MERGED</text>
+    <text x="634" y="303" class="sans t-ok" font-size="11" font-weight="600">[#15] 단위 테스트는 테이블 스펙 패턴으로 작성</text>
+
+    <rect class="sub-hi" x="388" y="328" width="584" height="70" rx="6" />
+    <text x="404" y="352" class="sans t-acc" font-size="11.5" font-weight="700">AI 중복 병합 제안</text>
+    <text x="404" y="376" class="sans t-pri" font-size="11">유사 규칙 #7 + #9 병합 -&gt; #15 단일 규칙 유지</text>
+    <rect class="btn-pri" x="866" y="356" width="92" height="26" rx="5" />
+    <text x="912" y="373" text-anchor="middle" class="sans t-pri" font-size="10.5" font-weight="700">병합 적용</text>
+  </g>
+</svg>

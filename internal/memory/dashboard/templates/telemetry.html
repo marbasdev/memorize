@@ -1,0 +1,145 @@
+{{define "engine_telemetry_panel"}}
+<details id="evalTelemetryPanel" class="cat-breakdown" style="margin-top:0;margin-bottom:0.85rem;" :open="telemetryOpen">
+  <summary class="cat-breakdown-head" @click.prevent="setTelemetryOpen(!telemetryOpen)">
+    <div style="display:flex;align-items:center;gap:0.42rem;flex-wrap:wrap;">
+      <span class="tel-chevron" aria-hidden="true">▸</span>
+      <strong>{{t .Lang "tel_panel_title"}}</strong>
+      <span class="badge b-muted" id="telemetrySummaryBadge" style="font-family:var(--mono);font-size:0.7rem;">
+        {{.TelemetryViz.WindowLabel}}: {{.Telemetry.TotalCalls}} {{t .Lang "tel_calls"}}
+      </span>
+      {{if gt .Telemetry.TotalCalls 0}}
+        <span class="tag-chip" style="font-family:var(--mono);font-size:0.69rem;">avg {{fmtLatency .Telemetry.AvgElapsedMs}}</span>
+        <span class="tag-chip" style="font-family:var(--mono);font-size:0.69rem;">p95 {{fmtLatency .Telemetry.P95ElapsedMs}}</span>
+        <span class="tag-chip" style="font-family:var(--mono);font-size:0.69rem;">Σ {{fmtLatency .Telemetry.TotalElapsedMs}}</span>
+      {{end}}
+      {{if gt .Telemetry.TotalTimeouts 0}}
+        <span class="badge b-warn">{{t .Lang "tel_timeouts"}} {{.Telemetry.TotalTimeouts}}</span>
+      {{end}}
+      {{if gt .Telemetry.TotalErrors 0}}
+        <span class="badge b-danger">{{t .Lang "tel_errors"}} {{.Telemetry.TotalErrors}}</span>
+      {{end}}
+    </div>
+
+    <div style="display:flex;align-items:center;gap:0.35rem;flex-wrap:wrap;" @click.stop>
+      <div class="pills" role="tablist" aria-label="Telemetry Window">
+        {{range .TelemetryViz.WindowTabs}}
+          <button type="button" class="pill {{if eq $.TelemetryViz.Window .ID}}active{{end}}"
+            hx-get="/ui/engines?view={{$.ViewedProvider}}&tw={{.ID}}"
+            hx-target="#enginesSection" hx-swap="innerHTML">{{.Label}}</button>
+        {{end}}
+      </div>
+      <button type="button" class="btn btn-sm" id="btnTelemetryReload"
+        hx-get="/ui/engines?view={{.ViewedProvider}}&tw={{.TelemetryViz.Window}}"
+        hx-target="#enginesSection" hx-swap="innerHTML">↻</button>
+      {{if gt .Telemetry.TotalCalls 0}}
+      <button type="button" class="btn btn-sm" id="btnResetTelemetry"
+        hx-post="/ui/engines/telemetry/reset"
+        hx-vals='{"view":"{{.ViewedProvider}}","tw":"{{.TelemetryViz.Window}}"}'
+        hx-target="#enginesSection" hx-swap="innerHTML">{{t .Lang "btn_reset_telemetry"}}</button>
+      {{end}}
+    </div>
+  </summary>
+
+  <div class="tel-body">
+  {{if eq .Telemetry.TotalCalls 0}}
+    <div style="font-size:0.78rem;color:var(--subtle);padding:0.55rem 0.2rem;">{{t .Lang "tel_empty_desc"}}</div>
+  {{else}}
+    <div class="tel-kpi-row">
+      <div class="tel-kpi">
+        <span class="tel-kpi-lbl">{{t .Lang "tel_kpi_calls"}}</span>
+        <span class="tel-kpi-val">{{.Telemetry.TotalCalls}}</span>
+      </div>
+      <div class="tel-kpi">
+        <span class="tel-kpi-lbl">{{t .Lang "tel_kpi_total_time"}}</span>
+        <span class="tel-kpi-val">{{fmtLatency .Telemetry.TotalElapsedMs}}</span>
+      </div>
+      <div class="tel-kpi">
+        <span class="tel-kpi-lbl">{{t .Lang "tel_kpi_avg"}}</span>
+        <span class="tel-kpi-val">{{fmtLatency .Telemetry.AvgElapsedMs}}</span>
+      </div>
+      <div class="tel-kpi">
+        <span class="tel-kpi-lbl">{{t .Lang "tel_kpi_p95"}}</span>
+        <span class="tel-kpi-val">{{fmtLatency .Telemetry.P95ElapsedMs}}</span>
+      </div>
+    </div>
+
+    <div class="grid-2" style="gap:0.75rem;">
+      <div class="tel-box" id="telemetryTaskChart">
+        <div class="tel-box-head">
+          <strong>{{t .Lang "tel_by_task_title"}}</strong>
+          <span class="tel-legend">
+            <span><i class="tel-dot tel-dot-avg"></i>avg</span>
+            <span><i class="tel-dot tel-dot-p95"></i>p95</span>
+          </span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:0.5rem;">
+          {{range .TelemetryViz.ActiveTasks}}
+            <div class="tel-row">
+              <div class="tel-row-top">
+                <span class="tel-row-name">{{.Label}} <small style="color:var(--muted);font-family:var(--mono);">({{.Calls}} {{t $.Lang "tel_calls"}} · {{fmtFloat .SharePct 0}}%)</small></span>
+                <span class="tel-row-metrics">{{fmtLatency .AvgElapsedMs}} / p95 {{fmtLatency .P95ElapsedMs}}</span>
+              </div>
+              <div class="tel-dual-track" title="total {{fmtLatency .TotalElapsedMs}} · avg {{fmtLatency .AvgElapsedMs}} · p95 {{fmtLatency .P95ElapsedMs}} · max {{fmtLatency .MaxElapsedMs}} · ~{{fmtFloat .AvgItems 1}} items">
+                <div class="tel-dual-p95" style="width:{{fmtFloat .P95WidthPct 1}}%"></div>
+                <div class="tel-dual-avg" style="width:{{fmtFloat .AvgWidthPct 1}}%"></div>
+              </div>
+            </div>
+          {{end}}
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:0.75rem;">
+        <div class="tel-box" id="telemetryEngineChart">
+          <div class="tel-box-head">
+            <strong>{{t .Lang "tel_by_engine_title"}}</strong>
+            <span class="tel-legend">
+              <span><i class="tel-dot tel-dot-avg"></i>avg</span>
+              <span><i class="tel-dot tel-dot-p95"></i>p95</span>
+            </span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:0.48rem;">
+            {{range .TelemetryViz.Engines}}
+              <div class="tel-row">
+                <div class="tel-row-top">
+                  <span class="tel-row-name" style="font-family:var(--mono);font-size:0.74rem;">
+                    {{.Engine}}
+                    <small style="color:var(--muted);">({{.Calls}} {{t $.Lang "tel_calls"}})</small>
+                    {{if gt .TimeoutCount 0}}<span class="badge b-warn">{{.TimeoutCount}}</span>{{end}}
+                    {{if gt .ErrorCount 0}}<span class="badge b-danger">{{.ErrorCount}}</span>{{end}}
+                  </span>
+                  <span class="tel-row-metrics">{{fmtLatency .AvgElapsedMs}} / p95 {{fmtLatency .P95ElapsedMs}}</span>
+                </div>
+                <div class="tel-dual-track" title="total {{fmtLatency .TotalElapsedMs}} · max {{fmtLatency .MaxElapsedMs}} · ~{{fmtFloat .AvgItems 1}} items">
+                  <div class="tel-dual-p95" style="width:{{fmtFloat .P95WidthPct 1}}%"></div>
+                  <div class="tel-dual-avg" style="width:{{fmtFloat .AvgWidthPct 1}}%"></div>
+                </div>
+              </div>
+            {{end}}
+          </div>
+        </div>
+
+        {{if .TelemetryViz.SparkBars}}
+        <div class="tel-box" id="telemetrySparkChart">
+          <div class="tel-box-head">
+            <strong>{{t .Lang "tel_recent_calls_title"}}</strong>
+            <span style="font-family:var(--mono);font-size:0.69rem;color:var(--muted);">max {{fmtLatency .TelemetryViz.MaxSampleMs}}</span>
+          </div>
+          <div class="tel-spark-grid">
+            {{range .TelemetryViz.SparkBars}}
+              <div class="tel-spark-col" title="{{.TaskLabel}} · {{.Engine}} · {{fmtLatency .ElapsedMs}} · {{.ItemCount}} items · {{.Status}} ({{.Stamp}})">
+                <div class="tel-spark-val">{{fmtLatency .ElapsedMs}}</div>
+                <div class="tel-spark-track">
+                  <div class="tel-spark-bar st-{{.Status}}" style="height:{{.HeightPx}}px;"></div>
+                </div>
+                <div class="tel-spark-lbl">{{.ShortTask}}</div>
+              </div>
+            {{end}}
+          </div>
+        </div>
+        {{end}}
+      </div>
+    </div>
+  {{end}}
+  </div>
+</details>
+{{end}}

@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 385" width="100%" height="100%" role="img" aria-label="Old way vs memorize real-world timeline comparison">
+  <defs>
+    <style>
+      .s-outer { fill: #0b0e13; stroke: #243041; stroke-width: 1.5; }
+      .s-top { fill: #121720; stroke: #243041; stroke-width: 1; }
+      .s-panel { fill: #11161f; stroke: #243041; stroke-width: 1; }
+      .s-card { fill: #161d28; stroke: #283548; stroke-width: 1; }
+      .s-term { fill: #0d121a; stroke: #283548; stroke-width: 1; }
+      .s-err { fill: rgba(239, 68, 68, 0.13); stroke: rgba(239, 68, 68, 0.48); stroke-width: 1; }
+      .s-ok { fill: rgba(16, 185, 129, 0.12); stroke: rgba(16, 185, 129, 0.48); stroke-width: 1; }
+      .s-info { fill: rgba(56, 189, 248, 0.12); stroke: rgba(56, 189, 248, 0.45); stroke-width: 1; }
+      .s-sans { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+      .s-mono { font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; }
+      .c-pri { fill: #f1f5f9; }
+      .c-sec { fill: #94a3b8; }
+      .c-mut { fill: #64748b; }
+      .c-acc { fill: #38bdf8; }
+      .c-ok { fill: #34d399; }
+      .c-err { fill: #f87171; }
+      .c-warn { fill: #fbbf24; }
+    </style>
+  </defs>
+
+  <rect class="s-outer" x="1" y="1" width="998" height="383" rx="12" />
+  <rect class="s-top" x="1" y="1" width="998" height="44" rx="12" />
+  <rect x="1" y="32" width="998" height="13" fill="#121720" />
+  <line x1="1" y1="45" x2="999" y2="45" stroke="#243041" stroke-width="1" />
+
+  <rect class="s-info" x="18" y="11" width="234" height="24" rx="5" />
+  <text x="135" y="27" text-anchor="middle" class="s-sans c-acc" font-size="11.5" font-weight="700">Real-World Session (Before vs After)</text>
+  <text x="982" y="27" text-anchor="end" class="s-sans c-sec" font-size="11">Rule Swapped → /compact Summary → Turn 42 Code Edit</text>
+
+  <!-- LEFT: WITHOUT MEMORIZE -->
+  <rect class="s-panel" x="18" y="58" width="466" height="311" rx="8" />
+  <text x="34" y="82" class="s-sans c-pri" font-size="12.5" font-weight="700">Old Way (CLAUDE.md · RAG · Plain Chat)</text>
+  <rect class="s-err" x="386" y="66" width="84" height="22" rx="4" />
+  <text x="428" y="81" text-anchor="middle" class="s-sans c-err" font-size="10.2" font-weight="700">RULE DRIFT</text>
+
+  <!-- Step 1 Left -->
+  <rect class="s-card" x="34" y="98" width="434" height="58" rx="6" />
+  <text x="46" y="116" class="s-mono c-sec" font-size="10.5">10:05 · Turn 3  User</text>
+  <text x="46" y="133" class="s-sans c-pri" font-size="11.5">“Switch API auth from JWT to session cookies from now on”</text>
+  <text x="46" y="149" class="s-sans c-mut" font-size="10">↳ Static CLAUDE.md still carries the old “Use JWT” instruction</text>
+
+  <!-- Step 2 Left -->
+  <rect class="s-card" x="34" y="164" width="434" height="52" rx="6" />
+  <text x="46" y="182" class="s-mono c-warn" font-size="10.5">11:40 · /compact Context Compaction</text>
+  <text x="46" y="199" class="s-sans c-sec" font-size="10.8">10:05 cookie agreement gets pushed out of long debug summaries</text>
+
+  <!-- Step 3 Left -->
+  <rect class="s-term" x="34" y="224" width="434" height="74" rx="6" />
+  <text x="46" y="242" class="s-mono c-sec" font-size="10.5">14:20 · Turn 42  Agent → write_file("auth.ts")</text>
+  <rect x="46" y="250" width="410" height="22" rx="3" fill="rgba(239,68,68,0.14)" />
+  <text x="54" y="265" class="s-mono c-err" font-size="10.2">+ import jwt from "jsonwebtoken"  // stale rule reused</text>
+  <text x="46" y="289" class="s-sans c-sec" font-size="10.5">Saved to disk and committed with zero pushback</text>
+
+  <!-- Result Left -->
+  <rect class="s-err" x="34" y="306" width="434" height="48" rx="6" />
+  <text x="251" y="326" text-anchor="middle" class="s-sans c-err" font-size="11.8" font-weight="700">Result: Caught only after JWT code is already written</text>
+  <text x="251" y="343" text-anchor="middle" class="s-sans c-sec" font-size="10.3">Manual rollback + thousands of wasted instruction tokens per turn</text>
+
+  <!-- VS Badge -->
+  <circle cx="500" cy="214" r="14" fill="#161d28" stroke="#334155" stroke-width="1.3" />
+  <text x="500" y="218" text-anchor="middle" class="s-mono c-acc" font-size="10" font-weight="700">VS</text>
+
+  <!-- RIGHT: WITH MEMORIZE -->
+  <rect class="s-panel" x="516" y="58" width="466" height="311" rx="8" />
+  <text x="532" y="82" class="s-sans c-pri" font-size="12.5" font-weight="700">With memorize</text>
+  <rect class="s-ok" x="844" y="66" width="122" height="22" rx="4" />
+  <text x="905" y="81" text-anchor="middle" class="s-sans c-ok" font-size="10.2" font-weight="700">PRE-RUN BLOCKED</text>
+
+  <!-- Step 1 Right -->
+  <rect class="s-card" x="532" y="98" width="434" height="58" rx="6" />
+  <text x="544" y="116" class="s-mono c-acc" font-size="10.5">10:05 · Write Gate (Atomic 1:N Replace)</text>
+  <text x="544" y="133" class="s-mono c-mut" font-size="10.5" text-decoration="line-through">[#4] Use JWT</text>
+  <text x="634" y="133" class="s-sans c-ok" font-size="11" font-weight="700">→  [#9] Session cookies only for auth</text>
+  <text x="544" y="149" class="s-sans c-mut" font-size="10">↳ Retires old rule immediately + sends [REVOKED] to other sessions</text>
+
+  <!-- Step 2 Right -->
+  <rect class="s-info" x="532" y="164" width="434" height="52" rx="6" />
+  <text x="544" y="182" class="s-mono c-acc" font-size="10.5">11:40 · /compact · Checkpoint Auto-Detected</text>
+  <text x="544" y="199" class="s-sans c-pri" font-size="10.8">Auto-restores [#9] &amp; invariants via <tspan class="c-ok" font-weight="700">[Post-Compact Restored]</tspan></text>
+
+  <!-- Step 3 Right -->
+  <rect class="s-term" x="532" y="224" width="434" height="74" rx="6" />
+  <text x="544" y="242" class="s-mono c-warn" font-size="10.3">14:20 · Turn 42  Agent calls write_file → PreToolUse Hook</text>
+  <rect x="544" y="250" width="410" height="22" rx="3" fill="rgba(251,191,36,0.14)" />
+  <text x="552" y="265" class="s-mono c-warn" font-size="10.4">[BLOCKED] Violates #9: No JWT — use session cookies</text>
+  <text x="544" y="289" class="s-sans c-ok" font-size="10.3">↳ Stopped before disk write → Agent rewrites with sessionCookie</text>
+
+  <!-- Result Right -->
+  <rect class="s-ok" x="532" y="306" width="434" height="48" rx="6" />
+  <text x="749" y="326" text-anchor="middle" class="s-sans c-ok" font-size="11.8" font-weight="700">Result: Violation stopped before touching disk</text>
+  <text x="749" y="343" text-anchor="middle" class="s-sans c-sec" font-size="10.3">0 repeat-turn evals · KV-cached prefix · 0-token System 1</text>
+</svg>

@@ -1,0 +1,9 @@
+bin/
+dist/
+models/
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.*
+.DS_Store

@@ -1,0 +1,398 @@
+{{define "progress_meta_chips"}}
+<button type="button" class="prog-meta-chip {{if eq .CurScope .Scope}}active{{end}}"
+  hx-get="/ui/progress" hx-include="#progressFilterForm" hx-vals="{{scopeToggleJSON .CurScope .Scope}}"
+  hx-target="#progressSection" hx-swap="innerHTML">{{.ProjectName}}</button>
+{{if .SessionID}}
+  <button type="button" class="prog-meta-chip {{if eq .CurSession .SessionID}}active{{end}}" title="{{.SessionID}}"
+    hx-get="/ui/progress" hx-include="#progressFilterForm" hx-vals="{{sessionToggleJSON .CurSession .SessionID}}"
+    hx-target="#progressSection" hx-swap="innerHTML">{{shortSession .SessionID}}</button>
+{{end}}
+<button type="button" class="prog-meta-chip kind-{{.Kind}} {{if eq .CurKind .Kind}}active{{end}}"
+  hx-get="/ui/progress" hx-include="#progressFilterForm" hx-vals="{{kindToggleJSON .CurKind .Kind}}"
+  hx-target="#progressSection" hx-swap="innerHTML">{{progKindLabel .Lang .Kind}}</button>
+{{end}}
+
+{{define "progress_section"}}
+<div>
+  <form id="progressFilterForm" class="toolbar" style="margin-bottom:0.75rem;"
+    hx-get="/ui/progress" hx-vals='{"page":"1"}' hx-target="#progressSection" hx-swap="innerHTML"
+    hx-trigger="change from:.prog-filter-sel" @submit.prevent>
+    <input type="hidden" name="track" value="{{.TrackFilter}}">
+    <input type="hidden" name="category" value="{{.CategoryFilter}}">
+    <input type="hidden" name="status" value="{{.StatusFilter}}">
+    <input type="hidden" name="page" value="{{.Overview.Page}}">
+    <input type="hidden" name="page_size" value="{{.Overview.PageSize}}">
+
+    <div style="display:flex;align-items:center;gap:0.65rem;flex-wrap:wrap;flex:1;">
+      <div>
+        <h2>{{t .Lang "prog_title"}}</h2>
+        <div style="font-size:0.76rem;color:var(--muted);">{{t .Lang "prog_desc"}}</div>
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:0.45rem;flex-wrap:wrap;">
+      {{if .Overview.Sync.InSync}}
+        <span class="badge b-ok" title="{{.Overview.Sync.RepoPath}}">
+          ✓ {{t .Lang "prog_in_sync"}}{{if .Overview.Sync.HeadCommit}} · {{.Overview.Sync.HeadCommit}}{{end}}
+        </span>
+      {{else}}
+        <span class="badge b-warn" title="{{.Overview.Sync.RepoPath}}">
+          ↻ {{t .Lang "prog_needs_sync"}}
+          {{if gt .Overview.Sync.UnlinkedMemoryCount 0}} · {{t .Lang "prog_unlinked_mem"}} {{.Overview.Sync.UnlinkedMemoryCount}}{{end}}
+          {{if gt (len .Overview.Sync.PendingCommits) 0}} · {{t .Lang "prog_pending_git"}} {{len .Overview.Sync.PendingCommits}}{{end}}
+        </span>
+      {{end}}
+
+      <button type="button" class="btn btn-sm {{if not .Overview.Sync.InSync}}btn-warn{{end}}" id="btnSyncProgress"
+        hx-post="/ui/progress/sync" hx-include="#progressFilterForm" hx-target="#progressSection" hx-swap="innerHTML"
+        hx-indicator="#progSyncIndicator">
+        ↻ {{t .Lang "prog_btn_sync"}}
+      </button>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;width:100%;margin-top:0.25rem;">
+      <div class="pills" role="tablist" aria-label="Progress Status Filter">
+        <button type="button" class="pill {{if eq .StatusFilter "all"}}active{{end}}"
+          hx-get="/ui/progress" hx-include="#progressFilterForm" hx-vals='{"status":"all","page":"1"}' hx-target="#progressSection" hx-swap="innerHTML">
+          {{t .Lang "prog_st_all"}} <span class="pill-cnt">{{.Overview.TotalCount}}</span>
+        </button>
+        <button type="button" class="pill {{if eq .StatusFilter "in_progress"}}active{{end}}"
+          hx-get="/ui/progress" hx-include="#progressFilterForm" hx-vals='{"status":"in_progress","page":"1"}' hx-target="#progressSection" hx-swap="innerHTML">
+          {{t .Lang "prog_st_in_progress"}} <span class="pill-cnt">{{.InProgressTotal}}</span>
+        </button>
+        <button type="button" class="pill {{if eq .StatusFilter "planned"}}active{{end}}"
+          hx-get="/ui/progress" hx-include="#progressFilterForm" hx-vals='{"status":"planned","page":"1"}' hx-target="#progressSection" hx-swap="innerHTML">
+          {{t .Lang "prog_st_planned"}} <span class="pill-cnt">{{.PlannedTotal}}</span>
+        </button>
+        <button type="button" class="pill {{if eq .StatusFilter "blocked"}}active{{end}}"
+          hx-get="/ui/progress" hx-include="#progressFilterForm" hx-vals='{"status":"blocked","page":"1"}' hx-target="#progressSection" hx-swap="innerHTML">
+          {{t .Lang "prog_st_blocked"}} <span class="pill-cnt">{{.BlockedTotal}}</span>
+        </button>
+        <button type="button" class="pill {{if eq .StatusFilter "done"}}active{{end}}"
+          hx-get="/ui/progress" hx-include="#progressFilterForm" hx-vals='{"status":"done","page":"1"}' hx-target="#progressSection" hx-swap="innerHTML">
+          {{t .Lang "prog_st_done"}} <span class="pill-cnt">{{.DoneTotal}}</span>
+        </button>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+        <select id="progScope" name="scope" class="prog-filter-sel" aria-label="Progress Project Scope">
+          <option value="" {{if eq .Scope ""}}selected{{end}}>{{t .Lang "prog_all_projects"}}</option>
+          {{range .Scopes}}
+            <option value="{{.}}" {{if eq $.Scope .}}selected{{end}}>{{.}}</option>
+          {{end}}
+        </select>
+
+        <select id="progKindFilter" name="kind" class="prog-filter-sel" aria-label="Progress Work Kind Filter">
+          <option value="" {{if eq .KindFilter ""}}selected{{end}}>{{t .Lang "prog_kind_all"}} ({{.KindAllTotal}})</option>
+          <option value="work" {{if eq .KindFilter "work"}}selected{{end}}>{{t .Lang "prog_kind_work"}} ({{.WorkTotal}})</option>
+          <option value="memory" {{if eq .KindFilter "memory"}}selected{{end}}>{{t .Lang "prog_kind_memory"}} ({{.MemoryTotal}})</option>
+          <option value="git" {{if eq .KindFilter "git"}}selected{{end}}>{{t .Lang "prog_kind_git"}} ({{.GitTotal}})</option>
+        </select>
+
+        <select id="progSessionFilter" name="session_id" class="prog-filter-sel" aria-label="Progress Session Filter">
+          <option value="" {{if eq .SessionFilter ""}}selected{{end}}>{{t .Lang "prog_all_sessions"}}{{if .Overview.Sessions}} ({{len .Overview.Sessions}}){{end}}</option>
+          {{range .Overview.Sessions}}
+            <option value="{{.SessionID}}" title="{{.SessionID}}" {{if eq $.SessionFilter .SessionID}}selected{{end}}>{{shortSession .SessionID}}{{if .Scope}} · {{.Scope}}{{end}} ({{.Count}})</option>
+          {{end}}
+        </select>
+
+        {{if or .Scope .KindFilter .SessionFilter .TrackFilter .CategoryFilter}}
+          <button type="button" class="btn btn-sm" id="btnResetProgFilters"
+            hx-get="/ui/progress" hx-include="#progressFilterForm"
+            hx-vals='{"scope":"","kind":"","session_id":"","track":"","category":"","status":"all","page":"1"}'
+            hx-target="#progressSection" hx-swap="innerHTML">
+            ✕ {{if .TrackFilter}}{{.TrackFilter}} · {{end}}{{t .Lang "btn_reset_filters"}}
+          </button>
+        {{end}}
+      </div>
+    </div>
+  </form>
+
+  <div id="progSyncIndicator" class="htmx-indicator" style="margin-bottom:0.7rem;">
+    <div class="sub-panel" style="padding:0.55rem 0.85rem;text-align:center;color:var(--accent);font-weight:600;border-color:var(--accent);">
+      {{t .Lang "prog_syncing"}}
+    </div>
+  </div>
+
+  <div id="liveSessionsStrip" class="live-sessions-strip" style="display:none;"></div>
+
+  {{if or (gt .Overview.TotalCount 0) .Scope .KindFilter .SessionFilter .TrackFilter .CategoryFilter}}
+    <div class="prog-board-3" id="activeTracksBoard">
+      <section class="prog-lane lane-doing">
+        <div class="prog-lane-head">
+          <span class="prog-lane-title">{{t .Lang "prog_lane_doing"}} <span class="badge b-accent">{{len .Overview.DoingTracks}}</span></span>
+        </div>
+        <div class="prog-lane-sub">{{t .Lang "prog_lane_doing_desc"}}</div>
+        <div class="prog-lane-body">
+          {{if .Overview.DoingTracks}}
+            {{range .Overview.DoingTracks}}
+              <div class="prog-track-card {{if eq $.TrackFilter .Track}}active{{end}}">
+                <div class="prog-meta-row">
+                  <div class="prog-meta-tags">
+                    {{template "progress_meta_chips" (progChips $ .Scope .ProjectName .SessionID .Kind)}}
+                  </div>
+                  <span class="badge {{progStatusBadge .Status}}">{{progStatusLabel $.Lang .Status}}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:0.35rem;flex-wrap:wrap;">
+                  <button type="button" class="prog-track-chip {{if eq $.TrackFilter .Track}}active{{end}}"
+                    hx-get="/ui/progress" hx-include="#progressFilterForm" hx-vals="{{trackToggleJSON $.TrackFilter .Track}}"
+                    hx-target="#progressSection" hx-swap="innerHTML">{{.Track}}</button>
+                  <span style="font-family:var(--mono);font-size:0.7rem;color:var(--muted);">{{.DoneCount}}/{{.TotalCount}}</span>
+                </div>
+                <div class="prog-track-sum"><span class="prog-kv-lbl">{{t $.Lang "prog_lbl_cur_work"}}</span>{{.LatestSummary}}</div>
+                {{if .LatestNextStep}}
+                  <div class="prog-next-box"><span class="prog-kv-lbl">{{t $.Lang "prog_lbl_next_inline"}}</span>→ {{.LatestNextStep}}</div>
+                {{end}}
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:0.35rem;flex-wrap:wrap;margin-top:auto;padding-top:0.1rem;">
+                  {{if gt .LinkedMemoryCount 0}}
+                    <span style="font-family:var(--mono);font-size:0.69rem;color:var(--muted);">{{.LinkedMemoryCount}} mem</span>
+                  {{else}}<span></span>{{end}}
+                  <span style="font-family:var(--mono);font-size:0.68rem;color:var(--subtle);" title="{{fmtLocalTimestamp .LatestUpdatedAt}}">{{fmtProgressStamp $.Lang .LatestUpdatedAt}}</span>
+                </div>
+              </div>
+            {{end}}
+          {{else}}
+            <div class="prog-lane-empty">{{t .Lang "prog_lane_doing_empty"}}</div>
+          {{end}}
+        </div>
+      </section>
+
+      <section class="prog-lane lane-next">
+        <div class="prog-lane-head">
+          <span class="prog-lane-title">{{t .Lang "prog_lane_next"}} <span class="badge b-warn">{{.NextLaneTotal}}</span></span>
+        </div>
+        <div class="prog-lane-sub">{{t .Lang "prog_lane_next_desc"}}</div>
+        <div class="prog-lane-body">
+          {{if or .Overview.PlannedTracks .Overview.NextStepItems}}
+            {{range .Overview.PlannedTracks}}
+              <div class="prog-track-card {{if eq $.TrackFilter .Track}}active{{end}}">
+                <div class="prog-meta-row">
+                  <div class="prog-meta-tags">
+                    {{template "progress_meta_chips" (progChips $ .Scope .ProjectName .SessionID .Kind)}}
+                  </div>
+                  <span class="badge b-muted">{{t $.Lang "prog_st_planned"}}</span>
+                </div>
+                <div>
+                  <button type="button" class="prog-track-chip {{if eq $.TrackFilter .Track}}active{{end}}"
+                    hx-get="/ui/progress" hx-include="#progressFilterForm" hx-vals="{{trackToggleJSON $.TrackFilter .Track}}"
+                    hx-target="#progressSection" hx-swap="innerHTML">{{.Track}}</button>
+                </div>
+                <div class="prog-track-sum">{{.LatestSummary}}</div>
+                {{if .LatestNextStep}}
+                  <div class="prog-next-box">→ {{.LatestNextStep}}</div>
+                {{end}}
+                <div style="display:flex;justify-content:flex-end;align-items:center;margin-top:auto;padding-top:0.1rem;">
+                  <span style="font-family:var(--mono);font-size:0.68rem;color:var(--subtle);" title="{{fmtLocalTimestamp .LatestUpdatedAt}}">{{fmtProgressStamp $.Lang .LatestUpdatedAt}}</span>
+                </div>
+              </div>
+            {{end}}
+            {{range .Overview.NextStepItems}}
+              <div class="prog-track-card {{if eq $.TrackFilter .Track}}active{{end}}">
+                <div class="prog-meta-row">
+                  <div class="prog-meta-tags">
+                    {{template "progress_meta_chips" (progChips $ .Scope .ProjectName .SessionID .Kind)}}
+                  </div>
+                  <span class="badge b-accent">{{t $.Lang "prog_from_doing"}}</span>
+                </div>
+                <div>
+                  <button type="button" class="prog-track-chip {{if eq $.TrackFilter .Track}}active{{end}}"
+                    hx-get="/ui/progress" hx-include="#progressFilterForm" hx-vals="{{trackToggleJSON $.TrackFilter .Track}}"
+                    hx-target="#progressSection" hx-swap="innerHTML">{{.Track}}</button>
+                </div>
+                <div class="prog-next-box">→ {{.NextStep}}</div>
+                <div style="display:flex;justify-content:flex-end;align-items:center;">
+                  <span style="font-family:var(--mono);font-size:0.68rem;color:var(--subtle);" title="{{fmtLocalTimestamp .UpdatedAt}}">{{fmtProgressStamp $.Lang .UpdatedAt}}</span>
+                </div>
+              </div>
+            {{end}}
+          {{else}}
+            <div class="prog-lane-empty">{{t .Lang "prog_lane_next_empty"}}</div>
+          {{end}}
+        </div>
+      </section>
+
+      <section class="prog-lane lane-done">
+        <div class="prog-lane-head" style="justify-content:space-between;gap:0.4rem;flex-wrap:wrap;">
+          <span class="prog-lane-title">{{t .Lang "prog_lane_done"}} <span class="badge b-ok">{{len .Overview.RecentDone}}{{if gt .Overview.DoneWindowTotal (len .Overview.RecentDone)}}/{{.Overview.DoneWindowTotal}}{{end}}</span></span>
+          <select id="progDoneWindow" name="done_window" form="progressFilterForm" aria-label="Recently Completed Time Window"
+            style="font-size:0.72rem;padding:0.15rem 0.42rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface);color:var(--fg);"
+            hx-get="/ui/progress" hx-include="#progressFilterForm" hx-target="#progressSection" hx-swap="innerHTML">
+            <option value="24h" {{if eq .Overview.DoneWindow "24h"}}selected{{end}}>{{t .Lang "prog_win_24h"}}</option>
+            <option value="7d" {{if or (eq .Overview.DoneWindow "7d") (eq .Overview.DoneWindow "")}}selected{{end}}>{{t .Lang "prog_win_7d"}}</option>
+            <option value="30d" {{if eq .Overview.DoneWindow "30d"}}selected{{end}}>{{t .Lang "prog_win_30d"}}</option>
+            <option value="all" {{if eq .Overview.DoneWindow "all"}}selected{{end}}>{{t .Lang "prog_win_all"}}</option>
+          </select>
+        </div>
+        <div class="prog-lane-sub">{{fmtDoneWindowDesc .Lang .Overview}}</div>
+        <div class="prog-lane-body">
+          {{if .Overview.RecentDone}}
+            {{range .Overview.RecentDone}}
+              <div class="prog-track-card {{if eq $.TrackFilter .Track}}active{{end}}">
+                <div class="prog-meta-row">
+                  <div class="prog-meta-tags">
+                    {{template "progress_meta_chips" (progChips $ .Scope .ProjectName .SessionID .Kind)}}
+                  </div>
+                  <span class="badge b-ok">{{t $.Lang "prog_st_done"}}</span>
+                </div>
+                <div>
+                  <button type="button" class="prog-track-chip {{if eq $.TrackFilter .Track}}active{{end}}"
+                    hx-get="/ui/progress" hx-include="#progressFilterForm" hx-vals="{{trackToggleJSON $.TrackFilter .Track}}"
+                    hx-target="#progressSection" hx-swap="innerHTML">{{.Track}}</button>
+                </div>
+                <div class="prog-track-sum">{{.Summary}}</div>
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:0.35rem;flex-wrap:wrap;margin-top:auto;padding-top:0.1rem;">
+                  <div style="display:flex;align-items:center;gap:0.25rem;flex-wrap:wrap;">
+                    {{if .CommitSHA}}<span class="tag-chip">git:{{.CommitSHA}}</span>{{end}}
+                  </div>
+                  <span style="font-family:var(--mono);font-size:0.68rem;color:var(--subtle);" title="{{fmtLocalTimestamp .UpdatedAt}}">{{fmtDoneItemStamp $.Lang .}}</span>
+                </div>
+              </div>
+            {{end}}
+          {{else}}
+            <div class="prog-lane-empty">{{if eq .Overview.DoneWindow "all"}}{{t .Lang "prog_lane_done_empty"}}{{else}}{{t .Lang "prog_done_empty_win"}}{{end}}</div>
+          {{end}}
+        </div>
+      </section>
+    </div>
+  {{end}}
+
+  <div class="prog-sec-head">
+    <span>{{t .Lang "prog_history_title"}} ({{.Overview.FilteredCount}})</span>
+    <div class="ret-header-actions">
+      <label class="ret-inline-ctl" for="progRetentionDays">
+        <span>{{t .Lang "ret_auto_lbl"}}</span>
+        <select id="progRetentionDays" name="retention_days" aria-label="Progress Auto Retention"
+          hx-post="/ui/progress/retention" hx-include="#progressFilterForm"
+          hx-target="#progressSection" hx-swap="innerHTML">
+          <option value="0" {{if eq .RetentionDays 0}}selected{{end}}>{{t .Lang "ret_forever"}}</option>
+          <option value="7" {{if eq .RetentionDays 7}}selected{{end}}>{{t .Lang "ret_7d"}}</option>
+          <option value="30" {{if eq .RetentionDays 30}}selected{{end}}>{{t .Lang "ret_30d"}}</option>
+          <option value="90" {{if eq .RetentionDays 90}}selected{{end}}>{{t .Lang "ret_90d"}}</option>
+          {{if and (ne .RetentionDays 0) (ne .RetentionDays 7) (ne .RetentionDays 30) (ne .RetentionDays 90)}}
+            <option value="{{.RetentionDays}}" selected>{{.RetentionDays}}d</option>
+          {{end}}
+        </select>
+      </label>
+
+      <div class="ret-inline-ctl" id="progCleanupControls" title="{{t .Lang "prog_clean_note"}}">
+        <span>{{t .Lang "ret_now_lbl"}}</span>
+        <select id="progCleanDaysSelect" name="older_than_days" aria-label="Progress Cleanup Period"
+          x-model="progCleanDays" @change="progCleanConfirm = false">
+          <option value="1">{{t .Lang "clean_short_1d"}}</option>
+          <option value="7" selected>{{t .Lang "clean_short_7d"}}</option>
+          <option value="30">{{t .Lang "clean_short_30d"}}</option>
+          <option value="0">{{t .Lang "clean_all_done"}}</option>
+        </select>
+        <button type="button" class="btn btn-sm ret-act-btn" id="btnCleanupProgressAsk"
+          x-show="!progCleanConfirm" @click="progCleanConfirm = true"
+          {{if eq .DoneTotal 0}}disabled{{end}}>{{t .Lang "btn_cleanup_short"}}</button>
+        <button type="button" class="btn btn-danger btn-sm ret-act-btn" id="btnCleanupProgress"
+          x-show="progCleanConfirm" x-cloak
+          hx-post="/ui/progress/cleanup" hx-include="#progressFilterForm, #progCleanupControls"
+          hx-target="#progressSection" hx-swap="innerHTML">{{t .Lang "btn_confirm_cleanup"}}</button>
+        <button type="button" class="btn btn-sm ret-act-btn"
+          x-show="progCleanConfirm" x-cloak
+          @click="progCleanConfirm = false; flushPendingLive()">{{t .Lang "btn_cancel"}}</button>
+      </div>
+    </div>
+  </div>
+
+  {{if not .Overview.Timeline}}
+    <div class="sub-panel" style="text-align:center;padding:2rem 1rem;color:var(--subtle);">
+      {{t .Lang "prog_empty"}}
+    </div>
+  {{else}}
+    <div class="prog-timeline" id="progressTimeline">
+      {{range $grp := .Overview.Timeline}}
+        <div class="prog-date-group">
+          <span class="prog-date-badge">{{$grp.Date}}</span>
+          <div class="prog-tl-list">
+            {{range $grp.Records}}
+              <article class="prog-tl-item">
+                <span class="prog-tl-dot st-{{.Status}}"></span>
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:0.45rem;flex-wrap:wrap;">
+                  <div style="display:flex;align-items:center;gap:0.32rem;flex-wrap:wrap;">
+                    {{template "progress_meta_chips" (progChips $ .Scope .ProjectName .SessionID .Kind)}}
+                    <button type="button" class="prog-track-chip {{if eq $.TrackFilter .Track}}active{{end}}"
+                      hx-get="/ui/progress" hx-include="#progressFilterForm" hx-vals="{{trackToggleJSON $.TrackFilter .Track}}"
+                      hx-target="#progressSection" hx-swap="innerHTML">{{.Track}}</button>
+                    <span class="badge {{progStatusBadge .Status}}">{{progStatusLabel $.Lang .Status}}</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:0.35rem;flex-wrap:wrap;">
+                    <span style="font-family:var(--mono);font-size:0.7rem;color:var(--subtle);" title="{{fmtLocalTimestamp .UpdatedAt}}">#{{.ID}} · {{fmtProgressStamp $.Lang .UpdatedAt}}</span>
+                  </div>
+                </div>
+
+                <div class="prog-track-sum">{{.Summary}}</div>
+                {{if .NextStep}}
+                  <div class="prog-next-box">→ {{.NextStep}}</div>
+                {{end}}
+
+                {{if .DetailsLines}}
+                  <details class="prog-detail-fold">
+                    <summary>{{if eq $.Lang "ko"}}{{len .DetailsLines}}{{t $.Lang "prog_expand_details"}}{{else}}{{len .DetailsLines}} {{t $.Lang "prog_expand_details"}}{{end}}</summary>
+                    <ul class="prog-detail-list">
+                      {{range .DetailsLines}}
+                        <li>{{.}}</li>
+                      {{end}}
+                    </ul>
+                  </details>
+                {{end}}
+
+                {{if or .MemoryIDs .CommitSHA}}
+                  <div style="display:flex;gap:0.25rem;flex-wrap:wrap;padding-top:0.1rem;">
+                    {{range .MemoryIDs}}
+                      <button type="button" class="tag-chip" style="cursor:pointer;border:1px solid var(--border);color:var(--accent);"
+                        hx-get="/ui/modal/detail?id={{.}}" hx-target="#modalHost" hx-swap="innerHTML">#{{.}}</button>
+                    {{end}}
+                    {{if .CommitSHA}}
+                      <span class="tag-chip" title="Git Commit">git:{{.CommitSHA}}</span>
+                    {{end}}
+                  </div>
+                {{end}}
+              </article>
+            {{end}}
+          </div>
+        </div>
+      {{end}}
+    </div>
+
+    <div class="pagination-bar" id="progPaginationBar" style="margin-top:0.85rem;">
+      <div class="page-info" id="progPageInfo">{{.PageInfo}}</div>
+      <div class="page-actions">
+        <label class="page-size-lbl" for="progPageSizeSelect">
+          <span>{{t .Lang "lbl_per_page"}}</span>
+          <select id="progPageSizeSelect" aria-label="History entries per page"
+            hx-get="/ui/progress" hx-include="#progressFilterForm"
+            hx-on::config-request="event.detail.parameters.page_size = this.value; event.detail.parameters.page = '1';"
+            hx-target="#progressSection" hx-swap="innerHTML">
+            {{range .PageSizes}}
+              <option value="{{.}}" {{if eq $.Overview.PageSize .}}selected{{end}}>{{.}}</option>
+            {{end}}
+          </select>
+        </label>
+        {{if gt .Overview.FilteredCount 0}}
+        <div class="page-nav" id="progPageNav" role="navigation" aria-label="Progress Pagination">
+          <button type="button" class="btn btn-sm page-btn" {{if le .Overview.Page 1}}disabled{{else}}
+            hx-get="/ui/progress" hx-include="#progressFilterForm" hx-vals='{"page":"{{sub .Overview.Page 1}}"}' hx-target="#progressSection" hx-swap="innerHTML"{{end}}>
+            &lsaquo; {{t .Lang "page_prev"}}
+          </button>
+          {{range .PageNums}}
+            {{if eq . "..."}}
+              <span class="page-ellipsis" aria-hidden="true">…</span>
+            {{else}}
+              <button type="button" class="btn btn-sm page-btn {{if eq . (printf "%d" $.Overview.Page)}}active{{end}}"
+                hx-get="/ui/progress" hx-include="#progressFilterForm" hx-vals='{"page":"{{.}}"}' hx-target="#progressSection" hx-swap="innerHTML">{{.}}</button>
+            {{end}}
+          {{end}}
+          <button type="button" class="btn btn-sm page-btn" {{if ge .Overview.Page .Overview.TotalPages}}disabled{{else}}
+            hx-get="/ui/progress" hx-include="#progressFilterForm" hx-vals='{"page":"{{add .Overview.Page 1}}"}' hx-target="#progressSection" hx-swap="innerHTML"{{end}}>
+            {{t .Lang "page_next"}} &rsaquo;
+          </button>
+        </div>
+        {{end}}
+      </div>
+    </div>
+  {{end}}
+</div>
+{{end}}

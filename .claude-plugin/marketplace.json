@@ -1,0 +1,15 @@
+{
+  "name": "memorize-marketplace",
+  "owner": {
+    "name": "Memorize Contributors"
+  },
+  "plugins": [
+    {
+      "name": "memorize",
+      "source": "./plugins/memorize",
+      "version": "1.0.0",
+      "license": "MIT",
+      "description": "State-evaluated MCP memory server backed by SQLite with lifecycle context injection, Git rule sync, PreToolUse guardrails, and web console."
+    }
+  ]
+}

@@ -1,0 +1,159 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 428" width="100%" height="100%" role="img" aria-label="웹 콘솔 진행 현황 탭 동작 시뮬레이션">
+  <style>
+    .outer { fill: #0b0e13; stroke: #243041; stroke-width: 1.5; }
+    .topbar { fill: #121720; stroke: #243041; stroke-width: 1; }
+    .card { fill: #121720; stroke: #243041; stroke-width: 1; }
+    .sub { fill: #161d28; stroke: #263346; stroke-width: 1; }
+    .sub-hi { fill: rgba(56, 189, 248, 0.10); stroke: rgba(56, 189, 248, 0.45); stroke-width: 1.2; }
+    .sub-ok { fill: rgba(16, 185, 129, 0.10); stroke: rgba(16, 185, 129, 0.45); stroke-width: 1.2; }
+    .sub-warn { fill: rgba(245, 158, 11, 0.10); stroke: rgba(245, 158, 11, 0.45); stroke-width: 1.2; }
+    .sub-err { fill: rgba(239, 68, 68, 0.10); stroke: rgba(239, 68, 68, 0.48); stroke-width: 1.2; }
+    .pill-idle { fill: #18202c; stroke: #263346; stroke-width: 1; }
+    .pill-act { fill: rgba(56, 189, 248, 0.16); stroke: rgba(56, 189, 248, 0.55); stroke-width: 1.2; }
+    .b-ok { fill: rgba(16, 185, 129, 0.16); stroke: rgba(16, 185, 129, 0.45); stroke-width: 1; }
+    .b-err { fill: rgba(239, 68, 68, 0.16); stroke: rgba(239, 68, 68, 0.45); stroke-width: 1; }
+    .b-warn { fill: rgba(245, 158, 11, 0.16); stroke: rgba(245, 158, 11, 0.45); stroke-width: 1; }
+    .b-info { fill: rgba(56, 189, 248, 0.16); stroke: rgba(56, 189, 248, 0.45); stroke-width: 1; }
+    .b-mut { fill: rgba(100, 116, 139, 0.18); stroke: rgba(100, 116, 139, 0.4); stroke-width: 1; }
+    .sans { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", Roboto, sans-serif; }
+    .mono { font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; }
+    .t-pri { fill: #f1f5f9; }
+    .t-sec { fill: #94a3b8; }
+    .t-mut { fill: #64748b; }
+    .t-acc { fill: #38bdf8; }
+    .t-ok { fill: #34d399; }
+    .t-warn { fill: #fbbf24; }
+    .t-err { fill: #f87171; }
+    .btn-pri { fill: #0284c7; stroke: #38bdf8; stroke-width: 1; }
+
+    /* 12s loop across 3 frames (4s per frame) */
+    .f1, .f2, .f3 { opacity: 0; }
+    .f1 { animation: loop1 12s infinite; }
+    .f2 { animation: loop2 12s infinite; }
+    .f3 { animation: loop3 12s infinite; }
+    @keyframes loop1 { 0%, 31% { opacity: 1; } 34%, 100% { opacity: 0; } }
+    @keyframes loop2 { 0%, 32% { opacity: 0; } 34%, 65% { opacity: 1; } 68%, 100% { opacity: 0; } }
+    @keyframes loop3 { 0%, 66% { opacity: 0; } 68%, 98% { opacity: 1; } 100% { opacity: 0; } }
+  </style>
+  <rect class="outer" x="1" y="1" width="998" height="426" rx="12" />
+  <rect class="topbar" x="1" y="1" width="998" height="46" rx="12" />
+  <rect x="1" y="34" width="998" height="13" fill="#121720" />
+  <line x1="1" y1="47" x2="999" y2="47" stroke="#243041" stroke-width="1" />
+
+  <!-- Brand + Port -->
+  <rect class="b-info" x="16" y="12" width="136" height="24" rx="5" />
+  <text x="84" y="28" text-anchor="middle" class="mono t-acc" font-size="11" font-weight="700">memorize :18095</text>
+
+  <!-- 5 Console Tabs -->
+  <rect class="pill-idle" x="166" y="12" width="104" height="24" rx="5" />
+  <text x="218.0" y="28" text-anchor="middle" class="sans t-sec" font-size="11" font-weight="600">기억 관리</text>
+  <rect class="pill-act" x="278" y="12" width="96" height="24" rx="5" />
+  <text x="326.0" y="28" text-anchor="middle" class="sans t-acc" font-size="11" font-weight="700">진행 현황</text>
+  <rect class="pill-idle" x="382" y="12" width="102" height="24" rx="5" />
+  <text x="433.0" y="28" text-anchor="middle" class="sans t-sec" font-size="11" font-weight="600">가드레일</text>
+  <rect class="pill-idle" x="492" y="12" width="92" height="24" rx="5" />
+  <text x="538.0" y="28" text-anchor="middle" class="sans t-sec" font-size="11" font-weight="600">추론 엔진</text>
+  <rect class="pill-idle" x="592" y="12" width="134" height="24" rx="5" />
+  <text x="659.0" y="28" text-anchor="middle" class="sans t-sec" font-size="11" font-weight="600">임계값 · 테스트</text>
+
+  <!-- Topbar right indicator -->
+  <rect class="b-mut" x="836" y="12" width="148" height="24" rx="5" />
+  <text x="910" y="28" text-anchor="middle" class="mono t-sec" font-size="10.2" font-weight="600">자동 재생 · 4초/단계</text>
+
+  <rect class="sub" x="16" y="58" width="314" height="28" rx="6" />
+  <g class="f1">
+    <rect class="sub-hi" x="16" y="58" width="314" height="28" rx="6" />
+  </g>
+  <text x="173" y="76" text-anchor="middle" class="sans t-pri" font-size="11" font-weight="600">1단계: 미동기화 커밋 감지</text>
+  <rect class="sub" x="343" y="58" width="314" height="28" rx="6" />
+  <g class="f2">
+    <rect class="sub-hi" x="343" y="58" width="314" height="28" rx="6" />
+  </g>
+  <text x="500" y="76" text-anchor="middle" class="sans t-pri" font-size="11" font-weight="600">2단계: 기억 · Git 즉시 동기화</text>
+  <rect class="sub" x="670" y="58" width="314" height="28" rx="6" />
+  <g class="f3">
+    <rect class="sub-hi" x="670" y="58" width="314" height="28" rx="6" />
+  </g>
+  <text x="827" y="76" text-anchor="middle" class="sans t-pri" font-size="11" font-weight="600">3단계: 최근 완료 레인으로 이동</text>
+
+  <!-- Header Toolbar -->
+  <rect class="card" x="16" y="96" width="968" height="44" rx="7" />
+  <text x="30" y="122" class="sans t-pri" font-size="12" font-weight="700">프로젝트 진행 현황 보드 (기억 규칙과 완전 분리)</text>
+
+  <g class="f1">
+    <rect class="b-warn" x="646" y="106" width="194" height="24" rx="5" />
+    <text x="743" y="122" text-anchor="middle" class="mono t-warn" font-size="10.2" font-weight="700">동기화 필요 · 새 커밋 1건</text>
+    <rect class="pill-idle" x="848" y="106" width="124" height="24" rx="5" />
+    <text x="910" y="122" text-anchor="middle" class="sans t-pri" font-size="10.5" font-weight="600">기억·Git 동기화</text>
+  </g>
+  <g class="f2">
+    <rect class="b-warn" x="646" y="106" width="194" height="24" rx="5" />
+    <text x="743" y="122" text-anchor="middle" class="mono t-warn" font-size="10.2" font-weight="700">동기화 필요 · 새 커밋 1건</text>
+    <rect class="btn-pri" x="848" y="106" width="124" height="24" rx="5" />
+    <text x="910" y="122" text-anchor="middle" class="sans t-pri" font-size="10.5" font-weight="700">기억·Git 동기화</text>
+  </g>
+  <g class="f3">
+    <rect class="b-ok" x="646" y="106" width="194" height="24" rx="5" />
+    <text x="743" y="122" text-anchor="middle" class="mono t-ok" font-size="10.2" font-weight="700">최신 동기화 · a106156</text>
+    <rect class="pill-idle" x="848" y="106" width="124" height="24" rx="5" />
+    <text x="910" y="122" text-anchor="middle" class="sans t-sec" font-size="10.5" font-weight="600">기억·Git 동기화</text>
+  </g>
+
+  <!-- 3 Kanban Lanes -->
+  <!-- Lane 1 -->
+  <rect class="card" x="16" y="150" width="314" height="262" rx="8" />
+  <text x="30" y="174" class="sans t-acc" font-size="11.5" font-weight="700">1. 현재 진행 중 · 보류</text>
+
+  <rect class="sub" x="28" y="188" width="290" height="94" rx="6" />
+  <rect class="b-info" x="38" y="198" width="106" height="18" rx="4" />
+  <text x="91" y="211" text-anchor="middle" class="mono t-acc" font-size="9.5" font-weight="700">auth-migration</text>
+  <rect class="b-warn" x="242" y="198" width="66" height="18" rx="4" />
+  <text x="275" y="211" text-anchor="middle" class="mono t-warn" font-size="9.5" font-weight="700">ACTIVE</text>
+  <text x="38" y="236" class="sans t-pri" font-size="10.8" font-weight="600">세션 토큰을 HttpOnly 쿠키로 전환</text>
+  <text x="38" y="260" class="sans t-sec" font-size="10.2">-&gt; PreToolUse 회귀 테스트 추가</text>
+
+  <!-- ui-banner card in Lane 1 during f1/f2, moves to Lane 3 in f3 -->
+  <g class="f1">
+    <rect class="sub-warn" x="28" y="292" width="290" height="94" rx="6" />
+    <rect class="b-warn" x="38" y="302" width="90" height="18" rx="4" />
+    <text x="83" y="315" text-anchor="middle" class="mono t-warn" font-size="9.5" font-weight="700">ui-banner</text>
+    <text x="38" y="340" class="sans t-pri" font-size="10.8" font-weight="600">엔진 미설정 시 상단 경고 배너 표시</text>
+    <text x="38" y="364" class="sans t-sec" font-size="10.2">-&gt; 설정 저장 시 OOB 자동 숨김</text>
+  </g>
+  <g class="f2">
+    <rect class="sub-hi" x="28" y="292" width="290" height="94" rx="6" />
+    <rect class="b-info" x="38" y="302" width="90" height="18" rx="4" />
+    <text x="83" y="315" text-anchor="middle" class="mono t-acc" font-size="9.5" font-weight="700">ui-banner</text>
+    <text x="38" y="340" class="sans t-pri" font-size="10.8" font-weight="600">엔진 미설정 시 상단 경고 배너 표시</text>
+    <text x="38" y="364" class="sans t-acc" font-size="10.2" font-weight="600">HEAD 변경 이력 분석 및 커밋 a106156 연결 완료</text>
+  </g>
+
+  <!-- Lane 2 -->
+  <rect class="card" x="343" y="150" width="314" height="262" rx="8" />
+  <text x="357" y="174" class="sans t-warn" font-size="11.5" font-weight="700">2. 다음 스텝 · 예정</text>
+  <rect class="sub" x="355" y="188" width="290" height="76" rx="6" />
+  <rect class="b-warn" x="365" y="198" width="110" height="18" rx="4" />
+  <text x="420" y="211" text-anchor="middle" class="mono t-warn" font-size="9.5" font-weight="700">auth-migration</text>
+  <text x="365" y="236" class="sans t-sec" font-size="10.5">-&gt; PreToolUse 회귀 테스트 추가</text>
+
+  <!-- Lane 3 -->
+  <rect class="card" x="670" y="150" width="314" height="262" rx="8" />
+  <text x="684" y="174" class="sans t-ok" font-size="11.5" font-weight="700">3. 최근 완료된 작업</text>
+
+  <rect class="sub" x="682" y="188" width="290" height="76" rx="6" />
+  <rect class="b-ok" x="692" y="198" width="116" height="18" rx="4" />
+  <text x="750" y="211" text-anchor="middle" class="mono t-ok" font-size="9.5" font-weight="700">engine-routing</text>
+  <rect class="b-ok" x="904" y="198" width="56" height="18" rx="4" />
+  <text x="932" y="211" text-anchor="middle" class="mono t-ok" font-size="9.5" font-weight="700">DONE</text>
+  <text x="692" y="238" class="sans t-pri" font-size="10.5">System 1 판정과 텍스트 생성 모델 분리</text>
+
+  <g class="f3">
+    <rect class="sub-ok" x="682" y="274" width="290" height="88" rx="6" />
+    <rect class="b-ok" x="692" y="284" width="90" height="18" rx="4" />
+    <text x="737" y="297" text-anchor="middle" class="mono t-ok" font-size="9.5" font-weight="700">ui-banner</text>
+    <rect class="b-ok" x="886" y="284" width="74" height="18" rx="4" />
+    <text x="923" y="297" text-anchor="middle" class="mono t-ok" font-size="9.5" font-weight="700">a106156</text>
+    <text x="692" y="324" class="sans t-ok" font-size="10.8" font-weight="600">엔진 미설정 시 상단 경고 배너 표시</text>
+    <text x="692" y="346" class="sans t-sec" font-size="10">HEAD 변경 이력 분석 및 커밋 a106156 연결 완료</text>
+  </g>
+</svg>

@@ -1,0 +1,214 @@
+{{define "guardrails_section"}}
+<div class="card" id="verifySimulatorCard">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.45rem;margin-bottom:0.55rem;">
+    <div>
+      <h2>{{t .Lang "sim_verify"}}</h2>
+      <div style="font-size:0.76rem;color:var(--muted);">{{t .Lang "verify_desc"}}</div>
+    </div>
+  </div>
+  <form style="display:flex;flex-direction:column;gap:0.5rem;margin-bottom:0.65rem;"
+    hx-post="/ui/verify" hx-include="#guardrailFilterForm" hx-target="#verifyResults" hx-swap="innerHTML">
+    <div style="display:flex;gap:0.4rem;">
+      <select name="scope" style="width:160px;" aria-label="Scope">
+        {{range .Scopes}}<option value="{{.}}">{{.}}</option>{{end}}
+      </select>
+      <button type="submit" class="btn btn-primary btn-sm">{{t .Lang "btn_check_plan"}}</button>
+    </div>
+    <textarea name="plan" rows="3" placeholder="{{t .Lang "ph_verify"}}" required aria-label="Proposed Plan"></textarea>
+  </form>
+  <div id="verifyResults">
+    <pre style="white-space:pre-wrap;font-family:var(--mono);font-size:0.78rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.65rem;color:var(--muted);min-height:70px;">{{t .Lang "verify_hint"}}</pre>
+  </div>
+</div>
+
+{{template "guardrail_logs_section" .GuardrailLogs}}
+{{end}}
+
+{{define "guardrail_logs_section"}}
+<div class="card" id="guardrailLogsSection" style="margin-top:1rem;" {{if .OOB}}hx-swap-oob="true"{{end}}>
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.65rem;margin-bottom:0.55rem;">
+    <div style="display:flex;flex-direction:column;gap:0.15rem;flex:1;min-width:220px;">
+      <h2>{{t .Lang "gr_title"}}</h2>
+      <div style="font-size:0.76rem;color:var(--muted);">{{t .Lang "gr_desc"}}</div>
+    </div>
+
+    <div class="ret-header-actions">
+      <label class="ret-inline-ctl" for="guardrailRetentionDays">
+        <span>{{t .Lang "ret_auto_lbl"}}</span>
+        <select id="guardrailRetentionDays" name="retention_days" aria-label="Guardrail Auto Retention"
+          hx-post="/ui/guardrail-logs/retention" hx-include="#guardrailFilterForm"
+          hx-target="#guardrailLogsSection" hx-swap="outerHTML">
+          <option value="0" {{if eq .Retention.GuardrailDays 0}}selected{{end}}>{{t .Lang "ret_forever"}}</option>
+          <option value="7" {{if eq .Retention.GuardrailDays 7}}selected{{end}}>{{t .Lang "ret_7d"}}</option>
+          <option value="30" {{if eq .Retention.GuardrailDays 30}}selected{{end}}>{{t .Lang "ret_30d"}}</option>
+          <option value="90" {{if eq .Retention.GuardrailDays 90}}selected{{end}}>{{t .Lang "ret_90d"}}</option>
+          {{if and (ne .Retention.GuardrailDays 0) (ne .Retention.GuardrailDays 7) (ne .Retention.GuardrailDays 30) (ne .Retention.GuardrailDays 90)}}
+            <option value="{{.Retention.GuardrailDays}}" selected>{{.Retention.GuardrailDays}}d</option>
+          {{end}}
+        </select>
+      </label>
+
+      <div class="ret-inline-ctl" id="guardrailCleanupControls">
+        <span>{{t .Lang "ret_now_lbl"}}</span>
+        <select id="guardrailCleanDaysSelect" name="older_than_days" aria-label="Guardrail Cleanup Period"
+          x-model="grCleanDays" @change="grCleanConfirm = false">
+          <option value="1">{{t .Lang "clean_short_1d"}}</option>
+          <option value="7" selected>{{t .Lang "clean_short_7d"}}</option>
+          <option value="30">{{t .Lang "clean_short_30d"}}</option>
+          <option value="0">{{t .Lang "clean_all_logs"}}</option>
+        </select>
+        <label class="cleanup-chk" title="{{t .Lang "gr_inc_blocked_hint"}}">
+          <input type="checkbox" id="guardrailCleanupIncBlocked" name="include_blocked" value="1"
+            x-model="grIncBlocked" @change="grCleanConfirm = false">
+          <span>{{t .Lang "gr_inc_blocked"}}</span>
+        </label>
+        <button type="button" class="btn btn-sm ret-act-btn" id="btnCleanupGuardrailAsk"
+          x-show="!grCleanConfirm" @click="grCleanConfirm = true"
+          :disabled="{{.Page.TotalCount}} === 0 || (!grIncBlocked && {{.Page.PassCount}} === 0)"
+          {{if eq .Page.TotalCount 0}}disabled{{end}}>{{t .Lang "btn_cleanup_short"}}</button>
+        <button type="button" class="btn btn-danger btn-sm ret-act-btn" id="btnCleanupGuardrail"
+          x-show="grCleanConfirm" x-cloak
+          hx-post="/ui/guardrail-logs/cleanup" hx-include="#guardrailFilterForm, #guardrailCleanupControls"
+          hx-target="#guardrailLogsSection" hx-swap="outerHTML">{{t .Lang "btn_confirm_cleanup"}}</button>
+        <button type="button" class="btn btn-sm ret-act-btn"
+          x-show="grCleanConfirm" x-cloak
+          @click="grCleanConfirm = false; flushPendingLive()">{{t .Lang "btn_cancel"}}</button>
+      </div>
+    </div>
+  </div>
+
+  <form id="guardrailFilterForm" class="toolbar" style="margin-bottom:0.6rem;"
+    hx-get="/ui/guardrail-logs" hx-vals='{"gr_page":"1"}' hx-target="#guardrailLogsSection" hx-swap="outerHTML"
+    hx-trigger="change from:.gr-filter-sel" @submit.prevent>
+    <input type="hidden" name="gr_state" value="{{.Query.State}}">
+    <input type="hidden" name="gr_page" value="{{.Page.Page}}">
+    <input type="hidden" name="gr_page_size" value="{{.Page.PageSize}}">
+
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;width:100%;">
+      <div class="pills" role="tablist" aria-label="Guardrail Verdict Filter">
+        <button type="button" class="pill {{if eq .Query.State "all"}}active{{end}}"
+          hx-get="/ui/guardrail-logs" hx-include="#guardrailFilterForm" hx-vals='{"gr_state":"all","gr_page":"1"}'
+          hx-target="#guardrailLogsSection" hx-swap="outerHTML">
+          {{t .Lang "gr_st_all"}} <span class="pill-cnt">{{.Page.TotalCount}}</span>
+        </button>
+        <button type="button" class="pill {{if eq .Query.State "blocked"}}active{{end}}"
+          hx-get="/ui/guardrail-logs" hx-include="#guardrailFilterForm" hx-vals='{"gr_state":"blocked","gr_page":"1"}'
+          hx-target="#guardrailLogsSection" hx-swap="outerHTML">
+          🚫 {{t .Lang "gr_st_blocked"}} <span class="pill-cnt">{{.Page.BlockedCount}}</span>
+        </button>
+        <button type="button" class="pill {{if eq .Query.State "pass"}}active{{end}}"
+          hx-get="/ui/guardrail-logs" hx-include="#guardrailFilterForm" hx-vals='{"gr_state":"pass","gr_page":"1"}'
+          hx-target="#guardrailLogsSection" hx-swap="outerHTML">
+          ✓ {{t .Lang "gr_st_pass"}} <span class="pill-cnt">{{.Page.PassCount}}</span>
+        </button>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+        <select id="guardrailScope" name="gr_scope" class="gr-filter-sel" aria-label="Guardrail Scope Filter">
+          <option value="" {{if eq .Query.Scope ""}}selected{{end}}>{{t .Lang "all_scopes"}}</option>
+          {{range .Scopes}}
+            <option value="{{.}}" {{if eq $.Query.Scope .}}selected{{end}}>{{.}}</option>
+          {{end}}
+        </select>
+        <select id="guardrailSource" name="gr_source" class="gr-filter-sel" aria-label="Guardrail Source Filter">
+          <option value="" {{if eq .Query.Source ""}}selected{{end}}>{{t .Lang "gr_src_all"}}</option>
+          <option value="pretool" {{if eq .Query.Source "pretool"}}selected{{end}}>{{t .Lang "gr_src_pretool"}}</option>
+          <option value="git-precommit" {{if eq .Query.Source "git-precommit"}}selected{{end}}>{{t .Lang "gr_src_git"}}</option>
+          <option value="verify" {{if eq .Query.Source "verify"}}selected{{end}}>{{t .Lang "gr_src_verify"}}</option>
+        </select>
+      </div>
+    </div>
+  </form>
+
+  {{if not .Page.Records}}
+    <div style="text-align:center;padding:1.8rem 1rem;color:var(--subtle);font-size:0.82rem;">{{t .Lang "gr_empty"}}</div>
+  {{else}}
+    <div class="gr-log-list" id="guardrailLogsList">
+      {{range .Page.Records}}
+        <article class="gr-log-item {{if .Blocked}}is-blocked{{end}}">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:0.45rem;flex-wrap:wrap;">
+            <div style="display:flex;align-items:center;gap:0.38rem;flex-wrap:wrap;">
+              <span class="badge {{guardrailBadge .Verdict}}">
+                {{if .Blocked}}🚫 {{else}}✓ {{end}}{{guardrailVerdictLabel $.Lang .Verdict}}
+              </span>
+              <span class="badge b-accent">{{.Scope}}</span>
+              <span class="tag-chip">{{guardrailSourceLabel $.Lang .Source}}{{if .ToolName}} · {{.ToolName}}{{end}}</span>
+              {{if gt .RuleCount 0}}
+                <span class="tag-chip">{{.RuleCount}} {{t $.Lang "gr_rules_checked"}}</span>
+              {{end}}
+              {{if gt .ElapsedMs 0.0}}
+                <span class="tag-chip" style="font-family:var(--mono);">{{fmtLatency .ElapsedMs}}</span>
+              {{end}}
+              {{range .ViolatedIDs}}
+                <button type="button" class="tag-chip" style="cursor:pointer;color:var(--danger);border-color:var(--danger);font-weight:700;"
+                  hx-get="/ui/modal/detail?id={{.}}" hx-target="#modalHost" hx-swap="innerHTML">#{{.}}</button>
+              {{end}}
+            </div>
+            <span style="font-family:var(--mono);font-size:0.71rem;color:var(--subtle);">#{{.ID}} · {{.CreatedAt}}</span>
+          </div>
+
+          {{if .Details}}
+            <div class="gr-violation-box">
+              {{range splitLines .Details}}
+                <div>{{.}}</div>
+              {{end}}
+            </div>
+          {{end}}
+
+          {{if .PlanSnippet}}
+            <details class="prog-detail-fold">
+              <summary>{{t $.Lang "gr_expand_plan"}}</summary>
+              <pre class="gr-plan-pre">{{.PlanSnippet}}</pre>
+            </details>
+          {{end}}
+        </article>
+      {{end}}
+    </div>
+
+    <div class="pagination-bar" id="guardrailPaginationBar" style="margin-top:0.8rem;">
+      <div class="page-info" id="guardrailPageInfo">{{.PageInfo}}</div>
+      <div class="page-actions">
+        <label class="page-size-lbl" for="guardrailPageSizeSelect">
+          <span>{{t .Lang "lbl_per_page"}}</span>
+          <select id="guardrailPageSizeSelect" aria-label="Guardrail logs per page"
+            hx-get="/ui/guardrail-logs" hx-include="#guardrailFilterForm"
+            hx-on::config-request="event.detail.parameters.gr_page_size = this.value; event.detail.parameters.gr_page = '1';"
+            hx-target="#guardrailLogsSection" hx-swap="outerHTML">
+            {{range .PageSizes}}
+              <option value="{{.}}" {{if eq $.Page.PageSize .}}selected{{end}}>{{.}}</option>
+            {{end}}
+          </select>
+        </label>
+        {{if gt .Page.FilteredCount 0}}
+        <div class="page-nav" id="guardrailPageNav" role="navigation" aria-label="Guardrail Pagination">
+          <button type="button" class="btn btn-sm page-btn" {{if le .Page.Page 1}}disabled{{else}}
+            hx-get="/ui/guardrail-logs" hx-include="#guardrailFilterForm" hx-vals='{"gr_page":"{{sub .Page.Page 1}}"}'
+            hx-target="#guardrailLogsSection" hx-swap="outerHTML"{{end}}>
+            &lsaquo; {{t .Lang "page_prev"}}
+          </button>
+          {{range .PageNums}}
+            {{if eq . "..."}}
+              <span class="page-ellipsis" aria-hidden="true">…</span>
+            {{else}}
+              <button type="button" class="btn btn-sm page-btn {{if eq . (printf "%d" $.Page.Page)}}active{{end}}"
+                hx-get="/ui/guardrail-logs" hx-include="#guardrailFilterForm" hx-vals='{"gr_page":"{{.}}"}'
+                hx-target="#guardrailLogsSection" hx-swap="outerHTML">{{.}}</button>
+            {{end}}
+          {{end}}
+          <button type="button" class="btn btn-sm page-btn" {{if ge .Page.Page .Page.TotalPages}}disabled{{else}}
+            hx-get="/ui/guardrail-logs" hx-include="#guardrailFilterForm" hx-vals='{"gr_page":"{{add .Page.Page 1}}"}'
+            hx-target="#guardrailLogsSection" hx-swap="outerHTML"{{end}}>
+            {{t .Lang "page_next"}} &rsaquo;
+          </button>
+        </div>
+        {{end}}
+      </div>
+    </div>
+  {{end}}
+</div>
+{{end}}
+
+{{define "verify_results"}}
+<pre style="white-space:pre-wrap;font-family:var(--mono);font-size:0.78rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.65rem;color:{{if .Passed}}var(--ok){{else}}var(--warn){{end}};min-height:70px;">{{.Output}}</pre>
+{{if .GuardrailLogs.OOB}}{{template "guardrail_logs_section" .GuardrailLogs}}{{end}}
+{{end}}

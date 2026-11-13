@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 385" width="100%" height="100%" role="img" aria-label="기존 방식과 memorize 실전 타임라인 비교">
+  <defs>
+    <style>
+      .s-outer { fill: #0b0e13; stroke: #243041; stroke-width: 1.5; }
+      .s-top { fill: #121720; stroke: #243041; stroke-width: 1; }
+      .s-panel { fill: #11161f; stroke: #243041; stroke-width: 1; }
+      .s-card { fill: #161d28; stroke: #283548; stroke-width: 1; }
+      .s-term { fill: #0d121a; stroke: #283548; stroke-width: 1; }
+      .s-err { fill: rgba(239, 68, 68, 0.13); stroke: rgba(239, 68, 68, 0.48); stroke-width: 1; }
+      .s-ok { fill: rgba(16, 185, 129, 0.12); stroke: rgba(16, 185, 129, 0.48); stroke-width: 1; }
+      .s-info { fill: rgba(56, 189, 248, 0.12); stroke: rgba(56, 189, 248, 0.45); stroke-width: 1; }
+      .s-sans { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", Roboto, sans-serif; }
+      .s-mono { font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; }
+      .c-pri { fill: #f1f5f9; }
+      .c-sec { fill: #94a3b8; }
+      .c-mut { fill: #64748b; }
+      .c-acc { fill: #38bdf8; }
+      .c-ok { fill: #34d399; }
+      .c-err { fill: #f87171; }
+      .c-warn { fill: #fbbf24; }
+    </style>
+  </defs>
+
+  <rect class="s-outer" x="1" y="1" width="998" height="383" rx="12" />
+  <rect class="s-top" x="1" y="1" width="998" height="44" rx="12" />
+  <rect x="1" y="32" width="998" height="13" fill="#121720" />
+  <line x1="1" y1="45" x2="999" y2="45" stroke="#243041" stroke-width="1" />
+
+  <rect class="s-info" x="18" y="11" width="234" height="24" rx="5" />
+  <text x="135" y="27" text-anchor="middle" class="s-sans c-acc" font-size="11.5" font-weight="700">실전 세션에서 겪는 차이 (Before vs After)</text>
+  <text x="982" y="27" text-anchor="end" class="s-sans c-sec" font-size="11">규칙 교체 → /compact 대화 요약 → 42턴째 코드 작성</text>
+
+  <!-- LEFT: WITHOUT MEMORIZE -->
+  <rect class="s-panel" x="18" y="58" width="466" height="311" rx="8" />
+  <text x="34" y="82" class="s-sans c-pri" font-size="12.5" font-weight="700">기존 방식 (CLAUDE.md · RAG · 일반 채팅)</text>
+  <rect class="s-err" x="396" y="66" width="74" height="22" rx="4" />
+  <text x="433" y="81" text-anchor="middle" class="s-sans c-err" font-size="10.5" font-weight="700">구버전 회귀</text>
+
+  <!-- Step 1 Left -->
+  <rect class="s-card" x="34" y="98" width="434" height="58" rx="6" />
+  <text x="46" y="116" class="s-mono c-sec" font-size="10.5">10:05 · Turn 3  User</text>
+  <text x="46" y="133" class="s-sans c-pri" font-size="11.5">“지금부터 인증은 JWT 말고 세션 쿠키로 가자”</text>
+  <text x="46" y="149" class="s-sans c-mut" font-size="10">↳ 정적 CLAUDE.md 파일엔 옛 규칙(“JWT 사용”)이 그대로 남아 있음</text>
+
+  <!-- Step 2 Left -->
+  <rect class="s-card" x="34" y="164" width="434" height="52" rx="6" />
+  <text x="46" y="182" class="s-mono c-warn" font-size="10.5">11:40 · /compact 대화 압축 발생</text>
+  <text x="46" y="199" class="s-sans c-sec" font-size="11">긴 디버깅 로그 요약 과정에서 오전 10:05 세션 쿠키 합의가 밀려남</text>
+
+  <!-- Step 3 Left -->
+  <rect class="s-term" x="34" y="224" width="434" height="74" rx="6" />
+  <text x="46" y="242" class="s-mono c-sec" font-size="10.5">14:20 · Turn 42  Agent → write_file("auth.ts")</text>
+  <rect x="46" y="250" width="410" height="22" rx="3" fill="rgba(239,68,68,0.14)" />
+  <text x="54" y="265" class="s-mono c-err" font-size="10.2">+ import jwt from "jsonwebtoken"  // 옛 규칙 그대로 참조</text>
+  <text x="46" y="289" class="s-sans c-sec" font-size="10.5">아무 제지 없이 파일 저장 &amp; 이후 커밋까지 진행</text>
+
+  <!-- Result Left -->
+  <rect class="s-err" x="34" y="306" width="434" height="48" rx="6" />
+  <text x="251" y="326" text-anchor="middle" class="s-sans c-err" font-size="12" font-weight="700">결과: 다 짜놓고 나서야 “또 JWT로 짰네” 발견</text>
+  <text x="251" y="343" text-anchor="middle" class="s-sans c-sec" font-size="10.5">폐기된 코드 되돌리기 + 매 턴 수천 토큰 규칙 파일 낭비</text>
+
+  <!-- VS Badge -->
+  <circle cx="500" cy="214" r="14" fill="#161d28" stroke="#334155" stroke-width="1.3" />
+  <text x="500" y="218" text-anchor="middle" class="s-mono c-acc" font-size="10" font-weight="700">VS</text>
+
+  <!-- RIGHT: WITH MEMORIZE -->
+  <rect class="s-panel" x="516" y="58" width="466" height="311" rx="8" />
+  <text x="532" y="82" class="s-sans c-pri" font-size="12.5" font-weight="700">memorize 적용 후</text>
+  <rect class="s-ok" x="852" y="66" width="114" height="22" rx="4" />
+  <text x="909" y="81" text-anchor="middle" class="s-sans c-ok" font-size="10.5" font-weight="700">실행 전 자동 차단</text>
+
+  <!-- Step 1 Right -->
+  <rect class="s-card" x="532" y="98" width="434" height="58" rx="6" />
+  <text x="544" y="116" class="s-mono c-acc" font-size="10.5">10:05 · 쓰기 게이트 (원자적 1:N 교체)</text>
+  <text x="544" y="133" class="s-mono c-mut" font-size="10.5" text-decoration="line-through">[#4] JWT 사용</text>
+  <text x="638" y="133" class="s-sans c-ok" font-size="11" font-weight="700">→  [#9] 인증은 세션 쿠키만 사용</text>
+  <text x="544" y="149" class="s-sans c-mut" font-size="10">↳ 옛 규칙 즉시 비활성화 + 다른 열린 에이전트 세션에도 [REVOKED] 통지</text>
+
+  <!-- Step 2 Right -->
+  <rect class="s-info" x="532" y="164" width="434" height="52" rx="6" />
+  <text x="544" y="182" class="s-mono c-acc" font-size="10.5">11:40 · /compact · 체크포인트 자동 감지</text>
+  <text x="544" y="199" class="s-sans c-pri" font-size="11">압축 감지 → <tspan class="c-ok" font-weight="700">[Post-Compact Restored]</tspan>로 [#9] · 핵심 규칙 복원</text>
+
+  <!-- Step 3 Right -->
+  <rect class="s-term" x="532" y="224" width="434" height="74" rx="6" />
+  <text x="544" y="242" class="s-mono c-warn" font-size="10.5">14:20 · Turn 42  Agent write_file 시도 → PreToolUse 가로채기</text>
+  <rect x="544" y="250" width="410" height="22" rx="3" fill="rgba(251,191,36,0.14)" />
+  <text x="552" y="265" class="s-mono c-warn" font-size="10.8">[BLOCKED] Rule #9 위반: JWT 금지 — 세션 쿠키 사용</text>
+  <text x="544" y="289" class="s-sans c-ok" font-size="10.5">↳ 저장 직전 중단 → 에이전트가 즉시 sessionCookie 코드로 수정 후 통과</text>
+
+  <!-- Result Right -->
+  <rect class="s-ok" x="532" y="306" width="434" height="48" rx="6" />
+  <text x="749" y="326" text-anchor="middle" class="s-sans c-ok" font-size="12" font-weight="700">결과: 잘못된 코드가 디스크에 닿기 전 차단</text>
+  <text x="749" y="343" text-anchor="middle" class="s-sans c-sec" font-size="10.5">반복 턴 추론 0회 · KV 캐시 재사용 · System 1 출력 토큰 0개 판정</text>
+</svg>

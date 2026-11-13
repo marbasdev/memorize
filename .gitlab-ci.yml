@@ -1,0 +1,121 @@
+stages:
+  - test
+  - build
+  - publish
+  - release
+
+variables:
+  GO_IMAGE: "golang:1.26"
+  PACKAGE_NAME: "memorize"
+
+test:
+  stage: test
+  image: ${GO_IMAGE}
+  script:
+    - go vet ./...
+    - go test -v -race ./...
+
+build-binaries:
+  stage: build
+  image: ${GO_IMAGE}
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+.*$/'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  script:
+    - VERSION="${CI_COMMIT_TAG#v}"
+    - if [ -z "$VERSION" ]; then VERSION="1.0.0-${CI_COMMIT_SHORT_SHA}"; fi
+    - mkdir -p dist
+    - |
+      for target in darwin/arm64 darwin/amd64 linux/arm64 linux/amd64 windows/amd64; do
+        GOOS="${target%/*}"
+        GOARCH="${target#*/}"
+        STAGE="dist/stage-${GOOS}-${GOARCH}"
+        mkdir -p "$STAGE"
+        BIN_NAME="memorize"
+        if [ "$GOOS" = "windows" ]; then BIN_NAME="memorize.exe"; fi
+        CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
+          go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+          -o "$STAGE/$BIN_NAME" ./cmd/memorize
+        tar -C "$STAGE" -czf "dist/memorize-${GOOS}-${GOARCH}.tar.gz" "$BIN_NAME"
+        if [ "$GOOS" = "windows" ]; then
+          if command -v zip >/dev/null 2>&1; then
+            (cd "$STAGE" && zip -q "../memorize-${GOOS}-${GOARCH}.zip" "$BIN_NAME")
+          else
+            cat <<'EOF' > "$STAGE/mkzip.go"
+package main
+import (
+  "archive/zip"
+  "io"
+  "os"
+)
+func main() {
+  zf, err := os.Create(os.Args[2])
+  if err != nil { panic(err) }
+  defer zf.Close()
+  zw := zip.NewWriter(zf)
+  w, err := zw.Create(os.Args[3])
+  if err != nil { panic(err) }
+  sf, err := os.Open(os.Args[1])
+  if err != nil { panic(err) }
+  defer sf.Close()
+  if _, err := io.Copy(w, sf); err != nil { panic(err) }
+  if err := zw.Close(); err != nil { panic(err) }
+}
+EOF
+            go run "$STAGE/mkzip.go" "$STAGE/$BIN_NAME" "dist/memorize-${GOOS}-${GOARCH}.zip" "$BIN_NAME"
+          fi
+        fi
+        rm -rf "$STAGE"
+      done
+    - (cd dist && sha256sum ./*.tar.gz ./*.zip > SHA256SUMS)
+  artifacts:
+    paths:
+      - dist/memorize-darwin-arm64.tar.gz
+      - dist/memorize-darwin-amd64.tar.gz
+      - dist/memorize-linux-arm64.tar.gz
+      - dist/memorize-linux-amd64.tar.gz
+      - dist/memorize-windows-amd64.tar.gz
+      - dist/memorize-windows-amd64.zip
+      - dist/SHA256SUMS
+    expire_in: 30 days
+
+publish-packages:
+  stage: publish
+  image: curlimages/curl:latest
+  needs:
+    - job: build-binaries
+      artifacts: true
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+.*$/'
+  script:
+    - VERSION="${CI_COMMIT_TAG#v}"
+    - REGISTRY_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/${PACKAGE_NAME}/${VERSION}"
+    - |
+      for file in memorize-darwin-arm64.tar.gz memorize-darwin-amd64.tar.gz memorize-linux-arm64.tar.gz memorize-linux-amd64.tar.gz memorize-windows-amd64.tar.gz memorize-windows-amd64.zip SHA256SUMS; do
+        curl --fail --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+             --upload-file "dist/${file}" \
+             "${REGISTRY_URL}/${file}"
+      done
+
+create-release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs:
+    - job: publish-packages
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+.*$/'
+  script:
+    - VERSION="${CI_COMMIT_TAG#v}"
+    - REGISTRY_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/${PACKAGE_NAME}/${VERSION}"
+    - |
+      release-cli create \
+        --name "Memorize ${CI_COMMIT_TAG}" \
+        --tag-name "${CI_COMMIT_TAG}" \
+        --description "Single-binary CGO-free MCP state memory server (${CI_COMMIT_TAG})." \
+        --assets-link "{\"name\":\"memorize-darwin-arm64.tar.gz\",\"url\":\"${REGISTRY_URL}/memorize-darwin-arm64.tar.gz\",\"filepath\":\"/memorize-darwin-arm64.tar.gz\",\"link_type\":\"package\"}" \
+        --assets-link "{\"name\":\"memorize-darwin-amd64.tar.gz\",\"url\":\"${REGISTRY_URL}/memorize-darwin-amd64.tar.gz\",\"filepath\":\"/memorize-darwin-amd64.tar.gz\",\"link_type\":\"package\"}" \
+        --assets-link "{\"name\":\"memorize-linux-arm64.tar.gz\",\"url\":\"${REGISTRY_URL}/memorize-linux-arm64.tar.gz\",\"filepath\":\"/memorize-linux-arm64.tar.gz\",\"link_type\":\"package\"}" \
+        --assets-link "{\"name\":\"memorize-linux-amd64.tar.gz\",\"url\":\"${REGISTRY_URL}/memorize-linux-amd64.tar.gz\",\"filepath\":\"/memorize-linux-amd64.tar.gz\",\"link_type\":\"package\"}" \
+        --assets-link "{\"name\":\"memorize-windows-amd64.tar.gz\",\"url\":\"${REGISTRY_URL}/memorize-windows-amd64.tar.gz\",\"filepath\":\"/memorize-windows-amd64.tar.gz\",\"link_type\":\"package\"}" \
+        --assets-link "{\"name\":\"memorize-windows-amd64.zip\",\"url\":\"${REGISTRY_URL}/memorize-windows-amd64.zip\",\"filepath\":\"/memorize-windows-amd64.zip\",\"link_type\":\"package\"}" \
+        --assets-link "{\"name\":\"SHA256SUMS\",\"url\":\"${REGISTRY_URL}/SHA256SUMS\",\"filepath\":\"/SHA256SUMS\",\"link_type\":\"other\"}"

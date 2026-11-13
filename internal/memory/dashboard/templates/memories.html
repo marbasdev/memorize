@@ -1,0 +1,366 @@
+{{define "kpi_strip"}}
+<div class="kpi-strip" id="kpiStrip" aria-label="Memory Metrics" {{if .OOB}}hx-swap-oob="true"{{end}}>
+  <div class="kpi-box">
+    <span class="kpi-lbl">{{t .Lang "kpi_active"}}</span>
+    <span class="kpi-val" id="statActive">{{.Stats.ActiveCount}}</span>
+  </div>
+  <div class="kpi-box">
+    <span class="kpi-lbl">{{t .Lang "kpi_pinned"}}</span>
+    <span class="kpi-val" id="statPinned">{{.Stats.PinnedCount}}</span>
+  </div>
+  <div class="kpi-box">
+    <span class="kpi-lbl">{{t .Lang "kpi_tomb"}}</span>
+    <span class="kpi-val" id="statTomb">{{.Stats.TombCount}}</span>
+  </div>
+</div>
+{{end}}
+
+{{define "memories_section"}}
+{{if .OOB}}
+  {{template "kpi_strip" .}}
+{{end}}
+
+<div x-data="{ addOpen: false }">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;margin-bottom:0.7rem;">
+    <div class="pills" role="tablist" aria-label="Memory State Filter">
+      <button type="button" class="pill {{if eq .Query.State "active"}}active{{end}}"
+        hx-get="/ui/memories" hx-include="#memoryFilterForm" hx-vals='{"state":"active","page":"1"}'
+        hx-target="#memoriesSection" hx-swap="innerHTML">
+        {{t .Lang "qt_active"}} <span class="pill-cnt">{{.Stats.ActiveCount}}</span>
+      </button>
+      <button type="button" class="pill {{if eq .Query.State "pinned"}}active{{end}}"
+        hx-get="/ui/memories" hx-include="#memoryFilterForm" hx-vals='{"state":"pinned","page":"1"}'
+        hx-target="#memoriesSection" hx-swap="innerHTML">
+        📌 {{t .Lang "qt_pinned"}} <span class="pill-cnt">{{.Stats.PinnedCount}}</span>
+      </button>
+      <button type="button" class="pill {{if eq .Query.State "general"}}active{{end}}"
+        hx-get="/ui/memories" hx-include="#memoryFilterForm" hx-vals='{"state":"general","page":"1"}'
+        hx-target="#memoriesSection" hx-swap="innerHTML">
+        {{t .Lang "qt_general"}} <span class="pill-cnt">{{.GeneralCount}}</span>
+      </button>
+      <button type="button" class="pill {{if eq .Query.State "tomb"}}active{{end}}"
+        hx-get="/ui/memories" hx-include="#memoryFilterForm" hx-vals='{"state":"tomb","page":"1"}'
+        hx-target="#memoriesSection" hx-swap="innerHTML">
+        {{t .Lang "qt_tomb"}} <span class="pill-cnt">{{.Stats.TombCount}}</span>
+      </button>
+      <button type="button" class="pill {{if eq .Query.State "all"}}active{{end}}"
+        hx-get="/ui/memories" hx-include="#memoryFilterForm" hx-vals='{"state":"all","page":"1"}'
+        hx-target="#memoriesSection" hx-swap="innerHTML">
+        {{t .Lang "qt_all"}} <span class="pill-cnt">{{.Stats.TotalCount}}</span>
+      </button>
+    </div>
+
+    <div style="display:flex;gap:0.4rem;flex-wrap:wrap;align-items:center;">
+      <label style="display:inline-flex;align-items:center;gap:0.35rem;font-size:0.76rem;color:var(--muted);cursor:pointer;margin-right:0.3rem;"
+        title="Include personal scope memories automatically when querying project:* scopes">
+        <input type="checkbox" id="chkPersonalInProject" name="enabled" value="1"
+          {{if .IncludePersonal}}checked{{end}}
+          hx-post="/ui/personal-toggle" hx-trigger="change" hx-swap="none">
+        <span>{{t .Lang "lbl_inc_personal"}}</span>
+      </label>
+      <button type="button" class="btn btn-primary btn-sm" id="btnToggleAdd" @click="addOpen = !addOpen">{{t .Lang "btn_add"}}</button>
+      <button type="button" class="btn btn-sm" id="btnOpenCatPresets"
+        hx-get="/ui/modal/categories" hx-target="#modalHost" hx-swap="innerHTML">{{t .Lang "btn_cat_presets"}}</button>
+      <button type="button" class="btn btn-sm" id="btnOpenCountMerge"
+        hx-get="/ui/modal/consolidate" hx-include="#filterScope" hx-target="#modalHost" hx-swap="innerHTML">{{t .Lang "btn_consolidate"}}</button>
+      <button type="button" class="btn btn-sm" id="btnPurge"
+        hx-post="/ui/memories/purge" hx-include="#memoryFilterForm" hx-target="#memoriesSection" hx-swap="innerHTML"
+        hx-confirm="{{t .Lang "confirm_purge"}}">{{t .Lang "btn_purge"}}</button>
+    </div>
+  </div>
+
+  <form class="toolbar" id="memoryFilterForm"
+    hx-get="/ui/memories" hx-vals='{"page":"1"}' hx-target="#memoriesSection" hx-swap="innerHTML"
+    hx-trigger="change from:.mem-filter-sel" @submit.prevent>
+    <input type="hidden" id="filterState" name="state" value="{{.Query.State}}">
+    <input type="hidden" name="page" value="{{.Page.Page}}">
+    <input type="hidden" id="hiddenPageSize" name="page_size" value="{{.Page.PageSize}}">
+    <div class="filter-group">
+      <select id="filterScope" name="scope" class="mem-filter-sel" aria-label="Scope Filter">
+        <option value="">{{t .Lang "all_scopes"}}</option>
+        {{range .Scopes}}
+          <option value="{{.}}" {{if eq $.Query.Scope .}}selected{{end}}>{{.}}</option>
+        {{end}}
+      </select>
+      <select id="filterSession" name="session_id" class="mem-filter-sel" aria-label="Session Filter">
+        <option value="">{{t .Lang "all_sessions"}}</option>
+        {{range .Sessions}}
+          <option value="{{.SessionID}}" title="{{.SessionID}}" {{if eq $.Query.SessionID .SessionID}}selected{{end}}>{{shortSession .SessionID}}{{if .Scope}} · {{.Scope}}{{end}} ({{.Count}})</option>
+        {{end}}
+      </select>
+      <select id="filterAccount" name="account" class="mem-filter-sel" aria-label="Account Filter">
+        <option value="">{{t .Lang "all_accounts"}}</option>
+        {{range .Accounts}}
+          <option value="{{.}}" {{if eq $.Query.Account .}}selected{{end}}>@{{.}}</option>
+        {{end}}
+      </select>
+      <select id="filterCat" name="category" class="mem-filter-sel" aria-label="Category Filter">
+        <option value="">{{t .Lang "all_cats"}}</option>
+        {{range .Categories}}
+          <option value="{{.}}" {{if eq $.Query.Category .}}selected{{end}}>{{.}}</option>
+        {{end}}
+      </select>
+      <select id="filterSubCat" name="sub_category" class="mem-filter-sel" aria-label="Sub-Category Filter">
+        <option value="">{{t .Lang "all_subcats"}}</option>
+        <option value="__none__" {{if eq $.Query.SubCategory "__none__"}}selected{{end}}>({{t .Lang "dist_uncat"}})</option>
+        {{range .SubCategories}}
+          <option value="{{.}}" {{if eq $.Query.SubCategory .}}selected{{end}}>{{.}}</option>
+        {{end}}
+      </select>
+      <div class="search-box">
+        <input id="filterSearch" name="q" class="input" value="{{.Query.Search}}"
+          placeholder="{{t .Lang "ph_search"}}" aria-label="Search"
+          hx-get="/ui/memories" hx-include="#memoryFilterForm" hx-vals='{"page":"1"}' hx-target="#memoriesSection" hx-swap="innerHTML"
+          hx-trigger="input changed delay:180ms, search"
+          @keydown.escape="if ($el.value) { $el.value = ''; htmx.trigger($el, 'search'); }">
+        {{if .Query.Search}}
+          <button type="button" class="search-clear-btn" style="display:inline-flex;" aria-label="Clear Search"
+            hx-get="/ui/memories" hx-include="#memoryFilterForm" hx-vals='{"q":"","page":"1"}'
+            hx-target="#memoriesSection" hx-swap="innerHTML">✕</button>
+        {{end}}
+      </div>
+      {{if .HasCustomFilter}}
+        <button type="button" class="btn btn-sm" id="btnResetFilters"
+          hx-get="/ui/memories?state=active&page=1&page_size={{.Page.PageSize}}"
+          hx-target="#memoriesSection" hx-swap="innerHTML">{{t .Lang "btn_reset_filters"}}</button>
+      {{end}}
+    </div>
+  </form>
+
+  {{template "memory_distribution" .}}
+
+  <form class="add-drawer" :class="{ 'open': addOpen }" id="commitForm"
+    x-data="{ catVal: '', subVal: '', subMap: {{jsonAttr .AllSubCategories}} }"
+    hx-post="/ui/memories/commit" hx-include="#memoryFilterForm" hx-target="#memoriesSection" hx-swap="innerHTML">
+    <div class="combo-box" style="width:145px;" x-data='comboBox({{jsonAttr .Scopes}}, {{jsonAttr (or .Query.Scope "global")}}, false)'>
+      <input name="new_scope" class="input" autocomplete="off" x-model="val" @click="open = true" @click.outside="open = false" placeholder="{{t .Lang "ph_new_scope"}}" required aria-label="Scope">
+      <button type="button" class="combo-btn" @click.stop="open = !open" tabindex="-1" aria-label="Toggle Scope List">▾</button>
+      <div class="combo-menu" :class="{ 'open': open }">
+        <template x-for="item in items" :key="item">
+          <div class="combo-item" :class="{ 'active': item.toLowerCase() === val.trim().toLowerCase() }" @click="pick(item)">
+            <span x-text="item"></span>
+          </div>
+        </template>
+      </div>
+    </div>
+    <input name="new_account" class="input" style="width:120px;" value="{{.CurrentAccount}}" placeholder="{{t .Lang "ph_new_account"}}" aria-label="Account">
+    <div class="combo-box" style="width:140px;" x-data='comboBox({{jsonAttr .Categories}}, "", false)'>
+      <input name="new_category" class="input" autocomplete="off" x-model="val" @input="catVal = val" @click="open = true" @click.outside="open = false" placeholder="{{t .Lang "ph_new_cat"}}" aria-label="Category">
+      <button type="button" class="combo-btn" @click.stop="open = !open" tabindex="-1" aria-label="Toggle Category List">▾</button>
+      <div class="combo-menu" :class="{ 'open': open }">
+        <template x-for="item in items" :key="item">
+          <div class="combo-item" :class="{ 'active': item.toLowerCase() === val.trim().toLowerCase() }" @click="pick(item); catVal = item;">
+            <span x-text="item"></span>
+          </div>
+        </template>
+      </div>
+    </div>
+    <div class="combo-box" style="width:155px;" x-data="{ open: false }" @click.outside="open = false">
+      <input name="new_sub_category" class="input" autocomplete="off" x-model="subVal" @click="open = true" placeholder="{{t .Lang "ph_new_subcat"}}" aria-label="Sub-Category">
+      <button type="button" class="combo-btn" @click.stop="open = !open" tabindex="-1" aria-label="Toggle Sub-Category List">▾</button>
+      <div class="combo-menu" :class="{ 'open': open }">
+        <div class="combo-item" x-show="subVal.trim().length > 0" @click="subVal = ''; open = false;" style="color:var(--muted);font-style:italic;">— Clear</div>
+        <template x-for="item in subOptionsFor(subMap, catVal)" :key="item">
+          <div class="combo-item" :class="{ 'active': item.toLowerCase() === subVal.trim().toLowerCase() }" @click="subVal = item; open = false;">
+            <span x-text="item"></span>
+          </div>
+        </template>
+      </div>
+    </div>
+    <input name="candidate" class="input" style="flex:1;min-width:220px;" placeholder="{{t .Lang "ph_new_fact"}}" required aria-label="Memory Content">
+    <button type="submit" class="btn btn-primary btn-sm">{{t .Lang "btn_commit"}}</button>
+  </form>
+
+  <div class="selection-bar" :class="{ 'open': selectedIDs.length > 0 }" id="selectionBar">
+    <div style="display:flex;align-items:center;gap:0.55rem;flex-wrap:wrap;">
+      <span><strong x-text="selectedIDs.length">0</strong> <span>{{t .Lang "lbl_selected"}}</span></span>
+      <button type="button" class="btn btn-sm"
+        x-show="{{.Page.FilteredActiveCount}} > {{len .Page.Records}} && selectedIDs.length < {{.Page.FilteredActiveCount}}"
+        @click="selectAllMatching()">
+        {{if eq .Lang "ko"}}조건 일치 {{.Page.FilteredActiveCount}}건 전체 선택{{else}}Select all {{.Page.FilteredActiveCount}} matching{{end}}
+      </button>
+    </div>
+    <div style="display:flex;gap:0.4rem;">
+      <button type="button" class="btn btn-sm" @click="clearSel()">{{t .Lang "btn_clear_sel"}}</button>
+      <button type="button" class="btn btn-primary btn-sm" x-show="selectedIDs.length >= 2"
+        hx-post="/ui/modal/consolidate-selected" :hx-vals="JSON.stringify({ ids: selectedIDs.join(',') })"
+        hx-target="#modalHost" hx-swap="innerHTML">{{t .Lang "btn_merge_sel"}}</button>
+      <button type="button" class="btn btn-danger btn-sm"
+        hx-post="/ui/memories/forget" hx-include="#memoryFilterForm" :hx-vals="JSON.stringify({ ids: selectedIDs.join(',') })"
+        hx-target="#memoriesSection" hx-swap="innerHTML">{{t .Lang "btn_forget_sel"}}</button>
+    </div>
+  </div>
+
+  <div class="table-wrap" x-init="setPageActiveIDs({{jsonAttr .PageActiveIDs}})">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:34px;">
+            <input type="checkbox" id="chkAll" aria-label="Select All"
+              :disabled="pageActiveIDs.length === 0"
+              :checked="isAllPageSelected()"
+              @change="togglePageAll($event.target.checked)">
+          </th>
+          <th style="width:56px;">ID</th>
+          <th style="width:130px;">SCOPE</th>
+          <th style="width:140px;">CATEGORY</th>
+          <th style="width:92px;">STATE</th>
+          <th>CONTENT</th>
+          <th style="width:88px;text-align:right;">{{t .Lang "th_action"}}</th>
+        </tr>
+      </thead>
+      <tbody id="memBody">
+        {{if not .Page.Records}}
+          <tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--subtle);">{{t .Lang "empty_table"}}</td></tr>
+        {{else}}
+          {{range .Page.Records}}
+          <tr class="{{if not .Active}}inactive{{end}}">
+            <td>
+              {{if .Active}}
+                <input type="checkbox" class="row-chk" value="{{.ID}}" :checked="isSelected({{.ID}})" @change="toggleID({{.ID}}, $event.target.checked)" aria-label="Select #{{.ID}}">
+              {{end}}
+            </td>
+            <td style="font-family:var(--mono);">#{{highlight (printf "%d" .ID) $.HighlightTerms}}</td>
+            <td>
+              <span class="badge b-accent">{{highlight .Scope $.HighlightTerms}}</span>
+              {{if .Account}}<div style="margin-top:0.15rem;"><span class="tag-chip" title="Account">@{{highlight .Account $.HighlightTerms}}</span></div>{{end}}
+            </td>
+            <td>
+              <div style="font-weight:600;display:flex;align-items:center;gap:0.25rem;flex-wrap:wrap;">
+                <span>{{highlight .Category $.HighlightTerms}}</span>
+                {{if .SubCategory}}<span class="tag-chip" style="color:var(--accent);">/ {{highlight .SubCategory $.HighlightTerms}}</span>{{end}}
+              </div>
+              {{if .Tags}}
+                <div style="margin-top:0.15rem;">
+                  {{range sliceTags .Tags $.HighlightTerms}}
+                    <span class="tag-chip">#{{highlight . $.HighlightTerms}}</span>
+                  {{end}}
+                </div>
+              {{end}}
+            </td>
+            <td>
+              {{if .Active}}
+                {{if .Pinned}}<span class="badge b-warn">PINNED</span>{{else}}<span class="badge b-ok">ACTIVE</span>{{end}}
+                <div style="margin-top:0.18rem;font-family:var(--mono);font-size:0.69rem;color:var(--muted);">conf {{fmtFloat .Confidence 2}}</div>
+              {{else}}
+                <span class="badge b-danger">TOMB{{if .SupersededBy}} -&gt; #{{derefInt64 .SupersededBy}}{{end}}</span>
+              {{end}}
+            </td>
+            <td class="content-cell" hx-get="/ui/modal/detail?id={{.ID}}" hx-target="#modalHost" hx-swap="innerHTML">
+              <div class="content-preview">{{highlight .Content $.HighlightTerms}}</div>
+              {{if .Replaces}}
+                <div style="margin-top:0.2rem;">
+                  <span class="tag-chip" style="{{if hasLineHit .Replaces $.HighlightTerms}}border:1px solid var(--warn);color:var(--warn);{{end}}">
+                    {{if eq $.Lang "ko"}}교체 {{len .Replaces}}건{{else}}Replaces {{len .Replaces}}{{end}}
+                  </span>
+                </div>
+              {{end}}
+            </td>
+            <td style="text-align:right;">
+              <button type="button" class="btn btn-sm" hx-get="/ui/modal/detail?id={{.ID}}" hx-target="#modalHost" hx-swap="innerHTML">{{t $.Lang "btn_detail"}}</button>
+            </td>
+          </tr>
+          {{end}}
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pagination-bar" id="paginationBar">
+    <div class="page-info" id="pageInfo">{{.PageInfo}}</div>
+    <div class="page-actions">
+      <label class="page-size-lbl" for="pageSizeSelect">
+        <span>{{t .Lang "lbl_per_page"}}</span>
+        <select id="pageSizeSelect" aria-label="Rows per page"
+          hx-get="/ui/memories" hx-include="#memoryFilterForm"
+          hx-on::config-request="event.detail.parameters.page_size = this.value; event.detail.parameters.page = '1';"
+          hx-target="#memoriesSection" hx-swap="innerHTML">
+          {{range .PageSizes}}
+            <option value="{{.}}" {{if eq $.Page.PageSize .}}selected{{end}}>{{.}}</option>
+          {{end}}
+        </select>
+      </label>
+      {{if gt .Page.FilteredRecords 0}}
+      <div class="page-nav" id="pageNav" role="navigation" aria-label="Pagination">
+        <button type="button" class="btn btn-sm page-btn" {{if le .Page.Page 1}}disabled{{else}}
+          hx-get="/ui/memories" hx-include="#memoryFilterForm" hx-vals='{"page":"{{sub .Page.Page 1}}"}' hx-target="#memoriesSection" hx-swap="innerHTML"{{end}}>
+          &lsaquo; {{t .Lang "page_prev"}}
+        </button>
+        {{range .PageNums}}
+          {{if eq . "..."}}
+            <span class="page-ellipsis" aria-hidden="true">…</span>
+          {{else}}
+            <button type="button" class="btn btn-sm page-btn {{if eq . (printf "%d" $.Page.Page)}}active{{end}}"
+              hx-get="/ui/memories" hx-include="#memoryFilterForm" hx-vals='{"page":"{{.}}"}' hx-target="#memoriesSection" hx-swap="innerHTML">{{.}}</button>
+          {{end}}
+        {{end}}
+        <button type="button" class="btn btn-sm page-btn" {{if ge .Page.Page .Page.TotalPages}}disabled{{else}}
+          hx-get="/ui/memories" hx-include="#memoryFilterForm" hx-vals='{"page":"{{add .Page.Page 1}}"}' hx-target="#memoriesSection" hx-swap="innerHTML"{{end}}>
+          {{t .Lang "page_next"}} &rsaquo;
+        </button>
+      </div>
+      {{end}}
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "memory_distribution"}}
+{{if gt .Distribution.TotalActive 0}}
+<details class="cat-breakdown" :open="distOpen">
+  <summary class="cat-breakdown-head" @click.prevent="setDistOpen(!distOpen)">
+    <div style="display:inline-flex;align-items:center;gap:0.45rem;flex-wrap:wrap;">
+      <strong>{{t .Lang "dist_title"}}</strong>
+      <span class="badge b-muted">{{if .Distribution.Scope}}{{.Distribution.Scope}}{{else}}{{t .Lang "all_scopes"}}{{end}} · {{.Distribution.TotalActive}}</span>
+      {{if gt .Distribution.TotalPinned 0}}
+        <span class="badge b-warn">📌 {{.Distribution.TotalPinned}}</span>
+      {{end}}
+      {{if gt .Distribution.UncategorizedTotal 0}}
+        <span class="badge b-muted" style="border:1px dashed var(--border-strong);">({{t .Lang "dist_uncat"}}) {{.Distribution.UncategorizedTotal}}</span>
+      {{end}}
+      {{if .Distribution.DuplicateSubCategories}}
+        <span class="badge b-muted">{{t .Lang "dist_dup_sub"}}: {{joinCSV .Distribution.DuplicateSubCategories}}</span>
+      {{end}}
+    </div>
+    <div style="display:inline-flex;align-items:center;gap:0.35rem;flex-wrap:wrap;" @click.stop>
+      <button type="button" class="btn btn-sm" style="padding:0.16rem 0.55rem;font-size:0.72rem;"
+        hx-get="/ui/modal/consolidate?mode=ai&merge_scope={{.Query.Scope | urlquery}}&merge_category={{.Query.Category | urlquery}}"
+        hx-target="#modalHost" hx-swap="innerHTML">{{t .Lang "dist_btn_merge"}}</button>
+    </div>
+  </summary>
+  <div class="treemap-mosaic treemap-2d">
+    {{range $cat := .Distribution.Categories}}
+      <div class="treemap-cat {{if eq $.Query.Category $cat.Category}}active{{end}}"
+        style="left:{{fmtFloat $cat.X 2}}%;top:{{fmtFloat $cat.Y 2}}%;width:{{fmtFloat $cat.W 2}}%;height:{{fmtFloat $cat.H 2}}%;">
+        <div class="treemap-cat-head" title="{{$cat.Category}}: {{$cat.ActiveCount}} ({{fmtFloat $cat.SharePct 1}}%){{if gt $cat.PinnedCount 0}} · pin {{$cat.PinnedCount}}{{end}}">
+          <button type="button" class="treemap-cat-btn"
+            hx-get="/ui/memories" hx-include="#memoryFilterForm"
+            hx-vals='{"category":"{{if and (eq $.Query.Category $cat.Category) (eq $.Query.SubCategory "")}}{{else}}{{$cat.Category}}{{end}}","sub_category":"","page":"1"}'
+            hx-target="#memoriesSection" hx-swap="innerHTML">
+            <strong>{{$cat.Category}}</strong>
+            <span class="treemap-cat-meta">{{$cat.ActiveCount}} ({{fmtFloat $cat.SharePct 0}}%)</span>
+          </button>
+          <button type="button" class="treemap-mini-btn" title="{{t $.Lang "dist_cat_merge"}} ({{$cat.Category}})"
+            hx-get="/ui/modal/consolidate?mode=ai&merge_scope={{$.Query.Scope | urlquery}}&merge_category={{$cat.Category | urlquery}}"
+            hx-target="#modalHost" hx-swap="innerHTML">{{t $.Lang "dist_cat_merge"}}</button>
+        </div>
+        <div class="treemap-tiles">
+          {{range $cat.SubItems}}
+            <button type="button"
+              class="treemap-tile {{if .IsUncategorized}}uncat{{end}} {{if and (eq $.Query.Category $cat.Category) (eq $.Query.SubCategory .SubCategory)}}active{{end}}"
+              style="left:{{fmtFloat .X 2}}%;top:{{fmtFloat .Y 2}}%;width:{{fmtFloat .W 2}}%;height:{{fmtFloat .H 2}}%;"
+              title="{{$cat.Category}} / {{if .IsUncategorized}}({{t $.Lang "dist_uncat"}}){{else}}{{.SubCategory}}{{end}} — {{.ActiveCount}} ({{fmtFloat .SharePct 1}}%){{if gt .PinnedCount 0}} · pin {{.PinnedCount}}{{end}}"
+              hx-get="/ui/memories" hx-include="#memoryFilterForm"
+              hx-vals='{"category":"{{$cat.Category}}","sub_category":"{{if and (eq $.Query.Category $cat.Category) (eq $.Query.SubCategory .SubCategory)}}{{else}}{{.SubCategory}}{{end}}","page":"1"}'
+              hx-target="#memoriesSection" hx-swap="innerHTML">
+              <span class="treemap-tile-lbl">{{if .IsUncategorized}}({{t $.Lang "dist_uncat"}}){{else}}{{.SubCategory}}{{end}}{{if .DuplicateAcrossCats}} ⇄{{end}}</span>
+              <span class="treemap-tile-cnt">{{.ActiveCount}} <small>({{fmtFloat .SharePct 0}}%)</small>{{if gt .PinnedCount 0}} <small>pin {{.PinnedCount}}</small>{{end}}</span>
+            </button>
+          {{end}}
+        </div>
+      </div>
+    {{end}}
+  </div>
+</details>
+{{end}}
+{{end}}

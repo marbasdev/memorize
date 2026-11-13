@@ -1,0 +1,568 @@
+{{define "engine_setup_alert"}}
+{{if .EngineSetupWarning}}
+<div id="engineSetupAlert" class="setup-alert" role="alert" {{if .OOB}}hx-swap-oob="outerHTML"{{end}}>
+  <div class="setup-alert-body">
+    <strong class="setup-alert-title">{{t .Lang "setup_warn_title"}}</strong>
+    <span class="setup-alert-desc">{{.EngineSetupWarning}}</span>
+  </div>
+  <button type="button" class="btn btn-warn btn-sm" id="btnGoEngines"
+    x-show="activeTab !== 'engines'"
+    hx-get="/ui/engines" hx-target="#enginesSection" hx-swap="innerHTML"
+    @click="switchTab('engines')">{{t .Lang "btn_go_engines"}}</button>
+</div>
+{{else}}
+<div id="engineSetupAlert" hidden {{if .OOB}}hx-swap-oob="outerHTML"{{end}}></div>
+{{end}}
+{{end}}
+
+{{define "engine_download_box"}}
+{{if .LocalModels.Download.Active}}
+<div id="engineDownloadBox" class="dl-box" style="display:block;"
+  hx-get="/ui/engines/download-box?view={{.ViewedProvider | urlquery}}&tier={{.GGUFTier | urlquery}}"
+  hx-trigger="every 1s" hx-target="#engineDownloadBox" hx-swap="outerHTML">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;">
+    <strong>{{.LocalModels.Download.Target}} ({{.LocalModels.Download.Phase}})</strong>
+    <div style="display:flex;align-items:center;gap:0.4rem;">
+      <span style="font-family:var(--mono);font-size:0.73rem;">
+        {{if gt .LocalModels.Download.TotalBytes 0}}
+          {{fmtBytes .LocalModels.Download.DownloadedBytes}} / {{fmtBytes .LocalModels.Download.TotalBytes}} ({{fmtFloat .LocalModels.Download.Percent 1}}%)
+        {{else}}
+          {{fmtBytes .LocalModels.Download.DownloadedBytes}}
+        {{end}}
+      </span>
+      <button type="button" class="btn btn-danger btn-sm"
+        hx-post="/ui/models/download" hx-vals='{"action":"cancel"}' hx-target="#enginesSection" hx-swap="innerHTML">{{t .Lang "btn_cancel"}}</button>
+    </div>
+  </div>
+  <div class="bar-track"><div class="bar-fill" style="width:{{clampPct .LocalModels.Download.Percent}}%;"></div></div>
+</div>
+{{else}}
+<div id="engineDownloadBox"></div>
+{{end}}
+{{end}}
+
+{{define "engines_section"}}
+{{if .OOB}}{{template "engine_setup_alert" .}}{{end}}
+<div>
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;margin-bottom:0.85rem;">
+    <div style="display:flex;align-items:center;gap:0.55rem;flex-wrap:wrap;">
+      <h2>{{t .Lang "eng_title"}}</h2>
+      {{if eq .ViewedProvider .EffectiveProvider}}
+        <span class="badge b-ok" id="engineModeBadge">ACTIVE: {{upper .EffectiveProvider}}</span>
+      {{else}}
+        <span class="badge b-warn" id="engineModeBadge">
+          {{if eq .Lang "ko"}}현재 활성: {{upper .EffectiveProvider}} · 미리보기: {{upper .ViewedProvider}} (미저장){{else}}ACTIVE: {{upper .EffectiveProvider}} · PREVIEW: {{upper .ViewedProvider}} (Unsaved){{end}}
+        </span>
+      {{end}}
+      <span class="badge b-accent" id="engineActiveBadge" style="font-family:var(--mono);" title="{{t .Lang "eng_active_hint"}}">
+        {{.ProviderName}}{{if gt .CustomRouteCount 0}} · {{if eq .Lang "ko"}}개별 {{.CustomRouteCount}}건{{else}}+{{.CustomRouteCount}} custom{{end}}{{end}}
+      </span>
+    </div>
+    <button type="submit" form="activeEngineForm" class="btn btn-primary btn-sm" id="btnApplyEngine">{{t .Lang "btn_apply_engine"}}</button>
+  </div>
+
+  {{template "engine_telemetry_panel" .}}
+
+  <div class="pills" id="enginePills" role="group" aria-label="Provider" style="margin-bottom:0.9rem;">
+    {{range .ProviderTabs}}
+      <button type="button" class="pill {{if eq $.ViewedProvider .ID}}active{{end}}"
+        hx-get="/ui/engines?view={{.ID}}" hx-target="#enginesSection" hx-swap="innerHTML">
+        <span>{{.Label}}</span>
+        {{if eq $.EffectiveProvider .ID}}<span class="badge b-ok" style="margin-left:0.32rem;padding:0.04rem 0.34rem;font-size:0.63rem;">● {{t $.Lang "badge_active"}}</span>{{end}}
+      </button>
+    {{end}}
+  </div>
+
+  {{if and (gt (len .DetectedLocalServers) 0) (or .EngineSetupWarning (eq .ViewedProvider "local"))}}
+  <div id="detectedLocalServers" class="sub-panel" style="margin-bottom:0.85rem;border-color:var(--accent);">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+      <div>
+        <strong>{{t .Lang "local_detected_title"}}</strong>
+        <div style="font-size:0.75rem;color:var(--muted);">{{t .Lang "local_detected_desc"}}</div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:0.45rem;">
+      {{range .DetectedLocalServers}}
+      <form class="model-row" hx-post="/ui/engines/save" hx-target="#enginesSection" hx-swap="innerHTML">
+        <input type="hidden" name="provider" value="{{.Provider}}">
+        {{if eq .Provider "jev"}}
+          <input type="hidden" name="jev_api_url" value="{{.BaseURL}}">
+        {{else}}
+          <input type="hidden" name="local_model_url" value="{{.BaseURL}}">
+        {{end}}
+        <div style="flex:1;min-width:190px;display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+          <span class="badge b-ok">{{.Label}}</span>
+          <code style="font-size:0.74rem;color:var(--muted);">{{.BaseURL}}</code>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+          {{if gt (len .Models) 0}}
+            <select name="{{if eq .Provider "jev"}}jev_model{{else}}local_model_name{{end}}" class="input" style="font-family:var(--mono);font-size:0.75rem;min-width:165px;">
+              {{range .Models}}<option value="{{.}}">{{.}}</option>{{end}}
+            </select>
+          {{else}}
+            <span style="font-size:0.74rem;color:var(--warn);">{{t $.Lang "local_no_models_loaded"}}</span>
+          {{end}}
+          <button type="submit" class="btn btn-primary btn-sm">{{t $.Lang "btn_connect_server"}}</button>
+        </div>
+      </form>
+      {{end}}
+    </div>
+  </div>
+  {{end}}
+
+  <!-- ==================== PANE: LOCAL GGUF ==================== -->
+  {{if eq .ViewedProvider "gguf"}}
+  <div id="pane-gguf" class="grid-2">
+    {{if not .LocalModels.Supported}}
+    <div class="sub-panel" style="grid-column:1 / -1;border-color:var(--warn);">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+        <strong style="color:var(--warn);">{{t .Lang "gguf_win_title"}}</strong>
+        <div style="display:flex;gap:0.4rem;flex-wrap:wrap;">
+          <button type="button" class="btn btn-primary btn-sm" hx-get="/ui/engines?view=local" hx-target="#enginesSection" hx-swap="innerHTML">{{t .Lang "btn_use_local_url"}}</button>
+          <button type="button" class="btn btn-sm" hx-get="/ui/engines?view=jev&jev_preset=flide" hx-target="#enginesSection" hx-swap="innerHTML">{{t .Lang "btn_use_flide"}}</button>
+        </div>
+      </div>
+      <div style="font-size:0.8rem;color:var(--muted);line-height:1.5;">{{t .Lang "gguf_win_desc"}}</div>
+    </div>
+    {{end}}
+
+    <div class="sub-panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.4rem;">
+        <h3>{{t .Lang "gguf_server_title"}}</h3>
+        <div style="display:flex;gap:0.35rem;flex-wrap:wrap;">
+          {{if gt .LocalModels.Hardware.RAMGB 0}}
+            <span class="badge b-muted">RAM {{.LocalModels.Hardware.RAMGB}}GB (&lt;= {{fmtFloat .LocalModels.Hardware.SafeBudgetGB 1}}GB)</span>
+          {{end}}
+          {{if .LocalModels.Supported}}
+            <span class="badge {{if .LocalModels.RuntimeInstalled}}b-ok{{else}}b-warn{{end}}">
+              {{if .LocalModels.RuntimeInstalled}}{{t .Lang "rt_ready"}}{{else}}{{t .Lang "rt_missing"}}{{end}}
+            </span>
+          {{else}}
+            <span class="badge b-warn">macOS / Linux Only</span>
+          {{end}}
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;font-size:0.8rem;">
+        <span style="display:inline-flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+          {{if .LocalModels.ServerRunning}}
+            {{t .Lang "srv_running"}} · <code>{{if .LocalModels.ActiveModel}}{{.LocalModels.ActiveModel}}{{else}}external{{end}}</code>
+          {{else}}
+            {{t .Lang "srv_idle"}}
+          {{end}}
+          {{if .LocalModels.PortFallback}}
+            <span class="badge b-warn">:{{.LocalModels.Port}} ({{t .Lang "ports_fallback_badge"}})</span>
+          {{else}}
+            <span class="badge b-muted">:{{.LocalModels.DesiredPort}}</span>
+          {{end}}
+        </span>
+        <div style="display:flex;gap:0.35rem;flex-wrap:wrap;">
+          <button type="button" class="btn btn-sm"
+            hx-get="/ui/modal/ports" hx-target="#modalHost" hx-swap="innerHTML">{{t .Lang "btn_ports"}}</button>
+          {{if and .LocalModels.Supported (not .LocalModels.RuntimeInstalled)}}
+            <button type="button" class="btn btn-sm"
+              hx-post="/ui/models/download" hx-vals='{"action":"runtime"}' hx-target="#enginesSection" hx-swap="innerHTML">{{t .Lang "btn_install_rt"}}</button>
+          {{end}}
+          {{if .LocalModels.ServerRunning}}
+            <button type="button" class="btn btn-danger btn-sm"
+              hx-post="/ui/models/server" hx-vals='{"action":"stop"}' hx-target="#enginesSection" hx-swap="innerHTML">{{t .Lang "btn_stop_srv"}}</button>
+          {{end}}
+        </div>
+      </div>
+
+      {{template "engine_download_box" .}}
+
+      <div class="model-list" id="installedModels">
+        {{if not .LocalModels.Installed}}
+          <div style="font-size:0.79rem;color:var(--subtle);padding:0.4rem 0;">{{t .Lang "no_installed"}}</div>
+        {{else}}
+          {{range .LocalModels.Installed}}
+            {{$isUp := and $.LocalModels.ServerRunning (eq $.LocalModels.ActiveModel .FileName)}}
+            {{$isUsing := and $isUp (eq $.EffectiveProvider "gguf")}}
+            <div class="model-row">
+              <div>
+                <strong style="font-family:var(--mono);font-size:0.78rem;">{{.FileName}}</strong>
+                <span class="tag-chip" style="margin-left:0.3rem;">{{fmtBytes .SizeBytes}}</span>
+                {{if $isUsing}}
+                  <span class="badge b-ok">{{t $.Lang "badge_active"}}</span>
+                {{else if $isUp}}
+                  <span class="badge b-accent">{{t $.Lang "badge_loaded"}}</span>
+                {{end}}
+              </div>
+              <div style="display:flex;gap:0.35rem;">
+                <button type="button" class="btn btn-primary btn-sm"
+                  hx-post="/ui/models/server" hx-vals='{"action":"start","model":"{{.FileName}}","activate":"1"}'
+                  hx-target="#enginesSection" hx-swap="innerHTML">
+                  {{if $isUsing}}{{t $.Lang "btn_restart"}}{{else}}{{t $.Lang "btn_start"}}{{end}}
+                </button>
+                <button type="button" class="btn btn-danger btn-sm"
+                  hx-post="/ui/models/server" hx-vals='{"action":"delete","model":"{{.FileName}}"}'
+                  hx-confirm="Delete {{.FileName}}?" hx-target="#enginesSection" hx-swap="innerHTML">{{t $.Lang "btn_delete"}}</button>
+              </div>
+            </div>
+          {{end}}
+        {{end}}
+      </div>
+
+      <form id="activeEngineForm" hx-post="/ui/engines/save" hx-target="#enginesSection" hx-swap="innerHTML">
+        <input type="hidden" name="provider" value="gguf">
+        <details class="adv-details">
+          <summary>{{t .Lang "gguf_adv"}}</summary>
+          <div class="adv-body">
+            <div style="display:flex;gap:0.4rem;align-items:center;">
+              <input name="gguf_endpoint" class="input" style="flex:1;font-family:var(--mono);font-size:0.76rem;" value="{{index .Config "gguf_endpoint"}}" aria-label="GGUF Endpoint">
+              <button type="submit" class="btn btn-sm">{{t .Lang "btn_save"}}</button>
+            </div>
+          </div>
+        </details>
+      </form>
+      <form style="display:flex;gap:0.4rem;align-items:center;" hx-post="/ui/models/download" hx-target="#enginesSection" hx-swap="innerHTML">
+        <input name="custom_url" class="input" style="flex:1;font-size:0.76rem;" placeholder="https://huggingface.co/.../model.gguf" aria-label="Direct GGUF URL">
+        <button type="submit" class="btn btn-sm">{{t .Lang "btn_dl_url"}}</button>
+      </form>
+    </div>
+
+    <div class="sub-panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.4rem;">
+        <h3>{{t .Lang "gguf_cat_title"}}</h3>
+        <div style="display:flex;gap:0.35rem;align-items:center;">
+          <span class="badge {{if .HFLive}}b-ok{{else}}b-muted{{end}}">{{.HFSource}}</span>
+          <button type="button" class="btn btn-sm"
+            hx-get="/ui/engines?view=gguf&discover_hf=1&refresh=1" hx-include="#hfFilterForm"
+            hx-target="#enginesSection" hx-swap="innerHTML">{{t .Lang "btn_sync_hf"}}</button>
+        </div>
+      </div>
+
+      <form id="hfFilterForm" style="display:flex;gap:0.4rem;"
+        hx-get="/ui/engines?view=gguf&discover_hf=1" hx-target="#enginesSection" hx-swap="innerHTML">
+        <input type="hidden" name="tier" value="{{.GGUFTier}}">
+        <select name="sort" style="width:125px;font-size:0.77rem;" aria-label="Sort" onchange="htmx.trigger(this.form, 'submit')">
+          <option value="latest" {{if eq .HFSort "latest"}}selected{{end}}>{{t .Lang "sort_latest"}}</option>
+          <option value="trending" {{if eq .HFSort "trending"}}selected{{end}}>{{t .Lang "sort_trending"}}</option>
+        </select>
+        <input name="q" class="input" style="flex:1;font-size:0.77rem;" value="{{.HFQuery}}" placeholder="{{t .Lang "ph_hf_search"}}" aria-label="Search Models">
+      </form>
+
+      <div class="pills">
+        {{range .GGUFTierTabs}}
+          <button type="button" class="pill {{if eq $.GGUFTier .ID}}active{{end}}"
+            hx-get="/ui/engines?view=gguf&tier={{.ID}}{{if $.HFLive}}&discover_hf=1{{end}}" hx-include="#hfFilterForm"
+            hx-target="#enginesSection" hx-swap="innerHTML">{{.Label}}</button>
+        {{end}}
+      </div>
+
+      <div class="model-list" id="recommendedCatalog">
+        {{if not .GGUFCatalog}}
+          <div style="font-size:0.79rem;color:var(--subtle);padding:0.5rem 0;">{{t .Lang "no_models"}}</div>
+        {{else}}
+          {{range .GGUFCatalog}}
+            <div class="model-row">
+              <div style="flex:1;min-width:200px;">
+                <div style="display:flex;align-items:center;gap:0.35rem;flex-wrap:wrap;">
+                  <strong>{{.Name}}</strong>
+                  {{if .Recommended}}<span class="badge b-warn">{{t $.Lang "badge_rec"}}</span>{{end}}
+                  <span class="tag-chip">{{.SizeHint}}</span>
+                  {{if .FitBadge}}<span class="badge {{fitBadgeClass .FitStatus}}">{{.FitBadge}}</span>{{end}}
+                </div>
+              </div>
+              <div>
+                {{if index $.InstalledSet .FileName}}
+                  <button type="button" class="btn btn-sm"
+                    hx-post="/ui/models/server" hx-vals='{"action":"start","model":"{{.FileName}}","activate":"1"}'
+                    hx-target="#enginesSection" hx-swap="innerHTML">{{t $.Lang "btn_start"}}</button>
+                {{else}}
+                  <button type="button" class="btn btn-primary btn-sm"
+                    hx-post="/ui/models/download" hx-vals='{"preset_id":"{{presetIDOrEmpty .ID}}","custom_url":"{{.URL}}"}'
+                    hx-target="#enginesSection" hx-swap="innerHTML">{{t $.Lang "btn_download"}}</button>
+                {{end}}
+              </div>
+            </div>
+          {{end}}
+        {{end}}
+      </div>
+    </div>
+  </div>
+  {{end}}
+
+  <!-- ==================== PANE: GEMINI ==================== -->
+  {{if eq .ViewedProvider "gemini"}}
+  <div id="pane-gemini" class="sub-panel" x-data='{ draftModel: {{jsonAttr (index .Config "gemini_model")}} }'>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.4rem;">
+      <h3>Google Gemini API</h3>
+      <div style="display:flex;gap:0.35rem;">
+        <span class="badge {{if eq .GeminiSource "live_api"}}b-ok{{else}}b-muted{{end}}">
+          {{if eq .GeminiSource "live_api"}}Live API ({{.GeminiAllCount}}){{else}}Presets{{end}}
+        </span>
+        <span class="badge {{if index .Config "gemini_key_status"}}b-ok{{else}}b-danger{{end}}">
+          {{if index .Config "gemini_key_status"}}{{index .Config "gemini_key_status"}}{{else}}{{t .Lang "key_missing"}}{{end}}
+        </span>
+      </div>
+    </div>
+
+    <form id="activeEngineForm" style="display:flex;gap:0.45rem;flex-wrap:wrap;"
+      hx-post="/ui/engines/save" hx-target="#enginesSection" hx-swap="innerHTML">
+      <input type="hidden" name="provider" value="gemini">
+      <input id="geminiApiKey" name="gemini_api_key" type="password" class="input" style="flex:1;min-width:210px;" placeholder="{{t .Lang "ph_gem_key"}}" aria-label="Gemini API Key">
+      <input id="geminiModel" name="gemini_model" class="input" style="width:210px;font-family:var(--mono);font-size:0.78rem;" x-model="draftModel" aria-label="Gemini Model">
+      <button type="button" class="btn"
+        hx-post="/ui/engines/discover-gemini" hx-include="#activeEngineForm" hx-vals='{"tier":"{{.GeminiTier}}"}'
+        hx-target="#enginesSection" hx-swap="innerHTML">{{t .Lang "btn_fetch_models"}}</button>
+      <button type="submit" class="btn btn-primary">{{t .Lang "btn_save"}}</button>
+    </form>
+
+    <div class="pills" id="geminiTierTabs">
+      {{range .GeminiTierTabs}}
+        <button type="button" class="pill {{if eq $.GeminiTier .ID}}active{{end}}"
+          hx-get="/ui/engines?view=gemini&gtier={{.ID}}{{if eq $.GeminiSource "live_api"}}&discover_gemini=1{{end}}"
+          hx-target="#enginesSection" hx-swap="innerHTML">{{.Label}}</button>
+      {{end}}
+    </div>
+
+    <div class="model-list" id="geminiCatalog">
+      {{if not .GeminiModels}}
+        <div style="font-size:0.79rem;color:var(--subtle);padding:0.5rem 0;">{{t .Lang "no_models"}}</div>
+      {{else}}
+        {{$isActiveEngine := eq .EffectiveProvider "gemini"}}
+        {{$savedModel := index .Config "gemini_model"}}
+        {{range .GeminiModels}}
+          <div class="model-row">
+            <div style="flex:1;min-width:200px;">
+              <div style="display:flex;align-items:center;gap:0.35rem;flex-wrap:wrap;">
+                <strong>{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}</strong>
+                {{if .Recommended}}<span class="badge b-warn">{{t $.Lang "badge_rec"}}</span>{{end}}
+                {{if .DecisionOnly}}<span class="badge b-accent">{{t $.Lang "badge_decision_only"}}</span>{{end}}
+                <span class="tag-chip">{{.ID}}</span>
+              </div>
+              {{if .Desc}}<div style="font-size:0.75rem;color:var(--muted);margin-top:0.15rem;">{{.Desc}}</div>{{end}}
+            </div>
+            <div>
+              {{if and $isActiveEngine (eq $savedModel .ID)}}
+                <span class="badge b-ok" data-model="{{.ID}}" x-show="draftModel === $el.dataset.model">{{t $.Lang "badge_active"}}</span>
+                <button type="button" class="btn btn-primary btn-sm" data-model="{{.ID}}" x-show="draftModel !== $el.dataset.model" @click="draftModel = $el.dataset.model">{{t $.Lang "btn_select"}}</button>
+              {{else}}
+                <span class="badge b-muted" data-model="{{.ID}}" x-show="draftModel === $el.dataset.model">{{t $.Lang "badge_selected"}}</span>
+                <button type="button" class="btn btn-primary btn-sm" data-model="{{.ID}}" x-show="draftModel !== $el.dataset.model" @click="draftModel = $el.dataset.model">{{t $.Lang "btn_select"}}</button>
+              {{end}}
+            </div>
+          </div>
+        {{end}}
+      {{end}}
+    </div>
+  </div>
+  {{end}}
+
+  <!-- ==================== PANE: SYSTEM 1 API (JEV / FLIDE) ==================== -->
+  {{if eq .ViewedProvider "jev"}}
+  <div id="pane-jev" class="sub-panel" x-data='{ draftModel: {{jsonAttr .JevModelVal}} }'>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.4rem;">
+      <h3>{{t .Lang "jev_title"}}</h3>
+      <div style="display:flex;gap:0.35rem;flex-wrap:wrap;">
+        <span class="badge {{.JevSourceClass}}">{{.JevSourceLabel}}</span>
+        <span class="badge {{.JevKeyClass}}">{{.JevKeyLabel}}</span>
+      </div>
+    </div>
+
+    <div class="pills" id="jevPresetPills">
+      <button type="button" class="pill {{if not .JevCloud}}active{{end}}"
+        hx-get="/ui/engines?view=jev&jev_preset=flide" hx-target="#enginesSection" hx-swap="innerHTML">{{t .Lang "jev_preset_flide"}}</button>
+      <button type="button" class="pill {{if .JevCloud}}active{{end}}"
+        hx-get="/ui/engines?view=jev&jev_preset=typesafe" hx-target="#enginesSection" hx-swap="innerHTML">{{t .Lang "jev_preset_cloud"}}</button>
+    </div>
+
+    <form id="activeEngineForm" style="display:flex;gap:0.45rem;flex-wrap:wrap;"
+      hx-post="/ui/engines/save" hx-target="#enginesSection" hx-swap="innerHTML">
+      <input type="hidden" name="provider" value="jev">
+      <input id="jevApiURL" name="jev_api_url" class="input" style="flex:1;min-width:230px;font-family:var(--mono);font-size:0.78rem;" value="{{.JevURLVal}}" aria-label="System 1 API URL">
+      <input id="jevModel" name="jev_model" class="input" style="width:200px;font-family:var(--mono);font-size:0.78rem;" x-model="draftModel" aria-label="System 1 Model">
+      <input id="typesafeApiKey" name="typesafe_api_key" type="password" class="input" style="width:205px;" placeholder="{{t .Lang "ph_jev_key"}}" aria-label="System 1 API Key">
+      <button type="button" class="btn"
+        hx-post="/ui/engines/discover-jev" hx-include="#activeEngineForm"
+        hx-target="#enginesSection" hx-swap="innerHTML">{{t .Lang "btn_probe_models"}}</button>
+      <button type="submit" class="btn btn-primary">{{t .Lang "btn_save"}}</button>
+    </form>
+
+    <div class="model-list" id="jevCatalog">
+      {{$isActiveEngine := eq .EffectiveProvider "jev"}}
+      {{$savedModel := index .Config "jev_model"}}
+      {{range .JevModels}}
+        <div class="model-row">
+          <div style="flex:1;min-width:200px;">
+            <div style="display:flex;align-items:center;gap:0.35rem;flex-wrap:wrap;">
+              <strong>{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}</strong>
+              {{if .Recommended}}<span class="badge b-warn">{{t $.Lang "badge_rec"}}</span>{{end}}
+              <span class="tag-chip">{{.ID}}</span>
+            </div>
+            {{if .Desc}}<div style="font-size:0.75rem;color:var(--muted);margin-top:0.15rem;">{{.Desc}}</div>{{end}}
+          </div>
+          <div>
+            {{if and $isActiveEngine (eq $savedModel .ID)}}
+              <span class="badge b-ok" data-model="{{.ID}}" x-show="draftModel === $el.dataset.model">{{t $.Lang "badge_active"}}</span>
+              <button type="button" class="btn btn-primary btn-sm" data-model="{{.ID}}" x-show="draftModel !== $el.dataset.model" @click="draftModel = $el.dataset.model">{{t $.Lang "btn_select"}}</button>
+            {{else}}
+              <span class="badge b-muted" data-model="{{.ID}}" x-show="draftModel === $el.dataset.model">{{t $.Lang "badge_selected"}}</span>
+              <button type="button" class="btn btn-primary btn-sm" data-model="{{.ID}}" x-show="draftModel !== $el.dataset.model" @click="draftModel = $el.dataset.model">{{t $.Lang "btn_select"}}</button>
+            {{end}}
+          </div>
+        </div>
+      {{end}}
+    </div>
+
+    <details class="adv-details">
+      <summary>{{t .Lang "flide_guide_title"}}</summary>
+      <div class="adv-body" style="color:var(--muted);line-height:1.55;">
+        <div>{{t .Lang "flide_guide_desc"}}</div>
+        <code style="display:block;padding:0.45rem 0.6rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--mono);font-size:0.75rem;user-select:all;">pip install flide &amp;&amp; flide serve --model OmniJev/OneJev1.6-0.8B --port 8000 --session-cache-gb 4</code>
+      </div>
+    </details>
+  </div>
+  {{end}}
+
+  <!-- ==================== PANE: CUSTOM LOCAL ==================== -->
+  {{if eq .ViewedProvider "local"}}
+  <div id="pane-local" class="sub-panel">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h3>{{t .Lang "local_ep_title"}}</h3>
+      <span class="badge {{if index .Config "local_key_status"}}b-ok{{else}}b-muted{{end}}">
+        {{if index .Config "local_key_status"}}{{index .Config "local_key_status"}}{{else}}No Auth{{end}}
+      </span>
+    </div>
+    <form id="activeEngineForm" style="display:flex;gap:0.45rem;flex-wrap:wrap;"
+      hx-post="/ui/engines/save" hx-target="#enginesSection" hx-swap="innerHTML">
+      <input type="hidden" name="provider" value="local">
+      <input name="local_model_url" class="input" style="flex:1;min-width:240px;font-family:var(--mono);font-size:0.79rem;" value="{{index .Config "local_model_url"}}" aria-label="OpenAI-Compatible Base URL">
+      <input name="local_model_name" class="input" style="width:180px;font-family:var(--mono);font-size:0.79rem;" value="{{index .Config "local_model_name"}}" placeholder="Model (e.g. qwen3:4b)" aria-label="Model Name">
+      <input name="local_api_key" type="password" class="input" style="width:210px;" placeholder="{{t .Lang "ph_local_key"}}" aria-label="Optional API Key">
+      <button type="submit" class="btn btn-primary">{{t .Lang "btn_save"}}</button>
+    </form>
+  </div>
+  {{end}}
+
+  <!-- ==================== PER-FEATURE vs BULK MODEL ROUTING ==================== -->
+  <div id="taskRoutingSection" class="sub-panel" style="margin-top:0.95rem;" x-data='{ genProv: {{jsonAttr .GenProviderVal}} }'>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
+      <div style="display:flex;align-items:center;gap:0.45rem;flex-wrap:wrap;">
+        <h3>{{t .Lang "route_title"}}</h3>
+        {{if eq .CustomRouteCount 0}}
+          <span class="badge b-ok">{{t .Lang "route_mode_bulk"}}</span>
+        {{else}}
+          <span class="badge b-accent">{{t .Lang "route_mode_custom"}} ({{.CustomRouteCount}})</span>
+        {{end}}
+      </div>
+      <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+        <span class="badge b-muted" style="font-family:var(--mono);font-size:0.7rem;">Bulk: {{.BulkSummary}}</span>
+      </div>
+    </div>
+    <div style="font-size:0.77rem;color:var(--muted);line-height:1.48;">{{t .Lang "route_desc"}}</div>
+
+    <datalist id="genModelSuggestions">
+      {{range .KnownGenModels}}<option value="{{.}}">{{end}}
+    </datalist>
+    <datalist id="allModelSuggestions">
+      {{range .KnownAllModels}}<option value="{{.}}">{{end}}
+    </datalist>
+
+    <form id="taskRoutingForm" hx-post="/ui/engines/routing" hx-target="#enginesSection" hx-swap="innerHTML" style="display:flex;flex-direction:column;gap:0.65rem;">
+      <input type="hidden" name="view" value="{{.ViewedProvider}}">
+      <input type="hidden" name="tw" value="{{.TelemetryViz.Window}}">
+
+      {{if or .BulkDecisionOnly (ne .GenProviderVal "")}}
+      <div style="padding:0.65rem 0.78rem;background:var(--bg);border:1px solid {{if .BulkDecisionOnly}}var(--accent){{else}}var(--border){{end}};border-radius:var(--radius-sm);display:flex;flex-direction:column;gap:0.42rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+          <strong style="font-size:0.8rem;">{{t .Lang "gen_fallback_title"}}</strong>
+          <span class="badge {{if eq .GenProviderVal ""}}b-warn{{else}}b-ok{{end}}" style="font-family:var(--mono);font-size:0.7rem;">{{.GenEffective}}</span>
+        </div>
+        <div style="font-size:0.74rem;color:var(--muted);">{{t .Lang "gen_fallback_desc"}}</div>
+        <div style="display:flex;gap:0.45rem;flex-wrap:wrap;align-items:center;">
+          <select name="gen_provider" class="select" style="min-width:210px;" x-model="genProv" aria-label="Generative Companion Provider">
+            {{range .GenProviderOptions}}
+              <option value="{{.ID}}" {{if eq $.GenProviderVal .ID}}selected{{end}}>{{.Label}}</option>
+            {{end}}
+          </select>
+          <input name="gen_model" class="input" list="genModelSuggestions" style="flex:1;min-width:200px;font-family:var(--mono);font-size:0.77rem;"
+            value="{{.GenModelVal}}" :disabled="genProv === ''"
+            placeholder="{{if eq .Lang "ko"}}모델명 (비우면 선택 엔진의 기본 생성 모델){{else}}Model override (blank = provider default generative model){{end}}"
+            aria-label="Generative Companion Model">
+        </div>
+      </div>
+      {{end}}
+
+      <div style="border:1px solid var(--border-strong);border-left:3px solid var(--accent);border-radius:var(--radius-sm);padding:0.62rem 0.72rem;background:var(--bg);display:flex;flex-direction:column;gap:0.42rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+          <strong style="font-size:0.8rem;">{{t .Lang "route_grp_decision"}}</strong>
+          <span class="badge b-accent" style="font-size:0.67rem;">{{t .Lang "route_dec_badge_summary"}}</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:0.38rem;">
+          {{range $row := .TaskRoutes}}{{if not $row.RequiresGenerative}}{{template "engine_task_route_row" $row}}{{end}}{{end}}
+        </div>
+      </div>
+
+      <div style="border:1px solid var(--border);border-left:3px solid var(--warn);border-radius:var(--radius-sm);padding:0.62rem 0.72rem;background:var(--bg);display:flex;flex-direction:column;gap:0.42rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+          <strong style="font-size:0.8rem;">{{t .Lang "route_grp_gen"}}</strong>
+          <span class="badge b-warn" style="font-size:0.67rem;">{{t .Lang "route_gen_badge_summary"}}</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:0.38rem;">
+          {{range $row := .TaskRoutes}}{{if $row.RequiresGenerative}}{{template "engine_task_route_row" $row}}{{end}}{{end}}
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;gap:0.45rem;flex-wrap:wrap;margin-top:0.15rem;">
+        {{if gt .CustomRouteCount 0}}
+        <button type="button" class="btn btn-sm"
+          hx-post="/ui/engines/routing" hx-vals='{"mode":"reset_all","view":"{{.ViewedProvider}}","tw":"{{.TelemetryViz.Window}}"}'
+          hx-target="#enginesSection" hx-swap="innerHTML">{{t .Lang "btn_reset_bulk"}}</button>
+        {{end}}
+        <button type="submit" class="btn btn-primary btn-sm" id="btnSaveRouting">{{t .Lang "btn_save_routing"}}</button>
+      </div>
+    </form>
+  </div>
+</div>
+{{end}}
+
+{{define "engine_task_route_row"}}
+<div class="model-row" x-data='{ rp: {{jsonAttr .RouteProvider}} }'>
+  <div style="flex:1.2;min-width:210px;">
+    <div style="display:flex;align-items:center;gap:0.35rem;flex-wrap:wrap;">
+      <strong style="font-size:0.81rem;">{{.Label}}</strong>
+      {{if .RequiresGenerative}}
+        <span class="badge b-warn" style="font-size:0.65rem;">{{t .Lang "route_gen_only"}}</span>
+      {{else}}
+        <span class="badge b-accent" style="font-size:0.65rem;">{{t .Lang "route_dec_ok"}}</span>
+      {{end}}
+    </div>
+    <div style="font-size:0.72rem;color:var(--muted);margin-top:0.12rem;">{{.Desc}}</div>
+    {{if gt .Stats.Calls 0}}
+      <div style="display:flex;align-items:center;gap:0.28rem;flex-wrap:wrap;margin-top:0.28rem;font-family:var(--mono);font-size:0.68rem;">
+        <span class="tag-chip">{{.Stats.LastEngine}} · {{.Stats.Calls}}{{t .Lang "tel_calls"}}</span>
+        <span class="tag-chip">avg {{fmtLatency .Stats.AvgElapsedMs}}</span>
+        <span class="tag-chip">p95 {{fmtLatency .Stats.P95ElapsedMs}}</span>
+        <span class="tag-chip">max {{fmtLatency .Stats.MaxElapsedMs}}</span>
+        {{if gt .Stats.AvgItems 0.0}}
+          <span class="tag-chip">{{fmtFloat .Stats.AvgItems 1}} {{t .Lang "tel_avg_items"}}</span>
+        {{end}}
+        {{if gt .Stats.TimeoutCount 0}}
+          <span class="badge b-warn">{{t .Lang "tel_timeouts"}} {{.Stats.TimeoutCount}}</span>
+        {{end}}
+        {{if gt .Stats.ErrorCount 0}}
+          <span class="badge b-danger">{{t .Lang "tel_errors"}} {{.Stats.ErrorCount}}</span>
+        {{end}}
+      </div>
+    {{end}}
+  </div>
+  <div style="display:flex;gap:0.35rem;flex-wrap:wrap;align-items:center;flex:1.4;min-width:270px;justify-content:flex-end;">
+    <select name="task_{{.Task}}_provider" class="select" style="min-width:165px;font-size:0.77rem;" x-model="rp" aria-label="{{.Label}} Provider">
+      {{range .ProviderOptions}}
+        <option value="{{.ID}}" {{if eq .ID $.RouteProvider}}selected{{end}}>{{.Label}}</option>
+      {{end}}
+    </select>
+    <input name="task_{{.Task}}_model" class="input"
+      list="{{if .RequiresGenerative}}genModelSuggestions{{else}}allModelSuggestions{{end}}"
+      style="width:175px;font-family:var(--mono);font-size:0.75rem;"
+      value="{{.RouteModel}}" :disabled="rp === ''"
+      placeholder="{{if eq .Lang "ko"}}기본 모델{{else}}provider default{{end}}"
+      aria-label="{{.Label}} Model">
+    <span class="badge {{if .IsHeuristic}}b-warn{{else if ne .RouteProvider ""}}b-accent{{else}}b-ok{{end}}"
+      style="font-family:var(--mono);font-size:0.69rem;min-width:120px;text-align:center;" title="{{t .Lang "route_lbl_effective"}}">{{.EffectiveEngine}}</span>
+  </div>
+</div>
+{{end}}

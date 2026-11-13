@@ -1,0 +1,98 @@
+{{define "layout"}}<!DOCTYPE html>
+<html lang="{{.Lang}}" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>memorize — Control &amp; Calibration Console</title>
+<link rel="stylesheet" href="/assets/styles.css">
+<script src="/assets/theme.js"></script>
+</head>
+<body>
+<div class="wrap" data-setup-required="{{if .Engines.EngineSetupWarning}}1{{end}}" x-data="dashboardApp()" @memorize-clear-sel.window="clearSel()" @memorize-close-modal.window="closeModal()">
+  <header class="topbar">
+    <div class="brand-row">
+      <h1>memorize</h1>
+      <button type="button" class="badge b-muted" id="daemonBadge" style="display:none;font-family:var(--mono);cursor:pointer;border:1px solid var(--border);" hx-get="/ui/modal/ports" hx-target="#modalHost" hx-swap="innerHTML" title="{{t .Lang "ports_title"}}"></button>
+      <button type="button" class="badge b-accent live-pill" id="liveSessionsBadge" style="display:none;cursor:pointer;border:1px solid var(--border);" @click="document.getElementById('tabBtn-progress')?.click()"></button>
+    </div>
+
+    <div class="nav-tabs" role="tablist" aria-label="Console Sections">
+      <button type="button" class="nav-tab" role="tab" id="tabBtn-memories"
+        :aria-selected="activeTab === 'memories'" @click="switchTab('memories')">{{t .Lang "tab_memories"}}</button>
+      <button type="button" class="nav-tab" role="tab" id="tabBtn-progress"
+        :aria-selected="activeTab === 'progress'"
+        hx-get="/ui/progress" hx-include="#progressFilterForm" hx-target="#progressSection" hx-swap="innerHTML"
+        @click="switchTab('progress')">{{t .Lang "tab_progress"}}</button>
+      <button type="button" class="nav-tab" role="tab" id="tabBtn-guardrails"
+        :aria-selected="activeTab === 'guardrails'"
+        hx-get="/ui/guardrails" hx-include="#guardrailFilterForm" hx-target="#guardrailsSection" hx-swap="innerHTML"
+        @click="switchTab('guardrails')">{{t .Lang "tab_guardrails"}}</button>
+      <button type="button" class="nav-tab" role="tab" id="tabBtn-engines"
+        :aria-selected="activeTab === 'engines'"
+        hx-get="/ui/engines" hx-target="#enginesSection" hx-swap="innerHTML"
+        @click="switchTab('engines')">{{t .Lang "tab_engines"}}</button>
+      <button type="button" class="nav-tab" role="tab" id="tabBtn-calibrate"
+        :aria-selected="activeTab === 'calibrate'"
+        hx-get="/ui/calibrate" hx-include="#calHistScope" hx-target="#calibrateSection" hx-swap="innerHTML"
+        @click="switchTab('calibrate')">{{t .Lang "tab_calibrate"}}</button>
+    </div>
+
+    <div style="display:flex;gap:0.4rem;align-items:center;">
+      <select id="langSelect" name="lang" aria-label="Language"
+        style="padding:0.24rem 0.5rem;font-size:0.75rem;background:var(--elevated);font-weight:600;cursor:pointer;"
+        hx-post="/ui/lang" hx-trigger="change" hx-swap="none">
+        <option value="en" {{if eq .Lang "en"}}selected{{end}}>English</option>
+        <option value="ko" {{if eq .Lang "ko"}}selected{{end}}>한국어</option>
+      </select>
+      <button type="button" class="btn btn-sm" id="btnTheme" @click="toggleTheme()">{{t .Lang "btn_theme"}}</button>
+    </div>
+  </header>
+
+  {{template "engine_setup_alert" .Engines}}
+
+  <!-- ==================== TAB 1: MEMORIES ==================== -->
+  <section class="tab-panel" :class="{ 'active': activeTab === 'memories' }" id="panel-memories" role="tabpanel">
+    {{template "kpi_strip" .Memories}}
+    <div class="card" id="memoriesSection">
+      {{template "memories_section" .Memories}}
+    </div>
+  </section>
+
+  <!-- ==================== TAB 2: PROGRESS ==================== -->
+  <section class="tab-panel" :class="{ 'active': activeTab === 'progress' }" id="panel-progress" role="tabpanel">
+    <div class="card" id="progressSection">
+      {{template "progress_section" .Progress}}
+    </div>
+  </section>
+
+  <!-- ==================== TAB 3: GUARDRAILS ==================== -->
+  <section class="tab-panel" :class="{ 'active': activeTab === 'guardrails' }" id="panel-guardrails" role="tabpanel">
+    <div id="guardrailsSection">
+      {{template "guardrails_section" .Guardrails}}
+    </div>
+  </section>
+
+  <!-- ==================== TAB 4: ENGINES ==================== -->
+  <section class="tab-panel" :class="{ 'active': activeTab === 'engines' }" id="panel-engines" role="tabpanel">
+    <div class="card" id="enginesSection" style="display:flex;flex-direction:column;gap:0.9rem;"
+      hx-get="/ui/engines" hx-trigger="memorizeRefreshEngines from:body" hx-target="#enginesSection" hx-swap="innerHTML">
+      {{template "engines_section" .Engines}}
+    </div>
+  </section>
+
+  <!-- ==================== TAB 5: CALIBRATION & TEST ==================== -->
+  <section class="tab-panel" :class="{ 'active': activeTab === 'calibrate' }" id="panel-calibrate" role="tabpanel">
+    <div id="calibrateSection">
+      {{template "calibrate_section" .Calibrate}}
+    </div>
+  </section>
+</div>
+
+<div id="modalHost"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="/assets/vendor/htmx.min.js"></script>
+<script src="/assets/ui.js"></script>
+<script defer src="/assets/vendor/alpine.min.js"></script>
+</body>
+</html>{{end}}

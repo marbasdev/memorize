@@ -1,0 +1,175 @@
+{{define "confidence_histogram"}}
+<div class="hist-bars" id="confHist" {{if .OOB}}hx-swap-oob="true"{{end}}>
+  {{range .Bars}}
+    <div class="hist-col">
+      <span class="hist-cnt">{{.Count}}</span>
+      <div class="hist-track">
+        <div class="hist-bar" style="height:{{.HeightPx}}px"></div>
+      </div>
+      <span class="hist-lbl">{{.Label}}</span>
+    </div>
+  {{end}}
+</div>
+{{end}}
+
+{{define "conf_hist_section"}}
+<div style="display:flex;justify-content:space-between;align-items:center;gap:0.45rem;flex-wrap:wrap;margin-bottom:0.35rem;">
+  <div style="display:inline-flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+    <h3>{{t .Lang "hist_title"}}</h3>
+    <span class="badge b-muted" style="font-family:var(--mono);">{{.HistActiveCount}}</span>
+  </div>
+  <div style="display:inline-flex;align-items:center;gap:0.38rem;flex-wrap:wrap;">
+    <select id="calHistScope" name="cal_scope" aria-label="Confidence Scope"
+      style="padding:0.22rem 0.5rem;font-size:0.75rem;"
+      hx-get="/ui/calibrate/histogram" hx-target="#confHistSection" hx-swap="innerHTML">
+      <option value="" {{if eq .HistScope ""}}selected{{end}}>{{t .Lang "all_scopes"}}</option>
+      {{range .Scopes}}
+        <option value="{{.}}" {{if eq $.HistScope .}}selected{{end}}>{{.}}</option>
+      {{end}}
+    </select>
+    <button type="button" class="btn btn-sm" id="btnRecalibrateConf"
+      hx-post="/ui/calibrate-confidence" hx-include="#calHistScope, #memoryFilterForm"
+      hx-target="#confHistSection" hx-swap="innerHTML" hx-disabled-elt="this">
+      {{t .Lang "btn_recalibrate"}}
+    </button>
+  </div>
+</div>
+{{template "confidence_histogram" .Histogram}}
+{{end}}
+
+{{define "thresholds_card"}}
+<form id="thresholdsCard" class="card" style="display:flex;flex-direction:column;gap:0.8rem;"
+  x-data="{
+    perm: {{fmtFloat .Thresholds.MinPermanent 2}},
+    conf: {{fmtFloat .Thresholds.MinConfidence 2}},
+    pin: {{fmtFloat .Thresholds.PinInvariant 2}},
+    rel: {{fmtFloat .Thresholds.MinRelevance 1}},
+    relConf: {{fmtFloat .Thresholds.MinRelConfidence 2}}
+  }"
+  hx-post="/ui/thresholds" hx-target="#thresholdsCard" hx-swap="outerHTML">
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <h2>{{t .Lang "cal_title"}}</h2>
+    <div style="display:flex;gap:0.4rem;">
+      <button type="button" class="btn btn-sm"
+        hx-post="/ui/thresholds" hx-include="#calHistScope" hx-vals='{"reset":"1"}' hx-target="#thresholdsCard" hx-swap="outerHTML">{{t .Lang "btn_reset"}}</button>
+      <button type="submit" class="btn btn-primary btn-sm">{{t .Lang "btn_save"}}</button>
+    </div>
+  </div>
+
+  <div class="sub-panel" style="padding:0.75rem 0.9rem;gap:0.45rem;">
+    <div style="font-size:0.76rem;font-weight:700;color:var(--accent);">{{t .Lang "gate_write"}}</div>
+    <div>
+      <div class="slider-row" style="margin-bottom:0.12rem;">
+        <label for="thPerm"><span>{{t .Lang "th_perm"}}</span> (<code>Perm</code>)</label>
+        <input id="thPerm" name="min_permanent" type="range" min="0.30" max="0.95" step="0.01" x-model="perm">
+        <span class="slider-val" x-text="Number(perm).toFixed(2)"></span>
+      </div>
+      <div style="font-size:0.72rem;color:var(--muted);margin-bottom:0.4rem;">{{t .Lang "desc_perm"}}</div>
+    </div>
+    <div>
+      <div class="slider-row" style="margin-bottom:0.12rem;">
+        <label for="thConf"><span>{{t .Lang "th_conf"}}</span> (<code>Conf</code>)</label>
+        <input id="thConf" name="min_confidence" type="range" min="0.30" max="0.98" step="0.01" x-model="conf">
+        <span class="slider-val" x-text="Number(conf).toFixed(2)"></span>
+      </div>
+      <div style="font-size:0.72rem;color:var(--muted);margin-bottom:0.4rem;">{{t .Lang "desc_conf"}}</div>
+    </div>
+    <div>
+      <div class="slider-row" style="margin-bottom:0.12rem;">
+        <label for="thPin"><span>{{t .Lang "th_pin"}}</span> (<code>Pin</code>)</label>
+        <input id="thPin" name="pin_invariant" type="range" min="0.50" max="0.99" step="0.01" x-model="pin">
+        <span class="slider-val" x-text="Number(pin).toFixed(2)"></span>
+      </div>
+      <div style="font-size:0.72rem;color:var(--muted);">{{t .Lang "desc_pin"}}</div>
+    </div>
+  </div>
+
+  <div class="sub-panel" style="padding:0.75rem 0.9rem;gap:0.45rem;">
+    <div style="font-size:0.76rem;font-weight:700;color:var(--accent);">{{t .Lang "gate_read"}}</div>
+    <div>
+      <div class="slider-row" style="margin-bottom:0.12rem;">
+        <label for="thRel"><span>{{t .Lang "th_rel"}}</span> (<code>Score</code>)</label>
+        <input id="thRel" name="min_relevance" type="range" min="0.5" max="4.8" step="0.1" x-model="rel">
+        <span class="slider-val" x-text="Number(rel).toFixed(1)"></span>
+      </div>
+      <div style="font-size:0.72rem;color:var(--muted);margin-bottom:0.4rem;">{{t .Lang "desc_rel"}}</div>
+    </div>
+    <div>
+      <div class="slider-row" style="margin-bottom:0.12rem;">
+        <label for="thRelConf"><span>{{t .Lang "th_rel_conf"}}</span> (<code>RelConf</code>)</label>
+        <input id="thRelConf" name="min_rel_confidence" type="range" min="0.30" max="0.98" step="0.01" x-model="relConf">
+        <span class="slider-val" x-text="Number(relConf).toFixed(2)"></span>
+      </div>
+      <div style="font-size:0.72rem;color:var(--muted);">{{t .Lang "desc_rel_conf"}}</div>
+    </div>
+  </div>
+
+  <div id="confHistSection">
+    {{template "conf_hist_section" .}}
+  </div>
+
+  <details class="adv-details">
+    <summary>{{t .Lang "th_guide_title"}}</summary>
+    <div class="adv-body" style="color:var(--muted);line-height:1.55;">
+      <div>{{t .Lang "th_guide_1"}}</div>
+      <div>{{t .Lang "th_guide_2"}}</div>
+      <div>{{t .Lang "th_guide_3"}}</div>
+    </div>
+  </details>
+</form>
+{{end}}
+
+{{define "calibrate_section"}}
+<div class="grid-2">
+  {{template "thresholds_card" .}}
+
+  <div class="card" style="display:flex;flex-direction:column;gap:0.8rem;">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:0.45rem;">
+      <h2>{{t .Lang "sim_probe"}}</h2>
+    </div>
+
+    <form style="display:flex;gap:0.4rem;"
+      hx-post="/ui/probe" hx-target="#probeResults" hx-swap="innerHTML">
+      <select name="scope" style="width:140px;" aria-label="Scope">
+        {{range .Scopes}}<option value="{{.}}">{{.}}</option>{{end}}
+      </select>
+      <input name="query" class="input" style="flex:1;" placeholder="{{t .Lang "ph_probe"}}" required aria-label="Probe Query">
+      <button type="submit" class="btn btn-primary btn-sm">{{t .Lang "btn_run"}}</button>
+    </form>
+    <div id="probeResults">
+      <div style="font-size:0.8rem;color:var(--subtle);padding:0.5rem 0;">{{t .Lang "probe_hint"}}</div>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "probe_results"}}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem;">
+  <span class="badge b-muted" style="font-family:var(--mono);">{{fmtFloat .ElapsedMs 1}}ms · {{.PassCount}}/{{.TotalCount}}</span>
+  <span style="font-size:0.72rem;color:var(--muted);">{{t .Lang "gate_read"}}</span>
+</div>
+<div class="probe-list">
+  {{if eq .TotalCount 0}}
+    <div style="font-size:0.8rem;color:var(--subtle);padding:0.5rem 0;">{{t .Lang "empty_table"}}</div>
+  {{else}}
+    {{range .Pinned}}
+      <div class="probe-item pass">
+        <div style="display:flex;justify-content:space-between;gap:0.5rem;">
+          <strong>[#{{.ID}}] {{.Category}}</strong>
+          <span class="badge b-ok">PINNED</span>
+        </div>
+        <div style="margin-top:0.2rem;">{{.Content}}</div>
+      </div>
+    {{end}}
+    {{range .Scored}}
+      <div class="probe-item {{if .Pass}}pass{{else}}drop{{end}}">
+        <div style="display:flex;justify-content:space-between;gap:0.5rem;">
+          <span><strong>[#{{.ID}}]</strong> {{.Content}}</span>
+          <span class="badge {{if .Pass}}b-ok{{else}}b-danger{{end}}" style="font-family:var(--mono);white-space:nowrap;">{{if .Pass}}PASS{{else}}DROP{{end}} · {{fmtFloat .Score 1}} · conf {{fmtFloat .Confidence 2}}</span>
+        </div>
+        <div class="bar-track"><div class="bar-fill" style="width:{{.Pct}}%;background:{{if .Pass}}var(--ok){{else}}var(--danger){{end}}"></div></div>
+      </div>
+    {{end}}
+  {{end}}
+</div>
+{{end}}

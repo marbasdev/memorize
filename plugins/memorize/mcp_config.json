@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "mcp": {
+      "command": "/bin/sh",
+      "args": [
+        "-c",
+        "if [ -f ./scripts/run-memorize.sh ]; then exec sh ./scripts/run-memorize.sh; elif [ -f \"$HOME/.gemini/config/plugins/memorize/scripts/run-memorize.sh\" ]; then exec sh \"$HOME/.gemini/config/plugins/memorize/scripts/run-memorize.sh\"; else exec \"$HOME/.memorize/bin/memorize\"; fi"
+      ]
+    }
+  }
+}

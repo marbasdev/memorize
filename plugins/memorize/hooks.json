@@ -1,0 +1,38 @@
+{
+  "memorize-enforcer": {
+    "enabled": true,
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "sh ./scripts/run-memorize.sh -hook antigravity-start",
+        "timeout": 8
+      }
+    ],
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "sh ./scripts/run-memorize.sh -hook antigravity-turn",
+        "timeout": 8
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "run_command|edit_file|write_file|multi_replace_file_content|replace_file_content|Bash|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh ./scripts/run-memorize.sh -hook antigravity-pretool",
+            "timeout": 8
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "sh ./scripts/run-memorize.sh -hook antigravity-stop",
+        "timeout": 4
+      }
+    ]
+  }
+}
