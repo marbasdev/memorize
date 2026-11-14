@@ -13,3 +13,4 @@
 ## Convention (`convention`)
 
 - (`http`) internal/transport/http의 JSON POST 엔드포인트는 수동 헤더 검사 대신 security.go의 미들웨어와 유틸리티를 사용해 루프백 Host/Origin 및 Sec-Fetch-Site 검증을 일관되게 적용합니다. · `@memorize-dev` · `2026-11-14`
+- (`workflow`) 훅·분류기·대시보드·진행 현황 로직에서 하드코딩된 단어·불용어 사전, 특정 응답 문구 목록, 문자열 역파싱 휴리스틱, 커스텀 DOM morpher를 추가하지 않는다. · `@memorize-dev` · `2026-11-14`
