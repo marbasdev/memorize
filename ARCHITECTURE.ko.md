@@ -38,7 +38,72 @@ flowchart LR
 
 ---
 
-## 2. MCP 도구, 리소스 및 프롬프트 명세
+## 2. 패키지 아키텍처
+
+### 2.1 폴더 구조
+
+```text
+memorize/
+├── cmd/
+│   └── memorize/                  # 최소 진입점 (main.go에서 RuntimeHooks 주입 후 transport/cli 위임)
+│
+├── internal/
+│   ├── domain/                    # [1] 순수 도메인 모델 & 계약 (표준 라이브러리만 사용; DB/HTTP/Git 무의존)
+│   │                              #     Fact, Scope, Progress, GuardrailLog, Evaluator, ChangeEvent, 비밀 마스킹
+│   │
+│   ├── infra/                     # [2] 기술 기반 인프라 (비즈니스 규칙 없음, 노드 공통 배관)
+│   │   ├── config/                #     환경변수, data dir 경로, 원자적 ports.json / daemon.json 설정 저장소
+│   │   ├── sqlite/                #     WAL SQLite 커넥션, 스키마 초기화, repo_sync 헬퍼
+│   │   ├── git/                   #     Git 루트 탐지, HEAD / 커밋 diff 및 로그 조회
+│   │   └── eventbus/              #     인프로세스 SSE 변경·라이브 세션 이벤트 브로드캐스터
+│   │
+│   ├── inference/                 # [3] AI 추론 엔진 계층 (도메인 규칙 비의존)
+│   │   ├── router/                #     태스크별 라우팅, 429 fallback 쿨다운 체인, eval_telemetry 기록
+│   │   ├── providers/             #     Gemini (decisions 포함), System 1 (Jev/Flide), OpenAI 호환, GGUF 어댑터
+│   │   ├── discovery/             #     추천 모델 프리셋 카탈로그 및 로컬 엔드포인트 프로빙
+│   │   └── localmodel/            #     llama-server 수명주기 및 GGUF 다운로드 관리 (macOS/Linux 로컬 전용)
+│   │
+│   ├── modules/                   # [4] 비즈니스 수직 모듈 (자기 테이블·규칙만 소유 → 엄격한 SSOT 격리)
+│   │   ├── memory/                #     기억 CRUD, 1:N 덮어쓰기, 세션 델타, 병합 정리, 분류, 플레이북
+│   │   ├── progress/              #     project_progress 보드, Git 커밋 동기화, 라이브 세션, TTL 리텐션
+│   │   └── guardrail/             #     IDE/Git 훅 디스패치, edit diff 검사, guardrail_logs, 온보딩
+│   │
+│   ├── transport/                 # [5] 외부 프로토콜 어댑터 (입출력 변환만 담당)
+│   │   ├── cli/                   #     플래그 파싱, stdio 브리지, daemon/port CLI, install (RuntimeHooks 주입)
+│   │   ├── mcp/                   #     MCP 툴·리소스·프롬프트 등록 및 워크스페이스 스코프 해석
+│   │   ├── http/                  #     공용 HTTP 라우터, /mcp·데몬 브리지 경로, 루프백/CSRF 보안 가드
+│   │   └── dashboard/             #     HTMX SSR 웹 콘솔 (templates/, assets/, i18n, 탭 핸들러)
+│   │
+│   └── app/                       # [6] 실행 모드 조립 (Wiring / Lifecycle)
+│       └── localdaemon/           #     단일 로컬 데몬 기동, 포트 폴백 및 버전 무중단 바이너리 핸드오버
+│
+└── plugins/                       # 에이전트 플러그인 매니페스트, 훅 러너 및 스킬 (Claude Code, Antigravity)
+```
+
+### 2.2 의존성 및 격리 규칙
+- **단방향 비순환 계층**: `domain -> infra -> inference -> modules -> transport -> app <- cmd/memorize`. 모든 패키지는 하위 계층만 임포트하며 상위 계층을 참조하지 않습니다 (`domain`은 Go 표준 라이브러리만 사용).
+- **계층 내부 의존 방향**:
+  - `infra`: `sqlite`가 `config`·`git`을 임포트하며, `eventbus`·`config`·`git`은 서로 독립적입니다.
+  - `inference`: `router`가 `localmodel`·`providers`를 임포트하고, `discovery`는 `providers`를 임포트합니다.
+  - `modules`: `guardrail`이 `progress`·`memory`를 임포트하고, `progress`가 `memory`를 임포트합니다 (타 모듈 테이블 직접 침범 없이 서비스 계약을 통해서만 연계).
+  - `transport`: `cli`와 `dashboard`가 `http`를 임포트하고, `http`가 `mcp`를 마운트해 루프백/CSRF 보안 미들웨어·브리지 타입을 공용화합니다.
+- **진입점 역의존 차단 (`RuntimeHooks`)**: `cmd/memorize/main.go`가 `internal/app/localdaemon`에서 생성한 `RuntimeHooks`를 `internal/transport/cli`에 주입하므로, `transport/*` 계층은 `app/*`를 직접 임포트하지 않습니다.
+
+### 2.3 로컬 전용 vs 동기화 경계 & `v1.1+` 확장 포인트
+로컬 노드 전용 배관과 이식 가능한 도메인 상태를 분리해 두었기 때문에, `v1.0` 이후 팀 공용 서버 및 기기 간 동기화 기능을 추가할 때 기존 비즈니스 규칙을 재작성하지 않고 확장할 수 있습니다.
+
+| 경계 구분 | 포함 패키지 | 담당 영역 |
+| :--- | :--- | :--- |
+| **로컬 노드 전용** | `infra/config`, `inference/localmodel`, `modules/guardrail`, `app/localdaemon` | API 키, 루프백 포트·PID 상태, 로컬 `llama-server`/GGUF, 머신 훅 및 라이브 세션 |
+| **동기화 가능 상태** | `modules/memory`, `modules/progress` | 스코프 기반 기억 계보(`global`, `project:*`, `personal`) 및 명시적·Git 진행 상태 |
+
+- **예정된 `v1.1+` 확장 위치** *(현재 디렉터리 트리에는 미생성)*:
+  - `internal/modules/sync`: `memory`/`progress` 변경분을 기기·팀 간 delta push/pull로 동기화
+  - `internal/app/teamserver`: `inference/localmodel` 없이 인증·테넌트 가드와 `modules/sync`를 조합해 기동하는 팀 공용 서버 진입 조립기
+
+---
+
+## 3. MCP 도구, 리소스 및 프롬프트 명세
 
 | 종류 | 이름 | 설명 |
 | :--- | :--- | :--- |
@@ -52,7 +117,7 @@ flowchart LR
 
 ---
 
-## 3. 환경변수 레퍼런스
+## 4. 환경변수 레퍼런스
 
 | 변수명 | 기본값 | 설명 |
 | :--- | :--- | :--- |
@@ -74,7 +139,7 @@ flowchart LR
 
 ---
 
-## 4. CI/CD 자동 릴리스
+## 5. CI/CD 자동 릴리스
 
 - **파이프라인 정의**: [GitHub Actions (`.github/workflows/ci-release.yml`)](./.github/workflows/ci-release.yml) · [GitLab CI (`.gitlab-ci.yml`)](./.gitlab-ci.yml)
 - **자동 테스트 검증**: 멀티 OS `go vet` + Unix(`ubuntu-latest`, `macos-latest`) `go test -v -race -count=1 ./...` + Windows(`windows-latest`) `CGO_ENABLED=0 go test -v -count=1 ./...`

@@ -38,7 +38,72 @@ flowchart LR
 
 ---
 
-## 2. MCP Tools, Resources & Prompts
+## 2. Package Architecture
+
+### 2.1 Directory Layout
+
+```text
+memorize/
+├── cmd/
+│   └── memorize/                  # Minimal entrypoint (main.go injects RuntimeHooks, delegates to transport/cli)
+│
+├── internal/
+│   ├── domain/                    # [1] Pure domain models & contracts (stdlib-only; zero DB/HTTP/Git deps)
+│   │                              #     Fact, Scope, Progress, GuardrailLog, Evaluator, ChangeEvent, secret redaction
+│   │
+│   ├── infra/                     # [2] Technical infrastructure (domain-agnostic, node-level plumbing)
+│   │   ├── config/                #     Env vars, data dir paths, atomic ports.json / daemon.json store
+│   │   ├── sqlite/                #     WAL SQLite connection, schema migrations, repo_sync helpers
+│   │   ├── git/                   #     Git root detection, HEAD / commit diff & log inspection
+│   │   └── eventbus/              #     In-process SSE change & live-session event broadcaster
+│   │
+│   ├── inference/                 # [3] AI inference engine layer (domain-rule independent)
+│   │   ├── router/                #     Per-task routing, 429 cooldown/fallback chain, eval_telemetry persistence
+│   │   ├── providers/             #     Gemini (incl. decisions), System 1 (Jev/Flide), OpenAI-compatible, GGUF
+│   │   ├── discovery/             #     Preset model catalog & local endpoint probing
+│   │   └── localmodel/            #     llama-server lifecycle & GGUF download manager (macOS/Linux local only)
+│   │
+│   ├── modules/                   # [4] Vertical business modules (isolated tables & rules -> strict SSOT)
+│   │   ├── memory/                #     Memory CRUD, 1:N supersession, session delta, consolidate, taxonomy, playbook
+│   │   ├── progress/              #     project_progress board, Git commit sync, live sessions, TTL retention
+│   │   └── guardrail/             #     IDE/Git hook dispatch, edit diff verification, guardrail_logs, onboarding
+│   │
+│   ├── transport/                 # [5] External protocol adapters (I/O translation only)
+│   │   ├── cli/                   #     Flags, stdio bridge client, daemon/port CLI, install (RuntimeHooks-injected)
+│   │   ├── mcp/                   #     MCP tool/resource/prompt registration & workspace scope resolver
+│   │   ├── http/                  #     Shared HTTP mux, /mcp & daemon bridge routes, loopback/CSRF guards
+│   │   └── dashboard/             #     HTMX SSR Web Console (templates/, assets/, i18n, tab handlers)
+│   │
+│   └── app/                       # [6] Execution mode composition (Wiring / Lifecycle)
+│       └── localdaemon/           #     Single local daemon startup, port fallback & versioned binary handover
+│
+└── plugins/                       # Agent plugin manifests, hook runners & skills (Claude Code, Antigravity)
+```
+
+### 2.2 Dependency & Isolation Rules
+- **Strict Acyclic Layering**: `domain -> infra -> inference -> modules -> transport -> app <- cmd/memorize`. Packages may only import lower layers, never higher layers (`domain` depends only on the Go standard library).
+- **Intra-Layer Dependencies**:
+  - `infra`: `sqlite` imports `config` and `git`; `eventbus`, `config`, and `git` stay mutually independent.
+  - `inference`: `router` imports `localmodel` and `providers`; `discovery` imports `providers`.
+  - `modules`: `guardrail` imports `progress` and `memory`; `progress` imports `memory` (vertical modules interact through service contracts rather than bypassing another module's tables).
+  - `transport`: `cli` and `dashboard` import `http`; `http` mounts `mcp` (sharing loopback/CSRF security guards and daemon bridge types).
+- **Decoupled Entrypoint (`RuntimeHooks`)**: `cmd/memorize/main.go` injects `localdaemon.Hooks` (`RuntimeHooks`) into `internal/transport/cli`, preventing `transport/*` from ever importing `app/*`.
+
+### 2.3 Local-Only vs. Syncable Boundary & `v1.1+` Extension Points
+Separating node infrastructure from portable domain state allows post-`v1.0` team server and cross-device sync features to plug in cleanly without rewriting core rules:
+
+| Boundary | Owned Packages | Responsibility |
+| :--- | :--- | :--- |
+| **Local Node Only** | `infra/config`, `inference/localmodel`, `modules/guardrail`, `app/localdaemon` | API keys, loopback port/PID bindings, local `llama-server`/GGUF, machine hooks & live sessions |
+| **Syncable State** | `modules/memory`, `modules/progress` | Scoped memory lineage (`global`, `project:*`, `personal`) and explicit/Git project progress |
+
+- **Planned `v1.1+` Extension Points** *(not present in the current tree)*:
+  - `internal/modules/sync`: Cross-device / team delta push & pull built on top of `memory` and `progress`.
+  - `internal/app/teamserver`: Shared server composition assembling auth/tenant middleware and `modules/sync` without `inference/localmodel`.
+
+---
+
+## 3. MCP Tools, Resources & Prompts
 
 | Kind | Name | Purpose |
 | :--- | :--- | :--- |
@@ -52,7 +117,7 @@ flowchart LR
 
 ---
 
-## 3. Environment Variables
+## 4. Environment Variables
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
@@ -74,7 +139,7 @@ flowchart LR
 
 ---
 
-## 4. CI/CD Release Automation
+## 5. CI/CD Release Automation
 
 - **Pipelines**: [GitHub Actions (`.github/workflows/ci-release.yml`)](./.github/workflows/ci-release.yml) · [GitLab CI (`.gitlab-ci.yml`)](./.gitlab-ci.yml)
 - **Automated Test Matrix**: Cross-OS `go vet`, Unix `go test -v -race -count=1 ./...` (`ubuntu-latest`, `macos-latest`), and Windows `CGO_ENABLED=0 go test -v -count=1 ./...` (`windows-latest`)

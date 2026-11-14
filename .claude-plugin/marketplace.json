@@ -7,7 +7,7 @@
     {
       "name": "memorize",
       "source": "./plugins/memorize",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "license": "MIT",
       "description": "State-evaluated MCP memory server backed by SQLite with lifecycle context injection, Git rule sync, PreToolUse guardrails, and web console."
     }
