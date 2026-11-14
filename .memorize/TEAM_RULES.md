@@ -9,6 +9,7 @@
 - (`workflow`) 프로덕션 코드의 git 명령 호출은 internal/infra/git 내부에만 두고 modules나 transport에서 직접 실행하지 않습니다. · `@memorize-dev` · `2026-11-14`
 - (`database`) SQLite DB 연결과 스키마 초기화는 internal/infra/sqlite의 Open과 InitSchema로 일원화하며, 팀 룰 본문은 DB 미러 없이 데몬 인메모리 캐시와 .memorize/TEAM_RULES.md에서 직접 읽는다. · `@memorize-dev` · `2026-11-14`
 - (`dashboard`) 서드파티 번들을 제외한 internal/transport/dashboard/assets 및 templates 커스텀 파일은 각 800줄 미만 모듈로 분리 유지합니다. · `@memorize-dev` · `2026-11-14`
+- (`workflow`) README.md·README.ko.md·ARCHITECTURE.md·ARCHITECTURE.ko.md·TEAM.md·TEAM.ko.md 등 공개 제품·아키텍처·가이드 문서는 개별 구현·리팩터링 작업마다 수시로 갱신하지 않고 버전 업(릴리스) 시점에 일괄 동기화한다(단, 사용자 직접 지시와 .memorize/TEAM_RULES.md·스킬/규칙 파일은 예외). · `@memorize-dev` · `2026-11-14`
 
 ## Security (`security`)
 
