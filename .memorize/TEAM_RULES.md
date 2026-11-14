@@ -10,6 +10,10 @@
 - (`database`) SQLite DB 연결과 스키마 초기화는 internal/infra/sqlite의 Open과 InitSchema로 일원화하고 팀 룰 미러 테이블은 internal/modules/rulepack 외 경로에서 임의 변경하지 않습니다. · `@memorize-dev` · `2026-11-14`
 - (`dashboard`) 서드파티 번들을 제외한 internal/transport/dashboard/assets 및 templates 커스텀 파일은 각 800줄 미만 모듈로 분리 유지합니다. · `@memorize-dev` · `2026-11-14`
 
+## Security (`security`)
+
+- (`release`) 엔진 탐색 및 어댑터에서 저장된 API 키는 u.Hostname() 정확 일치로 공식 호스트(api.typesafe.ai) 또는 기존 저장 호스트에만 전송한다. · `@memorize-dev` · `2026-11-14`
+
 ## Convention (`convention`)
 
 - (`http`) internal/transport/http의 JSON POST 엔드포인트는 수동 헤더 검사 대신 security.go의 미들웨어와 유틸리티를 사용해 루프백 Host/Origin 및 Sec-Fetch-Site 검증을 일관되게 적용합니다. · `@memorize-dev` · `2026-11-14`
