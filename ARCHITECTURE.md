@@ -141,6 +141,6 @@ Separating node infrastructure from portable domain state allows post-`v1.0` tea
 
 ## 5. CI/CD Release Automation
 
-- **Pipelines**: [GitHub Actions (`.github/workflows/ci-release.yml`)](./.github/workflows/ci-release.yml) · [GitLab CI (`.gitlab-ci.yml`)](./.gitlab-ci.yml)
+- **Pipelines**: [GitHub Actions CI (`ci.yml`)](./.github/workflows/ci.yml) · [GitHub Actions Release (`release.yml`)](./.github/workflows/release.yml) · [GitLab CI (`.gitlab-ci.yml`)](./.gitlab-ci.yml)
 - **Automated Test Matrix**: Cross-OS `go vet`, Unix `go test -v -race -count=1 ./...` (`ubuntu-latest`, `macos-latest`), and Windows `CGO_ENABLED=0 go test -v -count=1 ./...` (`windows-latest`)
 - **Release Artifacts (`v*.*.*` tags)**: Cross-compiles `CGO_ENABLED=0` archives (`darwin/arm64`, `darwin/amd64`, `linux/arm64`, `linux/amd64`, `windows/amd64`) plus `SHA256SUMS` automatically

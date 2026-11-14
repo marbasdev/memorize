@@ -1,0 +1,139 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify-ci:
+    name: Verify CI on SHA
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      verified: ${{ steps.check.outputs.verified }}
+    steps:
+      - name: Wait for CI workflow on commit SHA
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # Give a simultaneous `git push --follow-tags` a short window to register CI on main.
+          attempts=0
+          count=0
+          run_json="{}"
+          while [ "$attempts" -lt 7 ]; do
+            run_json="$(gh api "repos/${REPO}/actions/workflows/ci.yml/runs?head_sha=${SHA}&per_page=10" 2>/dev/null || true)"
+            if [ -z "$run_json" ]; then
+              run_json="{}"
+            fi
+            count="$(printf '%s' "$run_json" | jq -r '(.workflow_runs // []) | length' 2>/dev/null || echo 0)"
+            if [ "$count" -gt 0 ]; then
+              break
+            fi
+            attempts=$((attempts + 1))
+            if [ "$attempts" -lt 7 ]; then
+              sleep 5
+            fi
+          done
+
+          if [ "$count" -eq 0 ]; then
+            echo "No CI run found for ${SHA}; running fallback CI matrix before release."
+            echo "verified=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Poll until CI passes on this exact SHA or definitively fails.
+          polls=0
+          while [ "$polls" -lt 150 ]; do
+            run_json="$(gh api "repos/${REPO}/actions/workflows/ci.yml/runs?head_sha=${SHA}&per_page=10")"
+            passed="$(printf '%s' "$run_json" | jq -r '[.workflow_runs[] | select(.status == "completed" and .conclusion == "success")] | length')"
+            if [ "$passed" -gt 0 ]; then
+              echo "CI passed for ${SHA}."
+              echo "verified=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            latest_status="$(printf '%s' "$run_json" | jq -r '.workflow_runs[0].status // ""')"
+            latest_conclusion="$(printf '%s' "$run_json" | jq -r '.workflow_runs[0].conclusion // ""')"
+            latest_url="$(printf '%s' "$run_json" | jq -r '.workflow_runs[0].html_url // ""')"
+
+            if [ "$latest_status" = "completed" ]; then
+              if [ "$latest_conclusion" = "cancelled" ]; then
+                # A newer push/re-run may have superseded an earlier run; double-check once.
+                sleep 10
+                run_json="$(gh api "repos/${REPO}/actions/workflows/ci.yml/runs?head_sha=${SHA}&per_page=10")"
+                active_or_ok="$(printf '%s' "$run_json" | jq -r '[.workflow_runs[] | select(.status != "completed" or .conclusion == "success")] | length')"
+                if [ "$active_or_ok" -gt 0 ]; then
+                  polls=$((polls + 1))
+                  continue
+                fi
+              fi
+              echo "::error::CI failed for ${SHA} (${latest_conclusion}): ${latest_url}"
+              exit 1
+            fi
+
+            polls=$((polls + 1))
+            sleep 10
+          done
+
+          echo "::error::Timed out waiting for CI on ${SHA}"
+          exit 1
+
+  fallback-test:
+    name: Fallback CI
+    needs: verify-ci
+    if: needs.verify-ci.outputs.verified != 'true'
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: Build & Publish GitHub Release
+    needs: [verify-ci, fallback-test]
+    if: ${{ always() && needs.verify-ci.result == 'success' && (needs.fallback-test.result == 'success' || needs.fallback-test.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Cross-compile CGO-free Release Archives
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+          for target in darwin/arm64 darwin/amd64 linux/arm64 linux/amd64 windows/amd64; do
+            GOOS="${target%/*}"
+            GOARCH="${target#*/}"
+            STAGE="dist/stage-${GOOS}-${GOARCH}"
+            mkdir -p "$STAGE"
+            BIN_NAME="memorize"
+            if [ "$GOOS" = "windows" ]; then BIN_NAME="memorize.exe"; fi
+            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
+              go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+              -o "$STAGE/$BIN_NAME" ./cmd/memorize
+            tar -C "$STAGE" -czf "dist/memorize-${GOOS}-${GOARCH}.tar.gz" "$BIN_NAME"
+            if [ "$GOOS" = "windows" ]; then
+              (cd "$STAGE" && zip -q "../memorize-${GOOS}-${GOARCH}.zip" "$BIN_NAME")
+            fi
+            rm -rf "$STAGE"
+          done
+          (cd dist && sha256sum ./*.tar.gz ./*.zip > SHA256SUMS)
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/*.tar.gz dist/*.zip dist/SHA256SUMS \
+            --title "memorize ${GITHUB_REF_NAME}" \
+            --generate-notes

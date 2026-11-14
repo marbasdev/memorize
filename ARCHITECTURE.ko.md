@@ -141,6 +141,6 @@ memorize/
 
 ## 5. CI/CD 자동 릴리스
 
-- **파이프라인 정의**: [GitHub Actions (`.github/workflows/ci-release.yml`)](./.github/workflows/ci-release.yml) · [GitLab CI (`.gitlab-ci.yml`)](./.gitlab-ci.yml)
+- **파이프라인 정의**: [GitHub Actions CI (`ci.yml`)](./.github/workflows/ci.yml) · [GitHub Actions Release (`release.yml`)](./.github/workflows/release.yml) · [GitLab CI (`.gitlab-ci.yml`)](./.gitlab-ci.yml)
 - **자동 테스트 검증**: 멀티 OS `go vet` + Unix(`ubuntu-latest`, `macos-latest`) `go test -v -race -count=1 ./...` + Windows(`windows-latest`) `CGO_ENABLED=0 go test -v -count=1 ./...`
 - **릴리스 아티팩트 (`v*.*.*` 태그)**: 5개 타겟(`darwin/arm64`, `darwin/amd64`, `linux/arm64`, `linux/amd64`, `windows/amd64`) `CGO_ENABLED=0` 아카이브 및 `SHA256SUMS` 자동 생성·배포
