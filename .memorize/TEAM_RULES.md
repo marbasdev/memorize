@@ -13,6 +13,7 @@
 ## Security (`security`)
 
 - (`release`) 엔진 탐색 및 어댑터에서 저장된 API 키는 u.Hostname() 정확 일치로 공식 호스트(api.typesafe.ai) 또는 기존 저장 호스트에만 전송한다. · `@memorize-dev` · `2026-11-14`
+- (`release`) cwd 및 runtime.Caller 기반 바이너리 자동 교체와 라이브 에셋 로드는 기본 비활성화하고 MEMORIZE_DEV_HOTRELOAD=1일 때만 허용한다. · `@memorize-dev` · `2026-11-14`
 
 ## Convention (`convention`)
 
