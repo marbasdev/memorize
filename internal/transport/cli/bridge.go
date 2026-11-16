@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"memorize/internal/domain"
 	thttp "memorize/internal/transport/http"
 )
 
@@ -105,12 +106,30 @@ func candidatePluginDirs() []string {
 	}
 	add(os.Getenv("MEMORY_PLUGIN_DIR"))
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		add(filepath.Join(home, ".gemini", "config", "plugins", "memorize"))
+		for _, spec := range domain.AllAgentSpecs() {
+			for _, rel := range spec.PluginDirRelPaths {
+				add(filepath.Join(home, rel))
+			}
+		}
 	}
 	if wd, err := os.Getwd(); err == nil && wd != "" {
 		add(filepath.Join(wd, "plugins", "memorize"))
 	}
 	return dirs
+}
+
+func agentManifestRelPaths() []string {
+	seen := make(map[string]bool)
+	var rels []string
+	for _, spec := range domain.AllAgentSpecs() {
+		for _, rel := range spec.ManifestRelPaths {
+			if rel != "" && !seen[rel] {
+				seen[rel] = true
+				rels = append(rels, rel)
+			}
+		}
+	}
+	return rels
 }
 
 func resolveConfiguredHookTimeout(mode string) (time.Duration, bool) {
@@ -121,8 +140,9 @@ func resolveConfiguredHookTimeout(mode string) (time.Duration, bool) {
 	if m == "" {
 		return 0, false
 	}
+	manifests := agentManifestRelPaths()
 	for _, dir := range candidatePluginDirs() {
-		for _, rel := range []string{"hooks.json", filepath.Join(".claude-plugin", "plugin.json")} {
+		for _, rel := range manifests {
 			data, err := os.ReadFile(filepath.Join(dir, rel))
 			if err != nil {
 				continue
@@ -162,7 +182,7 @@ func remainingHookBudgets(procStart time.Time, total time.Duration) (serverBudge
 func runStdioDaemonBridge(addr, dbPath, modelsDir string, ensureFn ensureDaemonFn) error {
 	sid := fmt.Sprintf("stdio-%d-%d", os.Getpid(), time.Now().UnixNano()%100000)
 	cwd, _ := os.Getwd()
-	envAccount := firstNonEmpty(os.Getenv("MEMORY_ACCOUNT"), os.Getenv("AGY_ACCOUNT"))
+	envAccount := domain.FirstNonEmpty(os.Getenv("MEMORY_ACCOUNT"), os.Getenv("AGY_ACCOUNT"))
 
 	var outMu sync.Mutex
 	writeLine := func(b []byte) error {
@@ -309,6 +329,6 @@ func runHookViaDaemon(addr, dbPath, modelsDir, mode string, rawStdin []byte, pro
 	defer cancel()
 
 	cwd, _ := os.Getwd()
-	envAccount := firstNonEmpty(os.Getenv("MEMORY_ACCOUNT"), os.Getenv("AGY_ACCOUNT"))
+	envAccount := domain.FirstNonEmpty(os.Getenv("MEMORY_ACCOUNT"), os.Getenv("AGY_ACCOUNT"))
 	return thttp.PostDaemonHook(ctx, targetAddr, mode, rawStdin, cwd, envAccount, timeoutMs)
 }

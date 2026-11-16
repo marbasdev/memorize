@@ -78,6 +78,23 @@ func parseDiscoveredModelIDs(body []byte) ([]string, bool) {
 	return models, true
 }
 
+func httpGetBody(ctx context.Context, client *http.Client, url, hdrName, hdrVal string, maxBytes int64) (int, []byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, nil, err
+	}
+	if hdrName != "" && hdrVal != "" {
+		req.Header.Set(hdrName, hdrVal)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	body, rerr := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
+	_ = resp.Body.Close()
+	return resp.StatusCode, body, rerr
+}
+
 func probeSingleLocalTarget(ctx context.Context, target LocalProbeTarget) (DetectedLocalServer, bool) {
 	base := strings.TrimRight(strings.TrimSpace(target.BaseURL), "/")
 	if base == "" {
@@ -87,38 +104,26 @@ func probeSingleLocalTarget(ctx context.Context, target LocalProbeTarget) (Detec
 	defer cancel()
 
 	if target.Provider == "jev" {
-		if req, err := http.NewRequestWithContext(cctx, http.MethodGet, base+"/v1/models", nil); err == nil {
-			if resp, err := localHandshakeClient.Do(req); err == nil {
-				body, _ := io.ReadAll(io.LimitReader(resp.Body, 32768))
-				_ = resp.Body.Close()
-				if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-					if models, ok := parseDiscoveredModelIDs(body); ok {
-						return DetectedLocalServer{
-							Label: target.Label, Provider: "jev", BaseURL: base, Models: append([]string{"jev-latest"}, models...),
-						}, true
-					}
-				}
+		if code, body, err := httpGetBody(cctx, localHandshakeClient, base+"/v1/models", "", "", 32768); err == nil && code >= 200 && code < 300 {
+			if models, ok := parseDiscoveredModelIDs(body); ok {
+				return DetectedLocalServer{
+					Label: target.Label, Provider: "jev", BaseURL: base, Models: append([]string{"jev-latest"}, models...),
+				}, true
 			}
 		}
-		if req, err := http.NewRequestWithContext(cctx, http.MethodGet, base+"/health", nil); err == nil {
-			if resp, err := localHandshakeClient.Do(req); err == nil {
-				body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-				_ = resp.Body.Close()
-				if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-					var h struct {
-						Status string `json:"status"`
-						Model  string `json:"model"`
-					}
-					if json.Unmarshal(body, &h) == nil && (h.Status == "ok" || h.Status == "loading") {
-						models := []string{"jev-latest"}
-						if m := strings.TrimSpace(h.Model); m != "" {
-							models = append(models, m)
-						}
-						return DetectedLocalServer{
-							Label: target.Label, Provider: "jev", BaseURL: base, Models: models,
-						}, true
-					}
+		if code, body, err := httpGetBody(cctx, localHandshakeClient, base+"/health", "", "", 8192); err == nil && code >= 200 && code < 300 {
+			var h struct {
+				Status string `json:"status"`
+				Model  string `json:"model"`
+			}
+			if json.Unmarshal(body, &h) == nil && (h.Status == "ok" || h.Status == "loading") {
+				models := []string{"jev-latest"}
+				if m := strings.TrimSpace(h.Model); m != "" {
+					models = append(models, m)
 				}
+				return DetectedLocalServer{
+					Label: target.Label, Provider: "jev", BaseURL: base, Models: models,
+				}, true
 			}
 		}
 		return DetectedLocalServer{}, false
@@ -129,17 +134,8 @@ func probeSingleLocalTarget(ctx context.Context, target LocalProbeTarget) (Detec
 		modelsURL += "/v1"
 	}
 	modelsURL += "/models"
-	req, err := http.NewRequestWithContext(cctx, http.MethodGet, modelsURL, nil)
-	if err != nil {
-		return DetectedLocalServer{}, false
-	}
-	resp, err := localHandshakeClient.Do(req)
-	if err != nil {
-		return DetectedLocalServer{}, false
-	}
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 32768))
-	_ = resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	code, body, err := httpGetBody(cctx, localHandshakeClient, modelsURL, "", "", 32768)
+	if err != nil || code < 200 || code >= 300 {
 		return DetectedLocalServer{}, false
 	}
 	models, ok := parseDiscoveredModelIDs(body)

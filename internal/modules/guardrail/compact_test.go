@@ -13,9 +13,25 @@ import (
 )
 
 type compactSpyEval struct {
+	stubEval
 	lastQueryTask      string
 	lastCandidateCount int
 	queryCalls         int
+}
+
+func newCompactSpyEval() *compactSpyEval {
+	return &compactSpyEval{
+		stubEval: stubEval{
+			dec: domain.MutationDecision{
+				Category:    "architecture",
+				Tier:        "rule",
+				Cardinality: "additive",
+				IsPermanent: 0.95,
+				Action:      "INSERT",
+				Confidence:  0.95,
+			},
+		},
+	}
 }
 
 func (e *compactSpyEval) Name() string { return "gemini:compact-spy" }
@@ -36,24 +52,9 @@ func (e *compactSpyEval) ScoreRelevance(_ context.Context, currentTask string, c
 	return out, nil
 }
 
-func (e *compactSpyEval) EvaluateMutation(_ context.Context, _, _ string, _ []domain.Fact) (domain.MutationDecision, error) {
-	return domain.MutationDecision{
-		Category:    "architecture",
-		Tier:        "rule",
-		Cardinality: "additive",
-		IsPermanent: 0.95,
-		Action:      "INSERT",
-		Confidence:  0.95,
-	}, nil
-}
-
-func (e *compactSpyEval) VerifyPlan(_ context.Context, _ string, _ []domain.Fact) ([]domain.PlanViolation, error) {
-	return nil, nil
-}
-
 func TestClaudePostCompactAndSessionStartCompactAutoRestoresRules(t *testing.T) {
 	ctx := context.Background()
-	eval := &compactSpyEval{}
+	eval := newCompactSpyEval()
 	st := newTestStack(t, ":memory:", eval)
 
 	repo := t.TempDir()
@@ -125,7 +126,7 @@ func TestClaudePostCompactAndSessionStartCompactAutoRestoresRules(t *testing.T) 
 
 func TestAntigravityTranscriptCheckpointTriggersAutoPostCompactRecovery(t *testing.T) {
 	ctx := context.Background()
-	eval := &compactSpyEval{}
+	eval := newCompactSpyEval()
 	st := newTestStack(t, ":memory:", eval)
 
 	repo := t.TempDir()

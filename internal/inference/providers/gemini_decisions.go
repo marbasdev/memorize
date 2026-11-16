@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -43,7 +42,7 @@ func NewGeminiDecisionsAdapterConfig(apiKey, model string) *BatchEvaluator {
 		m = defaultGeminiDecisionModel
 	}
 	tr := &GeminiDecisionsAdapter{apiKey: k, model: m}
-	return NewBatchEvaluator("gemini:"+m, &decisionEvaluator{tr: tr}, 100, 4)
+	return NewBatchEvaluator("gemini:"+m, &decisionEvaluator{tr: tr}, 100, 2)
 }
 
 func (g *GeminiDecisionsAdapter) Name() string { return "gemini:" + g.model }
@@ -152,23 +151,15 @@ func (g *GeminiDecisionsAdapter) CallDecisions(ctx context.Context, input string
 	}
 
 	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := 0; attempt < 2; attempt++ {
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
-			case <-time.After(time.Duration(attempt*350) * time.Millisecond):
+			case <-time.After(200 * time.Millisecond):
 			}
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		if g.apiKey != "" {
-			req.Header.Set("x-goog-api-key", g.apiKey)
-		}
-		resp, err := httpClient.Do(req)
+		resp, err := postJSONRaw(ctx, httpClient, endpoint, body, "x-goog-api-key", g.apiKey)
 		if err != nil {
 			return nil, fmt.Errorf("gemini decisions endpoint unreachable: %w", err)
 		}
@@ -182,7 +173,9 @@ func (g *GeminiDecisionsAdapter) CallDecisions(ctx context.Context, input string
 			} else {
 				lastErr = fmt.Errorf("gemini decisions status %d", resp.StatusCode)
 			}
-			if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusTooManyRequests {
+			// Only retry once on transient 503; fail fast on 429 so the router circuit-breaker
+			// can immediately switch to the generative fallback model without wasting hook budget.
+			if resp.StatusCode == http.StatusServiceUnavailable {
 				continue
 			}
 			return nil, lastErr

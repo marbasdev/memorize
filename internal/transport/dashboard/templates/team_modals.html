@@ -1,0 +1,183 @@
+{{define "modal_team_publish"}}
+<dialog id="teamPublishDialog" aria-labelledby="teamPubTitle"
+  x-data='{ catVal: {{jsonAttr .Proposal.Category}}, subVal: {{jsonAttr .Proposal.SubCategory}}, subMap: {{jsonAttr .AllSubCategories}} }'
+  x-init="$el.showModal()" @click="if ($event.target === $el) $el.close()">
+  <form hx-post="/ui/team/publish" hx-target="#teamSection" hx-swap="innerHTML">
+    <input type="hidden" name="local_memory_id" value="{{.LocalMemoryID}}">
+    <div class="dlg-head">
+      <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+        <strong id="teamPubTitle">{{t .Lang "team_modal_title"}}</strong>
+        {{if gt .LocalMemoryID 0}}<span class="badge b-accent">from #{{.LocalMemoryID}}</span>{{end}}
+        {{if .Proposal.AddedBy}}<span class="badge b-muted" style="font-family:var(--mono);">{{.Proposal.AddedBy}}</span>{{end}}
+      </div>
+      <button type="button" class="btn btn-sm" @click="$el.closest('dialog').close()">{{t .Lang "btn_close"}}</button>
+    </div>
+
+    <div class="dlg-body">
+      <div style="font-size:0.76rem;color:var(--muted);">{{t .Lang "team_modal_desc"}}</div>
+      {{if .LocalContent}}
+        <div class="sub-panel" style="padding:0.5rem 0.65rem;font-size:0.77rem;">
+          <strong style="color:var(--muted);">Source #{{.LocalMemoryID}}:</strong> {{.LocalContent}}
+        </div>
+      {{end}}
+
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0.6rem;">
+        <div class="field-col">
+          <label>{{t .Lang "team_project_lbl"}}</label>
+          {{if gt (len .ProjectScopes) 0}}
+            <select name="team_scope">
+              {{range .ProjectScopes}}
+                <option value="{{.}}" {{if eq $.Scope .}}selected{{end}}>{{.}}</option>
+              {{end}}
+            </select>
+          {{else}}
+            <input name="team_scope" class="input" value="{{.Scope}}" required>
+          {{end}}
+        </div>
+        <div class="field-col">
+          <label>{{t .Lang "lbl_category"}}</label>
+          <input name="category" class="input" x-model="catVal" required>
+        </div>
+        <div class="field-col">
+          <label>{{t .Lang "lbl_subcategory"}}</label>
+          <input name="sub_category" class="input" x-model="subVal">
+        </div>
+      </div>
+
+      <div class="field-col">
+        <label>{{t .Lang "team_lbl_after_key"}}</label>
+        <select name="after_key">
+          <option value="">{{t .Lang "team_after_end"}}</option>
+          {{range .Outline}}
+            <option value="{{.RuleKey}}" {{if eq $.Proposal.AfterKey .RuleKey}}selected{{end}}>
+              {{.Category}}{{if .SubCategory}}/{{.SubCategory}}{{end}} · {{.Title}}
+            </option>
+          {{end}}
+        </select>
+      </div>
+
+      <div class="field-col">
+        <label>{{t .Lang "team_lbl_what"}}</label>
+        <textarea name="title" rows="2" required>{{.Proposal.Title}}</textarea>
+      </div>
+
+      {{if gt .LocalMemoryID 0}}
+      <div style="display:flex;gap:1rem;flex-wrap:wrap;font-size:0.79rem;">
+        <label style="display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;">
+          <input type="checkbox" name="retire_local" value="1" {{if .RetireLocal}}checked{{end}}>
+          <span>{{t .Lang "team_chk_retire_local"}}</span>
+        </label>
+      </div>
+      {{end}}
+    </div>
+
+    <div class="dlg-foot">
+      <button type="button" class="btn btn-sm" @click="$el.closest('dialog').close()">{{t .Lang "btn_close"}}</button>
+      <button type="submit" class="btn btn-primary btn-sm">{{t .Lang "team_btn_publish"}}</button>
+    </div>
+  </form>
+</dialog>
+{{end}}
+
+{{define "modal_team_edit"}}
+<dialog id="teamEditDialog" aria-labelledby="teamEditTitle"
+  x-data='{ catVal: {{jsonAttr .Rule.Category}}, subVal: {{jsonAttr .Rule.SubCategory}}, subMap: {{jsonAttr .AllSubCategories}} }'
+  x-init="$el.showModal()" @click="if ($event.target === $el) $el.close()">
+  <form hx-post="/ui/team/update" hx-target="#teamSection" hx-swap="innerHTML">
+    <input type="hidden" name="team_scope" value="{{.Scope}}">
+    <input type="hidden" name="target_key" value="{{.Rule.RuleKey}}">
+    <div class="dlg-head">
+      <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+        <strong id="teamEditTitle">{{t .Lang "team_edit_title"}}</strong>
+        <span class="badge b-accent">{{.Scope}}</span>
+        {{if .Rule.AddedBy}}<span class="badge b-muted" style="font-family:var(--mono);">{{.Rule.AddedBy}}</span>{{end}}
+      </div>
+      <button type="button" class="btn btn-sm" @click="$el.closest('dialog').close()">{{t .Lang "btn_close"}}</button>
+    </div>
+
+    <div class="dlg-body">
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0.6rem;">
+        <div class="field-col">
+          <label>{{t .Lang "lbl_category"}}</label>
+          <input name="category" class="input" x-model="catVal" required>
+        </div>
+        <div class="field-col">
+          <label>{{t .Lang "lbl_subcategory"}}</label>
+          <input name="sub_category" class="input" x-model="subVal">
+        </div>
+      </div>
+
+      <div class="field-col">
+        <label>{{t .Lang "team_lbl_what"}}</label>
+        <textarea name="title" rows="2" required>{{.Rule.Title}}</textarea>
+      </div>
+    </div>
+
+    <div class="dlg-foot">
+      <button type="button" class="btn btn-sm" @click="$el.closest('dialog').close()">{{t .Lang "btn_close"}}</button>
+      <button type="submit" class="btn btn-primary btn-sm">{{t .Lang "team_btn_save"}}</button>
+    </div>
+  </form>
+</dialog>
+{{end}}
+
+{{define "modal_team_duplicates"}}
+<dialog id="teamDupesDialog" aria-labelledby="teamDupesTitle"
+  x-init="$el.showModal()" @click="if ($event.target === $el) $el.close()">
+  <form hx-post="/ui/team/duplicates/apply" hx-target="#teamSection" hx-swap="innerHTML">
+    <input type="hidden" name="team_scope" value="{{.Scope}}">
+    <div class="dlg-head">
+      <div style="display:flex;align-items:center;gap:0.5rem;">
+        <strong id="teamDupesTitle">{{t .Lang "team_dupes_title"}}</strong>
+        <span class="badge b-accent">{{.Scope}}</span>
+        {{if .SourceLabel}}<span class="badge b-muted">{{.SourceLabel}}</span>{{end}}
+      </div>
+      <button type="button" class="btn btn-sm" @click="$el.closest('dialog').close()">{{t .Lang "btn_close"}}</button>
+    </div>
+
+    <div class="dlg-body">
+      <div style="font-size:0.76rem;color:var(--muted);">{{t .Lang "team_dupes_desc"}}</div>
+      {{if not .Suggestions}}
+        <div class="sub-panel" style="padding:1.1rem;text-align:center;color:var(--muted);">
+          {{t .Lang "team_dupes_none"}}
+        </div>
+      {{else}}
+        {{range .Suggestions}}
+          <div class="sub-panel" style="padding:0.65rem 0.75rem;display:flex;flex-direction:column;gap:0.4rem;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+              <label style="display:inline-flex;align-items:center;gap:0.4rem;font-weight:600;font-size:0.81rem;cursor:pointer;">
+                <input type="checkbox" name="ids" value="{{.LocalMemoryID}}" checked>
+                <span>#{{.LocalMemoryID}} ({{.LocalCategory}})</span>
+              </label>
+              {{if eq .Kind "duplicate"}}
+                <span class="badge b-danger">{{t $.Lang "team_kind_duplicate"}}</span>
+                <input type="hidden" name="action_{{.LocalMemoryID}}" value="delete">
+              {{else}}
+                <span class="badge b-warn">{{t $.Lang "team_kind_partial"}}</span>
+                <input type="hidden" name="action_{{.LocalMemoryID}}" value="trim">
+              {{end}}
+            </div>
+            <div style="font-size:0.78rem;"><strong>Local:</strong> {{.LocalContent}}</div>
+            <div style="font-size:0.75rem;color:var(--muted);">
+              <strong>Team Rule:</strong> {{.TeamRuleTitle}}{{if .Reason}} — {{.Reason}}{{end}}
+            </div>
+            {{if eq .Kind "partial_overlap"}}
+              <div class="field-col">
+                <label style="font-size:0.72rem;">Trimmed Local Content (&lt;= 180 chars)</label>
+                <textarea name="trimmed_{{.LocalMemoryID}}" rows="2" maxlength="180">{{.TrimmedContent}}</textarea>
+              </div>
+            {{end}}
+          </div>
+        {{end}}
+      {{end}}
+    </div>
+
+    <div class="dlg-foot">
+      <button type="button" class="btn btn-sm" @click="$el.closest('dialog').close()">{{t .Lang "btn_close"}}</button>
+      {{if .Suggestions}}
+        <button type="submit" class="btn btn-primary btn-sm">{{t .Lang "team_btn_apply_dupes"}}</button>
+      {{end}}
+    </div>
+  </form>
+</dialog>
+{{end}}

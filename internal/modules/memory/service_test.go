@@ -107,7 +107,7 @@ func TestServiceLifecycleAndUpgrades(t *testing.T) {
 	if err != nil {
 		t.Fatalf("QueryMemory error: %v", err)
 	}
-	if !strings.Contains(qOut, "Core Invariant") || !strings.Contains(qOut, "Use HttpOnly session cookies instead of JWT") || strings.Contains(qOut, "Replaces:") {
+	if !strings.Contains(qOut, "Core Rule") || !strings.Contains(qOut, "Use HttpOnly session cookies instead of JWT") || strings.Contains(qOut, "Replaces:") {
 		t.Fatalf("expected clean latest output without Replaces in fresh session:\n%s", qOut)
 	}
 
@@ -487,7 +487,7 @@ func TestAdminForgetUndoConsolidateThresholdsAndQuery(t *testing.T) {
 		t.Fatalf("ConsolidateMemories failed: id=%d err=%v", newID, err)
 	}
 	qCompacted, _ := svc.QueryMemory(ctx, "쿠키 보안", "", "project:dash")
-	if !strings.Contains(qCompacted, "HttpOnly, Secure, SameSite=Lax") || !strings.Contains(qCompacted, "Core Invariant") {
+	if !strings.Contains(qCompacted, "HttpOnly, Secure, SameSite=Lax") || !strings.Contains(qCompacted, "Core Rule") {
 		t.Fatalf("expected compacted pinned memory #5, got:\n%s", qCompacted)
 	}
 

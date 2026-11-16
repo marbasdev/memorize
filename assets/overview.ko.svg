@@ -67,7 +67,7 @@
   <rect class="s-panel" x="516" y="58" width="466" height="311" rx="8" />
   <text x="532" y="82" class="s-sans c-pri" font-size="12.5" font-weight="700">memorize 적용 후</text>
   <rect class="s-ok" x="852" y="66" width="114" height="22" rx="4" />
-  <text x="909" y="81" text-anchor="middle" class="s-sans c-ok" font-size="10.5" font-weight="700">실행 전 자동 차단</text>
+  <text x="909" y="81" text-anchor="middle" class="s-sans c-ok" font-size="10.5" font-weight="700">이원화 가드레일</text>
 
   <!-- Step 1 Right -->
   <rect class="s-card" x="532" y="98" width="434" height="58" rx="6" />
@@ -83,13 +83,13 @@
 
   <!-- Step 3 Right -->
   <rect class="s-term" x="532" y="224" width="434" height="74" rx="6" />
-  <text x="544" y="242" class="s-mono c-warn" font-size="10.5">14:20 · Turn 42  Agent write_file 시도 → PreToolUse 가로채기</text>
+  <text x="544" y="242" class="s-mono c-warn" font-size="10.5">14:20 · Turn 42  write_file("auth.ts") → 턴 종료 Stop 훅</text>
   <rect x="544" y="250" width="410" height="22" rx="3" fill="rgba(251,191,36,0.14)" />
-  <text x="552" y="265" class="s-mono c-warn" font-size="10.8">[BLOCKED] Rule #9 위반: JWT 금지 — 세션 쿠키 사용</text>
-  <text x="544" y="289" class="s-sans c-ok" font-size="10.5">↳ 저장 직전 중단 → 에이전트가 즉시 sessionCookie 코드로 수정 후 통과</text>
+  <text x="552" y="265" class="s-mono c-warn" font-size="10.8">[AUTO-FIX] Rule #9 위반: JWT 금지 — 세션 쿠키 사용</text>
+  <text x="544" y="289" class="s-sans c-ok" font-size="10.5">↳ 턴 종료 전 자동 수정 루프 → 에이전트가 sessionCookie 코드로 재작성</text>
 
   <!-- Result Right -->
   <rect class="s-ok" x="532" y="306" width="434" height="48" rx="6" />
-  <text x="749" y="326" text-anchor="middle" class="s-sans c-ok" font-size="12" font-weight="700">결과: 잘못된 코드가 디스크에 닿기 전 차단</text>
+  <text x="749" y="326" text-anchor="middle" class="s-sans c-ok" font-size="11.5" font-weight="700">결과: 턴 종료 전 자체 수정 (+ 위험 쉘 명령은 실행 전 차단)</text>
   <text x="749" y="343" text-anchor="middle" class="s-sans c-sec" font-size="10.5">반복 턴 추론 0회 · KV 캐시 재사용 · System 1 출력 토큰 0개 판정</text>
 </svg>

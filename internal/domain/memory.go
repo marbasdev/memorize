@@ -35,12 +35,19 @@ type Fact struct {
 	ID          int64    `json:"id"`
 	Scope       string   `json:"scope"`
 	Account     string   `json:"account,omitempty"`
+	Origin      string   `json:"origin,omitempty"`   // ""/"local" or "team"
+	RuleKey     string   `json:"rule_key,omitempty"` // Stable Team Rule Pack identifier
 	Category    string   `json:"category"`
 	SubCategory string   `json:"sub_category,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
 	Content     string   `json:"content"`
 	Pinned      bool     `json:"pinned,omitempty"`
 	Superseded  []string `json:"superseded,omitempty"`
+}
+
+// IsTeam reports whether f originates from a repository Team Rule Pack rather than local SQLite memories.
+func (f Fact) IsTeam() bool {
+	return f.Origin == RuleOriginTeam || f.RuleKey != ""
 }
 
 // ScoredFact pairs a retrieved Fact with evaluator relevance and confidence scores.
@@ -58,7 +65,7 @@ type MutationDecision struct {
 	Tier              string   `json:"tier,omitempty"`        // "invariant" | "rule" | "preference" | "transient"
 	Cardinality       string   `json:"cardinality,omitempty"` // "exclusive" | "additive"
 	IsPermanent       float64  `json:"is_permanent"`          // 0.0 ~ 1.0
-	IsGlobalInvariant float64  `json:"is_global_invariant"`   // 0.0 ~ 1.0 (Pinned Core Invariant)
+	IsGlobalInvariant float64  `json:"is_global_invariant"`   // 0.0 ~ 1.0 (Pinned Core Rule)
 	Action            string   `json:"action"`                // "INSERT" | "OVERWRITE" | "IGNORE"
 	ConflictFactID    int64    `json:"conflict_fact_id"`      // Primary target ID
 	ConflictFactIDs   []int64  `json:"conflict_fact_ids"`     // 1:N conflict or duplicate IDs

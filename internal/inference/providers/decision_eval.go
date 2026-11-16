@@ -39,6 +39,9 @@ func (a decisionAnswer) conf() float64 {
 	if a.AnswerConfidence > 0 {
 		return a.AnswerConfidence
 	}
+	if a.Choice != "" {
+		return 0.50
+	}
 	// Winning Bernoulli class probability max(p, 1-p) in [0.5, 1.0]:
 	// 0.50 at total uncertainty (noul=0.5), 0.95 at high certainty (noul=0.95 or 0.05).
 	return 0.5 + abs(a.Noul-0.5)
@@ -136,9 +139,9 @@ func (d *decisionEvaluator) EvaluateMutation(ctx context.Context, scope, candida
 	fmt.Fprintf(&sb, "Scope: %s\nExisting Facts:\n", scope)
 	q := map[string]decisionQuestion{
 		"perm": {Type: "noul", Instructions: "Is Candidate a lasting rule/state/preference worth keeping long-term (not a temporary log or transient chatter)?"},
-		"inv":  {Type: "noul", Instructions: "Is Candidate a strict non-negotiable invariant or constraint (e.g. constitutional rule, allergy, hard boundary) that must always be surfaced?"},
+		"inv":  {Type: "noul", Instructions: "Is Candidate a core architecture/safety rule or hard boundary (always included in context, editable later)?"},
 		"tier": {Type: "choice", Instructions: "Classify Candidate strength/tier.", Criteria: map[string]string{
-			"invariant":  "Strict non-negotiable prohibition or safety boundary.",
+			"invariant":  "Core architecture/safety rule or strict prohibition (always surfaced in context).",
 			"rule":       "Standard architectural decision, convention, or current state.",
 			"preference": "Soft preference, favored language/tool, or personal taste (non-binding hint).",
 			"transient":  "Temporary debug log or ephemeral chatter.",
@@ -211,6 +214,135 @@ func (d *decisionEvaluator) EvaluateMutation(ctx context.Context, scope, candida
 	return dec, nil
 }
 
+func (d *decisionEvaluator) EvaluateMutations(ctx context.Context, scope string, candidates []string, existing []domain.Fact) ([]domain.MutationDecision, error) {
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	if len(candidates) == 1 {
+		dec, err := d.EvaluateMutation(ctx, scope, candidates[0], existing)
+		if err != nil {
+			return nil, err
+		}
+		return []domain.MutationDecision{dec}, nil
+	}
+
+	// Pack multiple candidates into a single /v1beta/decisions call when total questions <= 90;
+	// otherwise pace sequentially (1 in-flight request at a time) to avoid rate-limit bursts.
+	qPerCand := 5 + len(existing)
+	perCall := max(1, 90/qPerCand)
+	if perCall == 1 {
+		out := make([]domain.MutationDecision, len(candidates))
+		for i, c := range candidates {
+			dec, err := d.EvaluateMutation(ctx, scope, c, existing)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = dec
+		}
+		return out, nil
+	}
+
+	out := make([]domain.MutationDecision, len(candidates))
+	catCriteria := buildCategoryCriteria(ctx)
+	tierCriteria := map[string]string{
+		"invariant":  "Core architecture/safety rule or strict prohibition (always surfaced in context).",
+		"rule":       "Standard architectural decision, convention, or current state.",
+		"preference": "Soft preference, favored language/tool, or personal taste (non-binding hint).",
+		"transient":  "Temporary debug log or ephemeral chatter.",
+	}
+	cardCriteria := map[string]string{
+		"exclusive": "Only one value/state can hold at a time, or Candidate explicitly replaces/negates a previous state.",
+		"additive":  "Multiple items/preferences can coexist simultaneously (e.g. liking multiple languages, tools, or foods).",
+	}
+	relCriteria := map[string]string{
+		"INDEPENDENT": "Unrelated, complementary, or coexisting additive preference (e.g. liking multiple languages/tools/foods).",
+		"OVERWRITE":   "Candidate explicitly contradicts, replaces, or negates this existing fact (mutually exclusive state).",
+		"DUPLICATE":   "Candidate already means the exact same thing as this existing fact.",
+	}
+
+	for start := 0; start < len(candidates); start += perCall {
+		end := min(start+perCall, len(candidates))
+		chunk := candidates[start:end]
+
+		var sb strings.Builder
+		fmt.Fprintf(&sb, "Scope: %s\nExisting Facts:\n", scope)
+		for _, f := range existing {
+			fmt.Fprintf(&sb, "[#%d] (%s) %s\n", f.ID, f.Category, f.Content)
+		}
+		sb.WriteString("\nCandidate Facts:\n")
+		q := make(map[string]decisionQuestion, len(chunk)*qPerCand)
+		for ci, cand := range chunk {
+			fmt.Fprintf(&sb, "[C%d] %s\n", ci, cand)
+			q[fmt.Sprintf("perm_%d", ci)] = decisionQuestion{Type: "noul", Instructions: fmt.Sprintf("Is Candidate C%d a lasting rule/state/preference worth keeping long-term?", ci)}
+			q[fmt.Sprintf("inv_%d", ci)] = decisionQuestion{Type: "noul", Instructions: fmt.Sprintf("Is Candidate C%d a core architecture/safety rule (always surfaced in context)?", ci)}
+			q[fmt.Sprintf("tier_%d", ci)] = decisionQuestion{Type: "choice", Instructions: fmt.Sprintf("Classify Candidate C%d strength/tier.", ci), Criteria: tierCriteria}
+			q[fmt.Sprintf("card_%d", ci)] = decisionQuestion{Type: "choice", Instructions: fmt.Sprintf("Can multiple items coexist for Candidate C%d subject, or is it mutually exclusive?", ci), Criteria: cardCriteria}
+			q[fmt.Sprintf("cat_%d", ci)] = decisionQuestion{Type: "choice", Instructions: fmt.Sprintf("Classify Candidate C%d into a domain.", ci), Criteria: catCriteria}
+			for _, f := range existing {
+				q[fmt.Sprintf("r_%d_%d", ci, f.ID)] = decisionQuestion{
+					Type:         "choice",
+					Instructions: fmt.Sprintf("Relation of Candidate C%d to Existing Fact #%d.", ci, f.ID),
+					Criteria:     relCriteria,
+				}
+			}
+		}
+
+		ans, err := d.tr.CallDecisions(ctx, sb.String(), q)
+		if err != nil {
+			return nil, err
+		}
+		for ci := range chunk {
+			perm, inv, cat := ans[fmt.Sprintf("perm_%d", ci)], ans[fmt.Sprintf("inv_%d", ci)], ans[fmt.Sprintf("cat_%d", ci)]
+			dec := domain.MutationDecision{
+				Category:          cat.Choice,
+				Tier:              ans[fmt.Sprintf("tier_%d", ci)].Choice,
+				Cardinality:       ans[fmt.Sprintf("card_%d", ci)].Choice,
+				IsPermanent:       perm.Noul,
+				IsGlobalInvariant: inv.Noul,
+				Action:            "INSERT",
+				Confidence:        perm.conf(),
+			}
+			var overwrites, duplicates []int64
+			var bestConf float64
+			for _, f := range existing {
+				a := ans[fmt.Sprintf("r_%d_%d", ci, f.ID)]
+				c := a.conf()
+				switch a.Choice {
+				case "DUPLICATE":
+					duplicates = append(duplicates, f.ID)
+					if c > bestConf {
+						bestConf = c
+					}
+				case "OVERWRITE":
+					overwrites = append(overwrites, f.ID)
+					if c >= bestConf {
+						bestConf = c
+						dec.ConflictFactID = f.ID
+					}
+				}
+			}
+			if len(duplicates) > 0 {
+				dec.Action = "IGNORE"
+				dec.ConflictFactID = duplicates[0]
+				dec.ConflictFactIDs = duplicates
+				dec.Confidence = bestConf
+			} else if len(overwrites) > 0 {
+				dec.Action = "OVERWRITE"
+				dec.ConflictFactIDs = overwrites
+				dec.Confidence = bestConf
+			}
+			domain.ApplyDecisionSemantics(&dec)
+			out[start+ci] = dec
+		}
+	}
+	return out, nil
+}
+
+var verifyPlanCriteria = map[string]string{
+	"ALLOW":     "Proposed Action/Diff is compatible with or unrelated to this rule, executes a partial/preparatory step of a broader workflow, follows Turn Context overrides, or only reflects Turn Context prose.",
+	"VIOLATION": "Proposed Action/Diff clearly and directly introduces prohibited behavior or values contradicting this rule.",
+}
+
 func (d *decisionEvaluator) VerifyPlan(ctx context.Context, proposedPlan string, rules []domain.Fact) ([]domain.PlanViolation, error) {
 	if len(rules) == 0 {
 		return nil, nil
@@ -222,8 +354,9 @@ func (d *decisionEvaluator) VerifyPlan(ctx context.Context, proposedPlan string,
 	for _, r := range rules {
 		fmt.Fprintf(&sb, "[#%d] (%s) %s\n", r.ID, r.Category, r.Content)
 		q[fmt.Sprintf("v_%d", r.ID)] = decisionQuestion{
-			Type:         "noul",
-			Instructions: fmt.Sprintf("Does the Proposed Plan violate or contradict Rule #%d?", r.ID),
+			Type:         "choice",
+			Instructions: fmt.Sprintf("Classify whether the Proposed Plan violates Rule #%d.", r.ID),
+			Criteria:     verifyPlanCriteria,
 		}
 	}
 	fmt.Fprintf(&sb, "\nProposed Plan:\n%s\n", proposedPlan)
@@ -235,8 +368,11 @@ func (d *decisionEvaluator) VerifyPlan(ctx context.Context, proposedPlan string,
 	var out []domain.PlanViolation
 	for _, r := range rules {
 		a := ans[fmt.Sprintf("v_%d", r.ID)]
-		if a.Noul >= 0.5 {
-			out = append(out, domain.PlanViolation{Fact: r, Probability: a.Noul, Confidence: a.conf()})
+		if a.Choice != "VIOLATION" {
+			continue
+		}
+		if p := a.conf(); p >= 0.5 {
+			out = append(out, domain.PlanViolation{Fact: r, Probability: p, Confidence: p})
 		}
 	}
 	return out, nil
@@ -247,7 +383,7 @@ func (d *decisionEvaluator) CalibrateConfidence(ctx context.Context, scope strin
 		return map[int64]float64{}, nil
 	}
 	bandCriteria := map[string]string{
-		"band_95": "0.95-1.00: strict non-negotiable invariant, hard prohibition, security/safety boundary, or core system contract.",
+		"band_95": "0.95-1.00: core architecture/safety rule, hard prohibition, security/safety boundary, or core system contract.",
 		"band_90": "0.90-0.94: explicit, concrete architectural, database, API, or operational rule with unambiguous conditions.",
 		"band_85": "0.85-0.89: standard coding, UI layout, or workflow convention.",
 		"band_80": "0.80-0.84: soft preference, stylistic taste, or situational hint.",

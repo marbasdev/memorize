@@ -2,7 +2,6 @@ package progress
 
 import (
 	"context"
-	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -17,40 +16,31 @@ type progressCatAgg struct {
 	hasHead bool
 }
 
-type progressLaneHead struct {
-	id        int64
-	status    string
-	kind      string
-	sessionID string
-	summary   string
-	nextStep  string
-	updatedAt string
-	set       bool
+type progressTrackAgg struct {
+	sum        domain.ProgressTrackSummary
+	memSeen    map[int64]bool
+	hasAnyHead bool
 }
 
-type progressTrackAgg struct {
-	sum           domain.ProgressTrackSummary
-	memSeen       map[int64]bool
-	hasAnyHead    bool
-	hasActiveHead bool
-	doingHead     progressLaneHead
-	plannedHead   progressLaneHead
+type progressProjectAgg struct {
+	sum              domain.ProgressProjectSummary
+	latestID         int64
+	recentCandidates []domain.ProgressRecord
 }
 
 type progressOverviewBuilder struct {
-	out            *domain.ProgressOverview
-	kindF, sessF   string
-	trkF, catF     string
-	stF            string
-	doneWindow     string
-	catMap         map[string]*progressCatAgg
-	catOrder       []string
-	trackMap       map[string]*progressTrackAgg
-	trackOrder     []string
-	sessMap        map[string]*domain.SessionSummary
-	sessOrder      []string
-	doneCandidates []domain.ProgressRecord
-	filtered       []domain.ProgressRecord
+	out              *domain.ProgressOverview
+	kindF            string
+	trkF, catF       string
+	doneWindow       string
+	catMap           map[string]*progressCatAgg
+	catOrder         []string
+	trackMap         map[string]*progressTrackAgg
+	trackOrder       []string
+	projMap          map[string]*progressProjectAgg
+	projOrder        []string
+	recentCandidates []domain.ProgressRecord
+	filtered         []domain.ProgressRecord
 }
 
 func newProgressOverviewBuilder(out *domain.ProgressOverview, q domain.ProgressQuery) *progressOverviewBuilder {
@@ -58,88 +48,75 @@ func newProgressOverviewBuilder(out *domain.ProgressOverview, q domain.ProgressQ
 	if kindF == "all" {
 		kindF = ""
 	}
-	sessF := strings.TrimSpace(q.SessionID)
-	if strings.EqualFold(sessF, "all") {
-		sessF = ""
-	}
 	doneWin := domain.NormalizeDoneWindow(q.DoneWindow)
 	out.DoneWindow = doneWin
 	return &progressOverviewBuilder{
 		out:        out,
 		kindF:      kindF,
-		sessF:      sessF,
 		trkF:       strings.ToLower(strings.TrimSpace(q.Track)),
 		catF:       strings.ToLower(strings.TrimSpace(q.Category)),
-		stF:        strings.ToLower(strings.TrimSpace(q.Status)),
 		doneWindow: doneWin,
 		catMap:     make(map[string]*progressCatAgg),
 		trackMap:   make(map[string]*progressTrackAgg),
-		sessMap:    make(map[string]*domain.SessionSummary),
-	}
-}
-
-func bumpProgressStatusCounts(total, done, inProg, planned, blocked *int, status string) {
-	*total++
-	switch status {
-	case domain.ProgressStatusDone:
-		*done++
-	case domain.ProgressStatusInProgress:
-		*inProg++
-	case domain.ProgressStatusPlanned:
-		*planned++
-	case domain.ProgressStatusBlocked:
-		*blocked++
+		projMap:    make(map[string]*progressProjectAgg),
 	}
 }
 
 func (b *progressOverviewBuilder) ingest(r domain.ProgressRecord) {
-	if r.SessionID != "" {
-		sKey := strings.ToLower(r.SessionID)
-		ss := b.sessMap[sKey]
-		if ss == nil {
-			ss = &domain.SessionSummary{
-				SessionID: r.SessionID,
-				Scope:     r.Scope,
-				UpdatedAt: r.UpdatedAt,
-			}
-			b.sessMap[sKey] = ss
-			b.sessOrder = append(b.sessOrder, sKey)
-		} else if compareProgressTSDesc(r.UpdatedAt, r.ID, ss.UpdatedAt, 0) {
-			ss.UpdatedAt = r.UpdatedAt
-		}
-		ss.Count++
-	}
-
 	tKey := strings.ToLower(r.Track)
 	cKey := strings.ToLower(r.Category)
 
-	matchSession := b.sessF == "" || strings.EqualFold(r.SessionID, b.sessF)
 	matchTrack := b.trkF == "" || tKey == b.trkF
 	matchCat := b.catF == "" || cKey == b.catF || tKey == b.catF
-	if matchSession && matchTrack && matchCat {
+	if matchTrack && matchCat {
 		b.out.KindCounts[r.Kind]++
 	}
 
 	matchKind := b.kindF == "" || r.Kind == b.kindF
-	if !(matchKind && matchSession && matchTrack && matchCat) {
+	if !(matchKind && matchTrack && matchCat) {
 		return
 	}
 
 	b.out.TotalCount++
-	b.out.StatusCounts[r.Status]++
+	b.recentCandidates = append(b.recentCandidates, r)
 
-	// Aggregate by Project + Session + Work Track so concurrent projects/sessions show distinctly.
-	boardKey := strings.ToLower(r.Scope) + "::" + strings.ToLower(r.SessionID) + "::" + tKey
-	if r.Status == domain.ProgressStatusDone {
-		b.doneCandidates = append(b.doneCandidates, r)
-	}
-
+	boardKey := strings.ToLower(r.Scope) + "::" + tKey
+	b.accumulateProject(r)
 	b.accumulateTrack(r, boardKey)
 	b.accumulateCategory(r, cKey)
 
-	if b.stF == "" || b.stF == "all" || r.Status == b.stF {
-		b.filtered = append(b.filtered, r)
+	b.filtered = append(b.filtered, r)
+}
+
+func (b *progressOverviewBuilder) accumulateProject(r domain.ProgressRecord) {
+	pKey := strings.ToLower(r.Scope)
+	pa := b.projMap[pKey]
+	if pa == nil {
+		pa = &progressProjectAgg{
+			sum: domain.ProgressProjectSummary{
+				Scope:           r.Scope,
+				ProjectName:     r.ProjectName,
+				LatestUpdatedAt: r.UpdatedAt,
+			},
+			latestID: r.ID,
+		}
+		b.projMap[pKey] = pa
+		b.projOrder = append(b.projOrder, pKey)
+	} else if compareProgressTSDesc(r.UpdatedAt, r.ID, pa.sum.LatestUpdatedAt, pa.latestID) {
+		pa.sum.LatestUpdatedAt = r.UpdatedAt
+		pa.latestID = r.ID
 	}
+
+	pa.sum.TotalCount++
+	switch r.Kind {
+	case domain.ProgressKindMemory:
+		pa.sum.MemoryCount++
+	case domain.ProgressKindGit:
+		pa.sum.GitCount++
+	default:
+		pa.sum.WorkCount++
+	}
+	pa.recentCandidates = append(pa.recentCandidates, r)
 }
 
 func (b *progressOverviewBuilder) accumulateTrack(r domain.ProgressRecord, boardKey string) {
@@ -160,57 +137,17 @@ func (b *progressOverviewBuilder) accumulateTrack(r domain.ProgressRecord, board
 		b.trackMap[boardKey] = ta
 		b.trackOrder = append(b.trackOrder, boardKey)
 	}
-	bumpProgressStatusCounts(&ta.sum.TotalCount, &ta.sum.DoneCount, &ta.sum.InProgressCount, &ta.sum.PlannedCount, &ta.sum.BlockedCount, r.Status)
+	ta.sum.TotalCount++
 	for _, mid := range r.MemoryIDs {
 		ta.memSeen[mid] = true
 	}
 	if !ta.hasAnyHead {
 		ta.hasAnyHead = true
-		ta.sum.Status = r.Status
 		ta.sum.Kind = r.Kind
 		ta.sum.LatestID = r.ID
 		ta.sum.LatestSummary = r.Summary
 		ta.sum.LatestNextStep = r.NextStep
 		ta.sum.LatestUpdatedAt = r.UpdatedAt
-	}
-	if r.Status != domain.ProgressStatusDone {
-		if !ta.hasActiveHead || progressStatusPriority(r.Status) < progressStatusPriority(ta.sum.Status) {
-			ta.hasActiveHead = true
-			ta.sum.Status = r.Status
-			ta.sum.Kind = r.Kind
-			ta.sum.LatestID = r.ID
-			ta.sum.LatestSummary = r.Summary
-			if r.NextStep != "" || ta.sum.LatestNextStep == "" {
-				ta.sum.LatestNextStep = r.NextStep
-			}
-			ta.sum.LatestUpdatedAt = r.UpdatedAt
-		} else if ta.sum.LatestNextStep == "" && r.NextStep != "" {
-			ta.sum.LatestNextStep = r.NextStep
-		}
-	}
-	switch r.Status {
-	case domain.ProgressStatusInProgress, domain.ProgressStatusBlocked:
-		if !ta.doingHead.set || (ta.doingHead.status == domain.ProgressStatusBlocked && r.Status == domain.ProgressStatusInProgress) {
-			prevNext := ta.doingHead.nextStep
-			ta.doingHead = progressLaneHead{
-				id: r.ID, status: r.Status, kind: r.Kind, sessionID: r.SessionID,
-				summary: r.Summary, nextStep: r.NextStep, updatedAt: r.UpdatedAt, set: true,
-			}
-			if ta.doingHead.nextStep == "" && prevNext != "" {
-				ta.doingHead.nextStep = prevNext
-			}
-		} else if ta.doingHead.nextStep == "" && r.NextStep != "" {
-			ta.doingHead.nextStep = r.NextStep
-		}
-	case domain.ProgressStatusPlanned:
-		if !ta.plannedHead.set {
-			ta.plannedHead = progressLaneHead{
-				id: r.ID, status: r.Status, kind: r.Kind, sessionID: r.SessionID,
-				summary: r.Summary, nextStep: r.NextStep, updatedAt: r.UpdatedAt, set: true,
-			}
-		} else if ta.plannedHead.nextStep == "" && r.NextStep != "" {
-			ta.plannedHead.nextStep = r.NextStep
-		}
 	}
 }
 
@@ -225,7 +162,7 @@ func (b *progressOverviewBuilder) accumulateCategory(r domain.ProgressRecord, cK
 		b.catMap[cKey] = agg
 		b.catOrder = append(b.catOrder, cKey)
 	}
-	bumpProgressStatusCounts(&agg.sum.TotalCount, &agg.sum.DoneCount, &agg.sum.InProgressCount, &agg.sum.PlannedCount, &agg.sum.BlockedCount, r.Status)
+	agg.sum.TotalCount++
 	if r.SubCategory != "" && !agg.subSeen[r.SubCategory] {
 		agg.subSeen[r.SubCategory] = true
 		agg.sum.SubCategories = append(agg.sum.SubCategories, r.SubCategory)
@@ -235,25 +172,10 @@ func (b *progressOverviewBuilder) accumulateCategory(r domain.ProgressRecord, cK
 	}
 	if !agg.hasHead {
 		agg.hasHead = true
-		agg.sum.LatestStatus = r.Status
 		agg.sum.LatestSummary = r.Summary
 		agg.sum.LatestNextStep = r.NextStep
 		agg.sum.LatestUpdatedAt = r.UpdatedAt
-	} else if agg.sum.LatestNextStep == "" && r.NextStep != "" && r.Status != domain.ProgressStatusDone {
-		agg.sum.LatestNextStep = r.NextStep
 	}
-}
-
-func applyProgressLaneHead(base domain.ProgressTrackSummary, status string, h progressLaneHead) domain.ProgressTrackSummary {
-	out := base
-	out.Status = status
-	out.Kind = h.kind
-	out.SessionID = h.sessionID
-	out.LatestID = h.id
-	out.LatestSummary = h.summary
-	out.LatestNextStep = h.nextStep
-	out.LatestUpdatedAt = h.updatedAt
-	return out
 }
 
 func compareProgressTSDesc(tsA string, idA int64, tsB string, idB int64) bool {
@@ -294,29 +216,21 @@ func doneWindowCutoff(win string, now time.Time) time.Time {
 	}
 }
 
-func (b *progressOverviewBuilder) finalizeRecentDone() {
-	out := b.out
-	now := time.Now().In(time.Local)
-	cutoff := doneWindowCutoff(b.doneWindow, now)
-	out.DoneWindowEnd = now.Format("2006-01-02 15:04")
-	if !cutoff.IsZero() {
-		out.DoneWindowStart = cutoff.In(time.Local).Format("2006-01-02 15:04")
-	}
+type progressWindowEntry struct {
+	rec domain.ProgressRecord
+	ts  time.Time
+	ok  bool
+}
 
-	type doneEntry struct {
-		rec domain.ProgressRecord
-		ts  time.Time
-		ok  bool
-	}
-	var matches []doneEntry
-	for _, r := range b.doneCandidates {
+func filterAndSortWindowEntries(candidates []domain.ProgressRecord, cutoff time.Time) []progressWindowEntry {
+	var matches []progressWindowEntry
+	for _, r := range candidates {
 		dt, ok := progressDoneEventTime(r)
 		if !cutoff.IsZero() && ok && dt.Before(cutoff) {
 			continue
 		}
-		matches = append(matches, doneEntry{rec: r, ts: dt, ok: ok})
+		matches = append(matches, progressWindowEntry{rec: r, ts: dt, ok: ok})
 	}
-	out.DoneWindowTotal = len(matches)
 	sort.Slice(matches, func(i, j int) bool {
 		if matches[i].ok && matches[j].ok && !matches[i].ts.Equal(matches[j].ts) {
 			return matches[i].ts.After(matches[j].ts)
@@ -326,39 +240,68 @@ func (b *progressOverviewBuilder) finalizeRecentDone() {
 		}
 		return matches[i].rec.ID > matches[j].rec.ID
 	})
+	return matches
+}
+
+func (b *progressOverviewBuilder) finalizeRecentHistory() {
+	out := b.out
+	now := time.Now().In(time.Local)
+	cutoff := doneWindowCutoff(b.doneWindow, now)
+	out.DoneWindowEnd = now.Format("2006-01-02 15:04")
+	if !cutoff.IsZero() {
+		out.DoneWindowStart = cutoff.In(time.Local).Format("2006-01-02 15:04")
+	}
+
+	matches := filterAndSortWindowEntries(b.recentCandidates, cutoff)
+	out.DoneWindowTotal = len(matches)
 
 	seenTrack := make(map[string]bool)
 	var overflow []domain.ProgressRecord
 	for _, m := range matches {
-		if len(out.RecentDone) >= 5 {
+		if len(out.RecentHistory) >= 5 {
 			break
 		}
-		k := strings.ToLower(m.rec.Scope) + "::" + strings.ToLower(m.rec.SessionID) + "::" + strings.ToLower(m.rec.Track)
+		k := strings.ToLower(m.rec.Scope) + "::" + strings.ToLower(m.rec.Track)
 		if !seenTrack[k] {
 			seenTrack[k] = true
-			out.RecentDone = append(out.RecentDone, m.rec)
+			out.RecentHistory = append(out.RecentHistory, m.rec)
 		} else {
 			overflow = append(overflow, m.rec)
 		}
 	}
 	for _, r := range overflow {
-		if len(out.RecentDone) >= 5 {
+		if len(out.RecentHistory) >= 5 {
 			break
 		}
-		out.RecentDone = append(out.RecentDone, r)
+		out.RecentHistory = append(out.RecentHistory, r)
 	}
+}
+
+func (b *progressOverviewBuilder) finalizeProjects() {
+	out := b.out
+	cutoff := doneWindowCutoff(b.doneWindow, time.Now().In(time.Local))
+
+	for _, pKey := range b.projOrder {
+		pa := b.projMap[pKey]
+		matches := filterAndSortWindowEntries(pa.recentCandidates, cutoff)
+		for _, m := range matches {
+			if len(pa.sum.RecentHistory) >= 5 {
+				break
+			}
+			pa.sum.RecentHistory = append(pa.sum.RecentHistory, m.rec)
+		}
+		out.Projects = append(out.Projects, pa.sum)
+	}
+	sort.SliceStable(out.Projects, func(i, j int) bool {
+		return compareProgressTSDesc(out.Projects[i].LatestUpdatedAt, 0, out.Projects[j].LatestUpdatedAt, 0)
+	})
 }
 
 func (b *progressOverviewBuilder) finalize(page, pageSize int) {
 	out := b.out
-	for _, sKey := range b.sessOrder {
-		out.Sessions = append(out.Sessions, *b.sessMap[sKey])
-	}
-	sort.SliceStable(out.Sessions, func(i, j int) bool {
-		return compareProgressTSDesc(out.Sessions[i].UpdatedAt, 0, out.Sessions[j].UpdatedAt, 0)
-	})
 
-	b.finalizeRecentDone()
+	b.finalizeRecentHistory()
+	b.finalizeProjects()
 
 	out.FilteredCount = len(b.filtered)
 	if out.FilteredCount > 0 {
@@ -397,55 +340,9 @@ func (b *progressOverviewBuilder) finalizeTracks() {
 	for _, tKey := range b.trackOrder {
 		ta := b.trackMap[tKey]
 		ta.sum.LinkedMemoryCount = len(ta.memSeen)
-		ta.sum.ActiveCount = ta.sum.TotalCount - ta.sum.DoneCount
-		if ta.sum.TotalCount > 0 {
-			ta.sum.DonePct = float64(ta.sum.DoneCount*100) / float64(ta.sum.TotalCount)
-		}
 		out.AllTracks = append(out.AllTracks, ta.sum)
-		if ta.sum.ActiveCount > 0 {
-			out.ActiveTracks = append(out.ActiveTracks, ta.sum)
-		}
-		if ta.doingHead.set {
-			d := applyProgressLaneHead(ta.sum, ta.doingHead.status, ta.doingHead)
-			out.DoingTracks = append(out.DoingTracks, d)
-			if d.LatestNextStep != "" {
-				out.NextStepItems = append(out.NextStepItems, domain.ProgressNextStepItem{
-					ID:            d.LatestID,
-					Scope:         d.Scope,
-					ProjectName:   d.ProjectName,
-					SessionID:     d.SessionID,
-					Kind:          d.Kind,
-					Track:         d.Track,
-					Status:        d.Status,
-					NextStep:      d.LatestNextStep,
-					ParentSummary: d.LatestSummary,
-					UpdatedAt:     d.LatestUpdatedAt,
-				})
-			}
-		}
-		if ta.plannedHead.set {
-			out.PlannedTracks = append(out.PlannedTracks, applyProgressLaneHead(ta.sum, domain.ProgressStatusPlanned, ta.plannedHead))
-		}
 	}
-	sortByPriorityThenID := func(list []domain.ProgressTrackSummary) {
-		sort.Slice(list, func(i, j int) bool {
-			pi := progressStatusPriority(list[i].Status)
-			pj := progressStatusPriority(list[j].Status)
-			if pi != pj {
-				return pi < pj
-			}
-			return compareProgressTSDesc(list[i].LatestUpdatedAt, list[i].LatestID, list[j].LatestUpdatedAt, list[j].LatestID)
-		})
-	}
-	sortByPriorityThenID(out.DoingTracks)
-	sortByPriorityThenID(out.ActiveTracks)
-	sort.Slice(out.PlannedTracks, func(i, j int) bool {
-		return compareProgressTSDesc(out.PlannedTracks[i].LatestUpdatedAt, out.PlannedTracks[i].LatestID, out.PlannedTracks[j].LatestUpdatedAt, out.PlannedTracks[j].LatestID)
-	})
 	sort.Slice(out.AllTracks, func(i, j int) bool {
-		if (out.AllTracks[i].ActiveCount > 0) != (out.AllTracks[j].ActiveCount > 0) {
-			return out.AllTracks[i].ActiveCount > 0
-		}
 		return compareProgressTSDesc(out.AllTracks[i].LatestUpdatedAt, out.AllTracks[i].LatestID, out.AllTracks[j].LatestUpdatedAt, out.AllTracks[j].LatestID)
 	})
 }
@@ -456,17 +353,9 @@ func (b *progressOverviewBuilder) finalizeCategories() {
 		agg := b.catMap[cKey]
 		sort.Strings(agg.sum.SubCategories)
 		agg.sum.LinkedMemoryCount = len(agg.memSeen)
-		if agg.sum.TotalCount > 0 {
-			agg.sum.DonePct = float64(agg.sum.DoneCount*100) / float64(agg.sum.TotalCount)
-		}
 		out.Categories = append(out.Categories, agg.sum)
 	}
 	sort.Slice(out.Categories, func(i, j int) bool {
-		activeI := out.Categories[i].InProgressCount + out.Categories[i].BlockedCount
-		activeJ := out.Categories[j].InProgressCount + out.Categories[j].BlockedCount
-		if activeI != activeJ {
-			return activeI > activeJ
-		}
 		if out.Categories[i].TotalCount != out.Categories[j].TotalCount {
 			return out.Categories[i].TotalCount > out.Categories[j].TotalCount
 		}
@@ -474,7 +363,7 @@ func (b *progressOverviewBuilder) finalizeCategories() {
 	})
 }
 
-// GetProgressOverviewWithQuery builds the complete filtered, paginated progress board and timeline overview.
+// GetProgressOverviewWithQuery builds the complete filtered, paginated progress activity board and timeline overview.
 func (s *Service) GetProgressOverviewWithQuery(ctx context.Context, q domain.ProgressQuery) (domain.ProgressOverview, error) {
 	rawSc := strings.TrimSpace(q.Scope)
 	sqlScope := ""
@@ -500,14 +389,9 @@ func (s *Service) GetProgressOverviewWithQuery(ctx context.Context, q domain.Pro
 		Page:          1,
 		PageSize:      pageSize,
 		TotalPages:    1,
-		StatusCounts:  map[string]int{},
 		KindCounts:    map[string]int{},
-		Sessions:      []domain.SessionSummary{},
-		ActiveTracks:  []domain.ProgressTrackSummary{},
-		DoingTracks:   []domain.ProgressTrackSummary{},
-		PlannedTracks: []domain.ProgressTrackSummary{},
-		NextStepItems: []domain.ProgressNextStepItem{},
-		RecentDone:    []domain.ProgressRecord{},
+		Projects:      []domain.ProgressProjectSummary{},
+		RecentHistory: []domain.ProgressRecord{},
 		AllTracks:     []domain.ProgressTrackSummary{},
 		Categories:    []domain.ProgressCategorySummary{},
 		Timeline:      []domain.ProgressDateGroup{},
@@ -520,7 +404,7 @@ func (s *Service) GetProgressOverviewWithQuery(ctx context.Context, q domain.Pro
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, scope, COALESCE(session_id, ''), COALESCE(track, ''), category, COALESCE(sub_category, ''), status,
+		SELECT id, scope, COALESCE(session_id, ''), COALESCE(track, ''), category, COALESCE(sub_category, ''),
 		       summary, COALESCE(details, ''), COALESCE(next_step, ''),
 		       COALESCE(memory_ids, ''), COALESCE(commit_sha, ''), COALESCE(source, 'manual'),
 		       COALESCE(created_at, ''), COALESCE(updated_at, '')
@@ -538,7 +422,7 @@ func (s *Service) GetProgressOverviewWithQuery(ctx context.Context, q domain.Pro
 	for rows.Next() {
 		var r domain.ProgressRecord
 		var memStr string
-		if err := rows.Scan(&r.ID, &r.Scope, &r.SessionID, &r.Track, &r.Category, &r.SubCategory, &r.Status,
+		if err := rows.Scan(&r.ID, &r.Scope, &r.SessionID, &r.Track, &r.Category, &r.SubCategory,
 			&r.Summary, &r.Details, &r.NextStep, &memStr, &r.CommitSHA, &r.Source, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return out, err
 		}
@@ -556,45 +440,4 @@ func (s *Service) GetProgressOverviewWithQuery(ctx context.Context, q domain.Pro
 
 	builder.finalize(page, pageSize)
 	return out, nil
-}
-
-// FormatActiveProgressForSession builds a compact summary of ongoing ('in_progress', 'blocked')
-// and planned ('planned') work tracks for SessionStart injection so new sessions inherit open work.
-func (s *Service) FormatActiveProgressForSession(ctx context.Context, rawScope string) string {
-	sc := domain.NormalizeScope(rawScope)
-	if !strings.HasPrefix(sc, "project:") {
-		return ""
-	}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, COALESCE(track, ''), category, COALESCE(sub_category, ''), status, summary, COALESCE(next_step, '')
-		FROM project_progress
-		WHERE scope = ? AND status IN ('in_progress', 'blocked', 'planned')
-		ORDER BY id DESC
-		LIMIT 12
-	`, sc)
-	if err != nil {
-		return ""
-	}
-	defer rows.Close()
-
-	var lines []string
-	for rows.Next() {
-		var id int64
-		var trk, cat, sub, st, sum, next string
-		if rows.Scan(&id, &trk, &cat, &sub, &st, &sum, &next) == nil {
-			eff := domain.EffectiveProgressTrack(trk, cat, sub)
-			line := fmt.Sprintf("- [#%d] **[%s]** (`%s`): %s", id, eff, st, strings.TrimSpace(sum))
-			if strings.TrimSpace(next) != "" {
-				line += " -> Next: " + strings.TrimSpace(next)
-			}
-			lines = append(lines, line)
-		}
-	}
-	if len(lines) == 0 {
-		return ""
-	}
-	var sb strings.Builder
-	sb.WriteString("[PROJECT PROGRESS STATE — project_progress: planned | in_progress | blocked | done]\n")
-	sb.WriteString(strings.Join(lines, "\n"))
-	return sb.String()
 }

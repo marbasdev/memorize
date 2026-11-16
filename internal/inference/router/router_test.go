@@ -119,3 +119,58 @@ func TestDynamicResolverAndPerFeatureRouting(t *testing.T) {
 	}
 	_ = flideHits.Load()
 }
+
+func TestRouterCircuitBreakerCooldownAndFallback(t *testing.T) {
+	var decHits, flashHits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1beta/decisions":
+			decHits.Add(1)
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"Quota exceeded for gemini-decision-1"}}`))
+		case "/v1beta/models/gemini-3.5-flash-lite:generateContent":
+			flashHits.Add(1)
+			_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"{\"items\":[{\"id\":1,\"score\":4.7,\"confidence\":0.94}]}"}]}}]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("GEMINI_API_BASE", srv.URL)
+
+	res := NewTaskResolver()
+	cfg := map[string]string{
+		"active_provider":      "gemini",
+		"gemini_model":         "gemini-3.5-flash-lite",
+		"gemini_api_key":       "k-gem",
+		"task_relevance_model": "gemini-decision-1",
+	}
+
+	ev1, ok := res(cfg, domain.TaskRelevance)
+	if !ok || ev1 == nil || ev1.Name() != "gemini:gemini-decision-1" {
+		t.Fatalf("expected initial Name() = gemini:gemini-decision-1, got %v", ev1)
+	}
+
+	facts := []domain.Fact{{ID: 1, Scope: "project:app", Category: "architecture", Content: "Use WAL mode"}}
+	scored1, err := ev1.ScoreRelevance(context.Background(), "database setup", facts)
+	if err != nil || len(scored1) != 1 || scored1[0].Score != 4.7 {
+		t.Fatalf("expected seamless fallback on 429, got scored=%+v err=%v", scored1, err)
+	}
+	if ev1.Name() != "gemini:gemini-3.5-flash-lite" {
+		t.Fatalf("expected effective Name() after fallback = gemini:gemini-3.5-flash-lite, got %q", ev1.Name())
+	}
+	if decHits.Load() != 1 || flashHits.Load() != 1 {
+		t.Fatalf("expected 1 fast-fail hit on decisions and 1 fallback hit on flash-lite, got dec=%d flash=%d", decHits.Load(), flashHits.Load())
+	}
+
+	// Second call while gemini-decision-1 is in cooldown must skip /v1beta/decisions completely (0ms wasted).
+	ev2, _ := res(cfg, domain.TaskRelevance)
+	scored2, err := ev2.ScoreRelevance(context.Background(), "database setup", facts)
+	if err != nil || len(scored2) != 1 {
+		t.Fatalf("expected second call during cooldown to succeed via fallback, got %+v (%v)", scored2, err)
+	}
+	if decHits.Load() != 1 || flashHits.Load() != 2 {
+		t.Fatalf("expected cooldown to skip decisions endpoint (decHits=1, flashHits=2), got dec=%d flash=%d", decHits.Load(), flashHits.Load())
+	}
+}

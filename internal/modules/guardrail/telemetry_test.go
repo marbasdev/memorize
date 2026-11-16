@@ -3,7 +3,6 @@ package guardrail_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -156,26 +155,6 @@ func TestEvalTelemetryTimeoutGuardrailElapsedAndLiveHookOverhead(t *testing.T) {
 	}
 	if len(page.Records) == 0 || page.Records[0].ElapsedMs <= 0 {
 		t.Fatalf("expected guardrail_log ElapsedMs > 0, got %+v", page.Records)
-	}
-
-	// Verify in-memory LiveSession accumulates hook calls & elapsed time across start -> turn -> pretool
-	sid := "sess-tel-1"
-	startJSON := fmt.Sprintf(`{"conversationId":%q,"workspacePaths":[%q]}`, sid, repo)
-	if _, code, err := st.gr.ExecuteHook(ctx, "antigravity-start", []byte(startJSON), repo); err != nil || code != 0 {
-		t.Fatalf("antigravity-start failed: code=%d err=%v", code, err)
-	}
-	turnJSON := fmt.Sprintf(`{"conversationId":%q,"workspacePaths":[%q],"lastUserInput":"sqlite migration"}`, sid, repo)
-	if _, code, err := st.gr.ExecuteHook(ctx, "antigravity-turn", []byte(turnJSON), repo); err != nil || code != 0 {
-		t.Fatalf("antigravity-turn failed: code=%d err=%v", code, err)
-	}
-	pretoolJSON := fmt.Sprintf(`{"conversationId":%q,"workspacePaths":[%q],"toolCall":{"name":"edit_file","args":{"Path":%q,"Replacement":"WAL"}}}`, sid, repo, filepath.Join(repo, "db.go"))
-	if _, code, err := st.gr.ExecuteHook(ctx, "antigravity-pretool", []byte(pretoolJSON), repo); err != nil || code != 0 {
-		t.Fatalf("antigravity-pretool failed: code=%d err=%v", code, err)
-	}
-
-	live := st.prog.ListLiveSessions()
-	if len(live) != 1 || live[0].HookCalls != 3 || live[0].HookElapsedMs <= 0 || live[0].Tool != "edit_file" || live[0].Target != "db.go" {
-		t.Fatalf("expected 3 accumulated hook calls and positive elapsed ms on live session, got %+v", live)
 	}
 
 	// Verify ResetTelemetry zeroes summary cleanly

@@ -13,12 +13,15 @@
     <div class="brand-row">
       <h1>memorize</h1>
       <button type="button" class="badge b-muted" id="daemonBadge" style="display:none;font-family:var(--mono);cursor:pointer;border:1px solid var(--border);" hx-get="/ui/modal/ports" hx-target="#modalHost" hx-swap="innerHTML" title="{{t .Lang "ports_title"}}"></button>
-      <button type="button" class="badge b-accent live-pill" id="liveSessionsBadge" style="display:none;cursor:pointer;border:1px solid var(--border);" @click="document.getElementById('tabBtn-progress')?.click()"></button>
     </div>
 
     <div class="nav-tabs" role="tablist" aria-label="Console Sections">
       <button type="button" class="nav-tab" role="tab" id="tabBtn-memories"
         :aria-selected="activeTab === 'memories'" @click="switchTab('memories')">{{t .Lang "tab_memories"}}</button>
+      <button type="button" class="nav-tab" role="tab" id="tabBtn-team"
+        :aria-selected="activeTab === 'team'"
+        hx-get="/ui/team" hx-include="#teamFilterForm" hx-target="#teamSection" hx-swap="innerHTML"
+        @click="switchTab('team')">{{t .Lang "tab_team"}}{{if gt .Team.PendingConflicts 0}} <span class="badge b-danger" style="margin-left:0.2rem;">{{.Team.PendingConflicts}}</span>{{end}}</button>
       <button type="button" class="nav-tab" role="tab" id="tabBtn-progress"
         :aria-selected="activeTab === 'progress'"
         hx-get="/ui/progress" hx-include="#progressFilterForm" hx-target="#progressSection" hx-swap="innerHTML"
@@ -55,6 +58,13 @@
     {{template "kpi_strip" .Memories}}
     <div class="card" id="memoriesSection">
       {{template "memories_section" .Memories}}
+    </div>
+  </section>
+
+  <!-- ==================== TAB 1.5: TEAM RULES ==================== -->
+  <section class="tab-panel" :class="{ 'active': activeTab === 'team' }" id="panel-team" role="tabpanel">
+    <div class="card" id="teamSection">
+      {{template "team_section" .Team}}
     </div>
   </section>
 

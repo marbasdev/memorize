@@ -1,7 +1,9 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -9,6 +11,35 @@ import (
 	"memorize/internal/domain"
 	"memorize/internal/infra/config"
 )
+
+func dropProgressStatusColumnIfPresent(db *sql.DB) {
+	rows, err := db.Query(`PRAGMA table_info(project_progress)`)
+	if err != nil {
+		return
+	}
+	hasStatus := false
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			colType string
+			notNull int
+			dfltVal sql.NullString
+			pk      int
+		)
+		if rows.Scan(&cid, &name, &colType, &notNull, &dfltVal, &pk) == nil && strings.EqualFold(name, "status") {
+			hasStatus = true
+			break
+		}
+	}
+	_ = rows.Close()
+	if !hasStatus {
+		return
+	}
+	_, _ = db.Exec(`DROP INDEX IF EXISTS idx_progress_scope_cat`)
+	_, _ = db.Exec(`DROP INDEX IF EXISTS idx_progress_scope_track`)
+	_, _ = db.Exec(`ALTER TABLE project_progress DROP COLUMN status`)
+}
 
 // Open initializes a single-writer WAL SQLite connection with 0600 file permissions and schema migrations.
 func Open(dbPath string) (*sql.DB, error) {
@@ -118,7 +149,6 @@ func InitSchema(db *sql.DB) error {
 			track TEXT NOT NULL DEFAULT '',
 			category TEXT NOT NULL,
 			sub_category TEXT NOT NULL DEFAULT '',
-			status TEXT NOT NULL DEFAULT 'in_progress',
 			summary TEXT NOT NULL,
 			details TEXT NOT NULL DEFAULT '',
 			next_step TEXT NOT NULL DEFAULT '',
@@ -128,7 +158,6 @@ func InitSchema(db *sql.DB) error {
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
-		CREATE INDEX IF NOT EXISTS idx_progress_scope_cat ON project_progress(scope, category, status, id DESC);
 		CREATE INDEX IF NOT EXISTS idx_progress_scope_commit ON project_progress(scope, commit_sha);
 		CREATE TABLE IF NOT EXISTS guardrail_logs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -163,19 +192,81 @@ func InitSchema(db *sql.DB) error {
 			pending INTEGER NOT NULL DEFAULT 0,
 			updated_at INTEGER NOT NULL
 		);
+		CREATE TABLE IF NOT EXISTS team_rule_states (
+			scope TEXT NOT NULL,
+			rule_key TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'adopted',
+			local_memory_id INTEGER NOT NULL DEFAULT 0,
+			local_content TEXT NOT NULL DEFAULT '',
+			conflict_reason TEXT NOT NULL DEFAULT '',
+			override_note TEXT NOT NULL DEFAULT '',
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (scope, rule_key)
+		);
+		CREATE TABLE IF NOT EXISTS team_rule_sync (
+			scope TEXT PRIMARY KEY,
+			file_hash TEXT NOT NULL DEFAULT '',
+			remote_branch TEXT NOT NULL DEFAULT '',
+			disk_baseline_hash TEXT NOT NULL DEFAULT '',
+			last_error TEXT NOT NULL DEFAULT '',
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE TABLE IF NOT EXISTS session_sent_rules (
+			session_id TEXT NOT NULL,
+			scope TEXT NOT NULL,
+			rule_key TEXT NOT NULL,
+			file_hash TEXT NOT NULL DEFAULT '',
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (session_id, scope, rule_key)
+		);
+		CREATE TABLE IF NOT EXISTS turn_pending_edits (
+			session_id TEXT NOT NULL,
+			scope TEXT NOT NULL,
+			file_path TEXT NOT NULL,
+			repo_dir TEXT NOT NULL DEFAULT '',
+			turn_input TEXT NOT NULL DEFAULT '',
+			baseline_exists INTEGER NOT NULL DEFAULT 0,
+			baseline_content TEXT NOT NULL DEFAULT '',
+			fallback_snippet TEXT NOT NULL DEFAULT '',
+			updated_at INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (session_id, scope, file_path)
+		);
 	`)
 	_, _ = db.Exec(`ALTER TABLE guardrail_logs ADD COLUMN elapsed_ms REAL NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(`ALTER TABLE project_progress ADD COLUMN track TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE project_progress ADD COLUMN details TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE project_progress ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`)
-	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_progress_scope_track ON project_progress(scope, track, status, id DESC)`)
+	dropProgressStatusColumnIfPresent(db)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_progress_scope_cat ON project_progress(scope, category, id DESC)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_progress_scope_track ON project_progress(scope, track, id DESC)`)
 	_, _ = db.Exec(`ALTER TABLE repo_sync ADD COLUMN repo_path TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE session_sent ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`)
 	_, _ = db.Exec(`DELETE FROM session_sent WHERE updated_at < datetime('now', '-2 days')`)
+	_, _ = db.Exec(`DELETE FROM session_sent_rules WHERE updated_at < datetime('now', '-2 days')`)
 	_, _ = db.Exec(`DELETE FROM session_updates WHERE updated_at < datetime('now', '-2 days')`)
 	_, _ = db.Exec(`DELETE FROM turn_state WHERE updated_at < ?`, time.Now().Add(-2*time.Hour).Unix())
+	_, _ = db.Exec(`DELETE FROM turn_pending_edits WHERE updated_at < ?`, time.Now().Add(-2*time.Hour).Unix())
 	_, _ = db.Exec(`DELETE FROM onboarding_prompts WHERE updated_at < ?`, time.Now().Add(-6*time.Hour).Unix())
 	_, _ = db.Exec(`DELETE FROM session_compacts WHERE updated_at < ?`, time.Now().Add(-48*time.Hour).Unix())
 	_, _ = db.Exec(`DELETE FROM project_progress WHERE source = 'session_auto'`)
+	if err := initSyncSchema(db); err != nil {
+		return err
+	}
 	return nil
+}
+
+// WithTx executes fn inside a SQLite transaction, rolling back on error or panic and committing on success.
+func WithTx(ctx context.Context, db *sql.DB, fn func(tx *sql.Tx) error) error {
+	if db == nil {
+		return sql.ErrConnDone
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

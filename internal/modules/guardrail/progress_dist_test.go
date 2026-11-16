@@ -10,10 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"memorize/internal/domain"
 	"memorize/internal/inference/providers"
@@ -71,25 +69,27 @@ func TestSeparatedProjectProgressLifecycleAndGitSync(t *testing.T) {
 		t.Fatalf("Commit 2: %v", err)
 	}
 
-	ov1, err := st.prog.GetProgressOverview(ctx, scope, "", "all", repoDir)
+	ov1, err := st.prog.GetProgressOverview(ctx, scope, "", repoDir)
 	if err != nil {
 		t.Fatalf("GetProgressOverview 1: %v", err)
 	}
-	if ov1.TotalCount != 1 || len(ov1.Records[0].MemoryIDs) != 2 || ov1.Records[0].Status != domain.ProgressStatusDone {
-		t.Fatalf("expected 1 coalesced done progress row linking [#1 #2], got %+v", ov1.Records)
+	if ov1.TotalCount != 1 || len(ov1.Records[0].MemoryIDs) != 2 {
+		t.Fatalf("expected 1 coalesced activity row linking [#1 #2], got %+v", ov1.Records)
 	}
 
 	manualRec, err := st.prog.RecordProgress(ctx, domain.ProgressInput{
 		Scope:       scope,
 		Category:    "dashboard",
 		SubCategory: "ui",
-		Status:      domain.ProgressStatusInProgress,
-		Summary:     "SPECIAL_PROGRESS_ONLY_MARKER_XYZ 작업 진행 중",
+		Summary:     "SPECIAL_PROGRESS_ONLY_MARKER_XYZ 작업 완료 기록",
 		NextStep:    "단위 테스트 작성",
 		Source:      "agent",
 	})
 	if err != nil {
 		t.Fatalf("RecordProgress: %v", err)
+	}
+	if manualRec.ID == 0 {
+		t.Fatalf("expected valid activity record ID, got %+v", manualRec)
 	}
 
 	memPrompt, err := st.mem.QuerySessionMemory(ctx, "sess-prog-check", "SPECIAL_PROGRESS_ONLY_MARKER_XYZ 확인", "", scope, false)
@@ -114,7 +114,7 @@ func TestSeparatedProjectProgressLifecycleAndGitSync(t *testing.T) {
 	if _, err := st.mem.CommitMemoryFull(ctx, "네 번째 백업 스냅샷 무결성 검증 원칙", "architecture", "storage", "", scope); err != nil {
 		t.Fatalf("Commit 4: %v", err)
 	}
-	ovMid, _ := st.prog.GetProgressOverview(ctx, scope, "", "all", repoDir)
+	ovMid, _ := st.prog.GetProgressOverview(ctx, scope, "", repoDir)
 	for _, r := range ovMid.Records {
 		if r.Source == "memory" {
 			_ = st.prog.DeleteProgress(ctx, r.ID)
@@ -130,10 +130,6 @@ func TestSeparatedProjectProgressLifecycleAndGitSync(t *testing.T) {
 		t.Fatalf("expected InSync=false with 4 unlinked memories and 1 pending commit, got %+v", preSync)
 	}
 
-	if err := st.prog.UpdateProgressStatus(ctx, manualRec.ID, domain.ProgressStatusDone); err != nil {
-		t.Fatalf("UpdateProgressStatus: %v", err)
-	}
-
 	syncRes, err := st.prog.SyncProjectProgress(ctx, scope, repoDir, "ko")
 	if err != nil {
 		t.Fatalf("SyncProjectProgress: %v", err)
@@ -147,23 +143,22 @@ func TestSeparatedProjectProgressLifecycleAndGitSync(t *testing.T) {
 		t.Fatalf("expected InSync=true after SyncProjectProgress, got %+v", postSync)
 	}
 
-	activeRec, err := st.prog.RecordProgress(ctx, domain.ProgressInput{
+	activityRec, err := st.prog.RecordProgress(ctx, domain.ProgressInput{
 		Scope:    scope,
 		Track:    "대시보드 히스토리 타임라인 개편",
-		Status:   domain.ProgressStatusInProgress,
-		Summary:  "상단 진행 트랙 보드 및 날짜별 세로 히스토리 연동 중",
+		Summary:  "상단 활동 요약 카드 및 날짜별 세로 히스토리 연동 완료",
 		NextStep: "트랙 클릭 필터 검증",
 		Source:   "agent",
 	})
 	if err != nil {
-		t.Fatalf("RecordProgress active track: %v", err)
+		t.Fatalf("RecordProgress activity track: %v", err)
 	}
-	ovFinal, err := st.prog.GetProgressOverview(ctx, scope, "", "all", repoDir)
+	ovFinal, err := st.prog.GetProgressOverview(ctx, scope, "", repoDir)
 	if err != nil {
 		t.Fatalf("GetProgressOverview final: %v", err)
 	}
-	if len(ovFinal.ActiveTracks) != 1 || ovFinal.ActiveTracks[0].LatestID != activeRec.ID || ovFinal.ActiveTracks[0].Track != "대시보드 히스토리 타임라인 개편" {
-		t.Fatalf("expected only ongoing track in ActiveTracks, got %+v", ovFinal.ActiveTracks)
+	if len(ovFinal.RecentHistory) == 0 || ovFinal.RecentHistory[0].ID != activityRec.ID || ovFinal.RecentHistory[0].Track != "대시보드 히스토리 타임라인 개편" {
+		t.Fatalf("expected latest recorded activity at head of RecentHistory, got %+v", ovFinal.RecentHistory)
 	}
 	if len(ovFinal.AllTracks) < 3 || len(ovFinal.Timeline) == 0 {
 		t.Fatalf("expected AllTracks >= 3 and non-empty date-grouped Timeline, got tracks=%d timeline=%d", len(ovFinal.AllTracks), len(ovFinal.Timeline))
@@ -177,21 +172,20 @@ func TestSeparatedProjectProgressLifecycleAndGitSync(t *testing.T) {
 	if !foundFullDetails {
 		t.Fatalf("expected memory_sync record to preserve all 4 memories in DetailsLines without truncation, got %+v", ovFinal.Records)
 	}
-	filteredOv, err := st.prog.GetProgressOverviewByTrack(ctx, scope, "대시보드 히스토리 타임라인 개편", "", "all", repoDir)
-	if err != nil || len(filteredOv.Records) != 1 || filteredOv.Records[0].ID != activeRec.ID {
+	filteredOv, err := st.prog.GetProgressOverviewByTrack(ctx, scope, "대시보드 히스토리 타임라인 개편", "", repoDir)
+	if err != nil || len(filteredOv.Records) != 1 || filteredOv.Records[0].ID != activityRec.ID {
 		t.Fatalf("expected track filter to isolate 1 record, got %+v (%v)", filteredOv.Records, err)
 	}
 
 	if _, err := st.prog.RecordProgress(ctx, domain.ProgressInput{
 		Scope:   scope,
-		Track:   "대시보드 히스토리 타임라인 개편",
-		Status:  domain.ProgressStatusPlanned,
-		Summary: "모바일 반응형 점검",
+		Track:   "모바일 반응형 점검",
+		Summary: "모바일 반응형 점검 완료",
 		Source:  "agent",
 	}); err != nil {
-		t.Fatalf("RecordProgress planned: %v", err)
+		t.Fatalf("RecordProgress second track: %v", err)
 	}
-	longRule := "진행 현황 히스토리 및 상단 3분할 상태 보드에서는 긴 기억 원문이 추가되거나 수정되더라도 말줄임표 없이 끝까지 원문 전체가 온전하게 표시되어야 하며 어떠한 경우에도 문장 끝이 잘리지 않아야 한다 (검증 마커: FULL_TAIL_OK_999)"
+	longRule := "진행 현황 히스토리 및 상단 활동 요약 카드에서는 긴 기억 원문이 추가되거나 수정되더라도 말줄임표 없이 끝까지 원문 전체가 온전하게 표시되어야 하며 어떠한 경우에도 문장 끝이 잘리지 않아야 한다 (검증 마커: FULL_TAIL_OK_999)"
 	if _, err := st.mem.CommitMemoryFull(ctx, longRule, "architecture", "dashboard", "", scope); err != nil {
 		t.Fatalf("CommitMemoryFull longRule: %v", err)
 	}
@@ -200,7 +194,6 @@ func TestSeparatedProjectProgressLifecycleAndGitSync(t *testing.T) {
 		if _, err := st.prog.RecordProgress(ctx, domain.ProgressInput{
 			Scope:   scope,
 			Track:   fmt.Sprintf("완료 트랙 #%d", i),
-			Status:  domain.ProgressStatusDone,
 			Summary: fmt.Sprintf("자동 기록 완료 마일스톤 %d", i),
 			Source:  "agent",
 		}); err != nil {
@@ -208,11 +201,11 @@ func TestSeparatedProjectProgressLifecycleAndGitSync(t *testing.T) {
 		}
 	}
 
-	page1, err := st.prog.GetProgressOverviewPaged(ctx, scope, "", "", "all", repoDir, 1, 10)
+	page1, err := st.prog.GetProgressOverviewPaged(ctx, scope, "", "", repoDir, 1, 10)
 	if err != nil {
 		t.Fatalf("GetProgressOverviewPaged page 1: %v", err)
 	}
-	page2, err := st.prog.GetProgressOverviewPaged(ctx, scope, "", "", "all", repoDir, 2, 10)
+	page2, err := st.prog.GetProgressOverviewPaged(ctx, scope, "", "", repoDir, 2, 10)
 	if err != nil {
 		t.Fatalf("GetProgressOverviewPaged page 2: %v", err)
 	}
@@ -220,9 +213,9 @@ func TestSeparatedProjectProgressLifecycleAndGitSync(t *testing.T) {
 		t.Fatalf("expected paginated history (page1=10, page2>0, totalPages>=2), got page1=%d page2=%d totalPages=%d",
 			len(page1.Records), len(page2.Records), page1.TotalPages)
 	}
-	if len(page2.DoingTracks) != 1 || len(page2.PlannedTracks) != 1 || len(page2.NextStepItems) != 1 || len(page2.RecentDone) != 5 {
-		t.Fatalf("expected top 3-lane board to preserve full-scope Doing(1)/Planned(1)/Next(1)/RecentDone(5) on page 2, got doing=%d planned=%d next=%d recentDone=%d",
-			len(page2.DoingTracks), len(page2.PlannedTracks), len(page2.NextStepItems), len(page2.RecentDone))
+	if len(page2.RecentHistory) != 5 || len(page2.Projects) != 1 || len(page2.Projects[0].RecentHistory) != 5 {
+		t.Fatalf("expected top project board to preserve RecentHistory(5)/Projects(1)/Projects[0].RecentHistory(5) on page 2, got recentHistory=%d projects=%d projRecent=%d",
+			len(page2.RecentHistory), len(page2.Projects), len(page2.Projects[0].RecentHistory))
 	}
 	for _, r := range append(page1.Records, page2.Records...) {
 		if strings.Contains(r.Summary, "…") {
@@ -238,8 +231,8 @@ func TestSeparatedProjectProgressLifecycleAndGitSync(t *testing.T) {
 	if err != nil || startCode != 0 {
 		t.Fatalf("ExecuteHook antigravity-start: code=%d err=%v", startCode, err)
 	}
-	if !strings.Contains(startOut, "PROJECT PROGRESS STATE") || !strings.Contains(startOut, "상단 진행 트랙 보드 및 날짜별 세로 히스토리 연동 중") {
-		t.Fatalf("expected SessionStart hook to inject ongoing work track state for seamless resume, got: %s", startOut)
+	if strings.Contains(startOut, "PROJECT PROGRESS STATE") {
+		t.Fatalf("expected SessionStart hook NOT to inject active progress state under activity-feed model, got: %s", startOut)
 	}
 	afterHookSync := st.prog.InspectProgressSync(ctx, scope, repoDir)
 	if !afterHookSync.InSync || len(afterHookSync.PendingCommits) != 0 {
@@ -251,12 +244,9 @@ func TestParallelGuardrailHookAndConcurrentCommitBatch(t *testing.T) {
 	ctx := context.Background()
 
 	var (
-		barrierOn     atomic.Bool
-		mutCalls      atomic.Int32
-		evalEntered   = make(chan struct{}, 1)
-		verifyEntered = make(chan struct{}, 1)
-		bothEntered   = make(chan struct{})
-		once          sync.Once
+		mutCalls    atomic.Int32
+		verifyCalls atomic.Int32
+		failOnce    atomic.Bool
 	)
 
 	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -274,34 +264,26 @@ func TestParallelGuardrailHookAndConcurrentCommitBatch(t *testing.T) {
 		var content string
 		switch {
 		case strings.Contains(prompt, "Proposed Plan"):
-			if barrierOn.Load() {
-				select {
-				case verifyEntered <- struct{}{}:
-				default:
-				}
-				select {
-				case <-evalEntered:
-					once.Do(func() { close(bothEntered) })
-				case <-time.After(500 * time.Millisecond):
-				}
-			}
-			content = `{"items":[]}`
+			verifyCalls.Add(1)
+			content = `{"a_verdict":"COMPLIES: ok","violations":[]}`
 		case strings.Contains(prompt, "Current Task"):
 			content = `{"items":[{"id":1,"score":4.5,"confidence":0.93}]}`
+		case strings.Contains(prompt, "\nCandidates:\n"):
+			mutCalls.Add(1)
+			content = `{"items":[
+				{"index":0,"category":"architecture","sub_category":"core","tags":[],"tier":"invariant","cardinality":"exclusive","is_permanent":0.93,"is_global_invariant":0.91,"confidence":0.94,"action":"INSERT","conflict_fact_ids":[]},
+				{"index":1,"category":"security","sub_category":"auth","tags":[],"tier":"invariant","cardinality":"exclusive","is_permanent":0.93,"is_global_invariant":0.91,"confidence":0.94,"action":"INSERT","conflict_fact_ids":[]},
+				{"index":2,"category":"database","sub_category":"sql","tags":[],"tier":"invariant","cardinality":"exclusive","is_permanent":0.93,"is_global_invariant":0.91,"confidence":0.94,"action":"INSERT","conflict_fact_ids":[]},
+				{"index":3,"category":"testing","sub_category":"unit","tags":[],"tier":"invariant","cardinality":"exclusive","is_permanent":0.93,"is_global_invariant":0.91,"confidence":0.94,"action":"INSERT","conflict_fact_ids":[]}
+			]}`
 		default:
 			mutCalls.Add(1)
-			if barrierOn.Load() {
-				select {
-				case evalEntered <- struct{}{}:
-				default:
-				}
-				select {
-				case <-verifyEntered:
-					once.Do(func() { close(bothEntered) })
-				case <-time.After(500 * time.Millisecond):
-				}
+			if failOnce.CompareAndSwap(true, false) {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(`{"error":{"message":"transient error"}}`))
+				return
 			}
-			content = `{"category":"architecture","sub_category":"core","tags":[],"tier":"invariant","cardinality":"singleton","is_permanent":0.93,"is_global_invariant":0.91,"confidence":0.94,"action":"INSERT","conflict_fact_ids":[]}`
+			content = `{"category":"architecture","sub_category":"core","tags":[],"tier":"invariant","cardinality":"exclusive","is_permanent":0.93,"is_global_invariant":0.91,"confidence":0.94,"action":"INSERT","conflict_fact_ids":[]}`
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"content":%q}}]}`, content)
@@ -327,7 +309,6 @@ func TestParallelGuardrailHookAndConcurrentCommitBatch(t *testing.T) {
 		t.Fatalf("ExecuteHook claude-turn: %v", err)
 	}
 
-	barrierOn.Store(true)
 	guardPayload, _ := json.Marshal(map[string]any{
 		"session_id": "sess-parallel",
 		"cwd":        workDir,
@@ -336,22 +317,19 @@ func TestParallelGuardrailHookAndConcurrentCommitBatch(t *testing.T) {
 			"command": "CGO_ENABLED=1 go build ./...",
 		},
 	})
+	// Transient error on EvaluateMutation must reset gate_checked so the next tool call still enforces PRE-MUTATE GATE.
+	failOnce.Store(true)
+	_, _, _ = st.gr.ExecuteHook(ctx, "claude-pretool", guardPayload, workDir)
+
 	guardOut, _, err := st.gr.ExecuteHook(ctx, "claude-pretool", guardPayload, workDir)
 	if err != nil {
 		t.Fatalf("ExecuteHook claude-pretool: %v", err)
 	}
-	barrierOn.Store(false)
-
-	select {
-	case <-bothEntered:
-	default:
-		t.Fatalf("expected EvaluateMutation and VerifyPlan HTTP requests to execute concurrently in guardrail hook")
-	}
 	if !strings.Contains(guardOut, "PRE-MUTATE GATE") {
-		t.Fatalf("expected PRE-MUTATE GATE block on un-committed rule, got:\n%s", guardOut)
+		t.Fatalf("expected PRE-MUTATE GATE block on un-committed rule after retry, got:\n%s", guardOut)
 	}
 
-	// Part B: Verify CommitBatch evaluates multiple unique candidates concurrently while skipping duplicates in batch
+	// Part B: Verify CommitBatch evaluates multiple unique candidates in a single EvaluateMutations pass while skipping duplicates in batch
 	mutCalls.Store(0)
 	batchSvc, err := memory.Open(":memory:", adapter)
 	if err != nil {
@@ -369,8 +347,8 @@ func TestParallelGuardrailHookAndConcurrentCommitBatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CommitBatch: %v", err)
 	}
-	if mutCalls.Load() != 4 {
-		t.Fatalf("expected 4 unique EvaluateMutation calls (skipping 1 duplicate in batch), got %d", mutCalls.Load())
+	if mutCalls.Load() != 1 {
+		t.Fatalf("expected 1 batched EvaluateMutations call for 4 unique candidates (skipping 1 duplicate in batch), got %d", mutCalls.Load())
 	}
 	if !strings.Contains(res, "SKIPPED (duplicate in batch") {
 		t.Fatalf("expected duplicate-in-batch notice in CommitBatch output, got:\n%s", res)
@@ -382,27 +360,11 @@ func TestParallelGuardrailHookAndConcurrentCommitBatch(t *testing.T) {
 }
 
 type guardrailAuditEval struct {
+	stubEval
 	violate bool
 }
 
 func (e *guardrailAuditEval) Name() string { return "guardrail-audit-eval" }
-func (e *guardrailAuditEval) ScoreRelevance(_ context.Context, _ string, facts []domain.Fact) ([]domain.ScoredFact, error) {
-	out := make([]domain.ScoredFact, len(facts))
-	for i, f := range facts {
-		out[i] = domain.ScoredFact{Fact: f, Score: 4.5, Confidence: 0.92}
-	}
-	return out, nil
-}
-func (e *guardrailAuditEval) EvaluateMutation(_ context.Context, _ string, _ string, _ []domain.Fact) (domain.MutationDecision, error) {
-	return domain.MutationDecision{
-		Category:          "architecture",
-		Tier:              "invariant",
-		IsPermanent:       0.95,
-		IsGlobalInvariant: 0.92,
-		Action:            "INSERT",
-		Confidence:        0.96,
-	}, nil
-}
 func (e *guardrailAuditEval) VerifyPlan(_ context.Context, _ string, rules []domain.Fact) ([]domain.PlanViolation, error) {
 	if !e.violate || len(rules) == 0 {
 		return nil, nil
@@ -420,7 +382,18 @@ func (e *guardrailAuditEval) SynthesizeConsolidation(_ context.Context, _ string
 
 func TestGuardrailLogsAuditPaginationAndIsolation(t *testing.T) {
 	ctx := context.Background()
-	eval := &guardrailAuditEval{}
+	eval := &guardrailAuditEval{
+		stubEval: stubEval{
+			dec: domain.MutationDecision{
+				Category:          "architecture",
+				Tier:              "invariant",
+				IsPermanent:       0.95,
+				IsGlobalInvariant: 0.92,
+				Action:            "INSERT",
+				Confidence:        0.96,
+			},
+		},
+	}
 	st := newTestStack(t, ":memory:", eval)
 
 	if _, err := st.mem.CommitMemory(ctx, "CGO_ENABLED=0 순수 Go 바이너리 빌드만 허용하며 C 바인딩을 금지한다", "architecture", "project:guard"); err != nil {

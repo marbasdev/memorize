@@ -31,7 +31,7 @@ func TestRetentionAndCleanupProgressAndGuardrailLogs(t *testing.T) {
 		t.Fatalf("expected default forever (0d) retention policy, got: %+v", defPol)
 	}
 
-	// 2. Commit 2 memories (auto-linked into done progress row) + add ongoing in_progress & planned tracks + 1 recent done row
+	// 2. Commit 2 memories (auto-linked into activity row) + add 2 older tracks + 1 recent track
 	scope := "project:ret"
 	if _, err := st.mem.CommitMemoryFull(ctx, "첫 번째 보관 정책 불변 규칙", "architecture", "storage", "", scope); err != nil {
 		t.Fatalf("Commit 1: %v", err)
@@ -39,36 +39,33 @@ func TestRetentionAndCleanupProgressAndGuardrailLogs(t *testing.T) {
 	if _, err := st.mem.CommitMemoryFull(ctx, "두 번째 보관 정책 불변 규칙", "architecture", "storage", "", scope); err != nil {
 		t.Fatalf("Commit 2: %v", err)
 	}
-	inProgRec, err := st.prog.RecordProgress(ctx, domain.ProgressInput{
+	oldTrackA, err := st.prog.RecordProgress(ctx, domain.ProgressInput{
 		Scope:    scope,
-		Track:    "장기 진행 트랙",
-		Status:   domain.ProgressStatusInProgress,
-		Summary:  "15일째 진행 중인 작업",
-		NextStep: "마무리 테스트",
+		Track:    "오래된 작업 트랙 A",
+		Summary:  "15일 전 완료된 작업 A",
+		NextStep: "후속 검증 메모",
 	})
 	if err != nil {
-		t.Fatalf("RecordProgress in_progress: %v", err)
+		t.Fatalf("RecordProgress oldTrackA: %v", err)
 	}
-	plannedRec, err := st.prog.RecordProgress(ctx, domain.ProgressInput{
+	oldTrackB, err := st.prog.RecordProgress(ctx, domain.ProgressInput{
 		Scope:   scope,
-		Track:   "장기 예정 트랙",
-		Status:  domain.ProgressStatusPlanned,
-		Summary: "15일 전 등록된 예정 작업",
+		Track:   "오래된 작업 트랙 B",
+		Summary: "15일 전 완료된 작업 B",
 	})
 	if err != nil {
-		t.Fatalf("RecordProgress planned: %v", err)
+		t.Fatalf("RecordProgress oldTrackB: %v", err)
 	}
 	recentDone, err := st.prog.RecordProgress(ctx, domain.ProgressInput{
 		Scope:   scope,
 		Track:   "오늘 완료 트랙",
-		Status:  domain.ProgressStatusDone,
 		Summary: "방금 완료된 최신 작업",
 	})
 	if err != nil {
 		t.Fatalf("RecordProgress recent done: %v", err)
 	}
 
-	// Backdate the memory-linked done row AND the in_progress/planned rows to -15 days
+	// Backdate the memory-linked row AND the two older tracks to -15 days
 	rawDB, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatalf("sql.Open: %v", err)
@@ -82,28 +79,24 @@ func TestRetentionAndCleanupProgressAndGuardrailLogs(t *testing.T) {
 		t.Fatalf("backdate project_progress: %v", err)
 	}
 
-	// Clean done history older than 7 days: must delete ONLY the old done row, preserving old in_progress & planned AND recent done!
+	// Clean history older than 7 days: must delete all 3 -15d rows while preserving the recent entry!
 	deletedProg, err := st.prog.CleanupProgressHistory(ctx, scope, 7)
 	if err != nil {
 		t.Fatalf("CleanupProgressHistory(7): %v", err)
 	}
-	if deletedProg != 1 {
-		t.Fatalf("expected 1 old done row deleted, got %d", deletedProg)
+	if deletedProg != 3 {
+		t.Fatalf("expected 3 old rows deleted, got %d", deletedProg)
 	}
 
-	ovAfter, err := st.prog.GetProgressOverview(ctx, scope, "", "all", "")
+	ovAfter, err := st.prog.GetProgressOverview(ctx, scope, "", "")
 	if err != nil {
 		t.Fatalf("GetProgressOverview: %v", err)
 	}
-	if ovAfter.TotalCount != 3 {
-		t.Fatalf("expected 3 remaining rows (in_progress + planned + recent done), got %d: %+v", ovAfter.TotalCount, ovAfter.Records)
+	if ovAfter.TotalCount != 1 {
+		t.Fatalf("expected 1 remaining recent row, got %d: %+v", ovAfter.TotalCount, ovAfter.Records)
 	}
-	seenIDs := map[int64]bool{}
-	for _, r := range ovAfter.Records {
-		seenIDs[r.ID] = true
-	}
-	if !seenIDs[inProgRec.ID] || !seenIDs[plannedRec.ID] || !seenIDs[recentDone.ID] {
-		t.Fatalf("expected active & recent records preserved, got %+v", ovAfter.Records)
+	if ovAfter.Records[0].ID != recentDone.ID || ovAfter.Records[0].ID == oldTrackA.ID || ovAfter.Records[0].ID == oldTrackB.ID {
+		t.Fatalf("expected only recent record %d preserved, got %+v", recentDone.ID, ovAfter.Records)
 	}
 
 	// Watermark protection: pruned active memories #1 and #2 must NOT show up as unlinked or resurrect on SyncProjectProgress!

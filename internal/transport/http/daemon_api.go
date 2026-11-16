@@ -14,11 +14,13 @@ import (
 
 	"memorize/internal/domain"
 	"memorize/internal/modules/guardrail"
+	"memorize/internal/modules/memory"
 	transportmcp "memorize/internal/transport/mcp"
 )
 
 // DaemonDeps wires unified daemon HTTP routes to MCP, Guardrail, Dashboard, and process control callbacks.
 type DaemonDeps struct {
+	Memory        *memory.Service
 	Guardrail     *guardrail.Service
 	MCPServer     *server.MCPServer
 	Dashboard     http.Handler
@@ -215,6 +217,8 @@ func NewDaemonMux(deps DaemonDeps) http.Handler {
 			"exit_code": code,
 		})
 	})
+
+	registerSyncDaemonRoutes(mux, deps.Memory)
 
 	if deps.Dashboard != nil {
 		mux.Handle("/", deps.Dashboard)

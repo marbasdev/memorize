@@ -2,22 +2,12 @@ package domain
 
 import (
 	"strings"
-	"time"
 )
 
 const (
-	ProgressStatusPlanned    = "planned"
-	ProgressStatusInProgress = "in_progress"
-	ProgressStatusNeedsSync  = "needs_sync"
-	ProgressStatusBlocked    = "blocked"
-	ProgressStatusDone       = "done"
-
 	ProgressKindWork   = "work"
 	ProgressKindMemory = "memory"
 	ProgressKindGit    = "git"
-
-	// LiveSessionTTL expires abandoned in-memory sessions lazily on read with no background sweeper.
-	LiveSessionTTL = 90 * time.Second
 )
 
 // ProgressWorkKind classifies a progress entry into work, memory, or git.
@@ -45,22 +35,6 @@ func ProjectShortName(scope string) string {
 		return "global"
 	}
 	return sc
-}
-
-// NormalizeProgressStatus maps status aliases onto canonical progress states.
-func NormalizeProgressStatus(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "planned", "todo", "pending", "예정":
-		return ProgressStatusPlanned
-	case "in_progress", "in-progress", "working", "doing", "active", "진행중", "진행":
-		return ProgressStatusInProgress
-	case "blocked", "hold", "보류", "막힘":
-		return ProgressStatusBlocked
-	case "done", "completed", "complete", "완료", "needs_sync", "needs-sync", "sync", "review", "확인필요":
-		return ProgressStatusDone
-	default:
-		return ProgressStatusInProgress
-	}
 }
 
 // EffectiveProgressTrack resolves a human-readable work stream / topic name.
@@ -123,7 +97,6 @@ type ProgressRecord struct {
 	Track        string   `json:"track"`
 	Category     string   `json:"category"`
 	SubCategory  string   `json:"sub_category,omitempty"`
-	Status       string   `json:"status"`
 	Summary      string   `json:"summary"`
 	Details      string   `json:"details,omitempty"`
 	DetailsLines []string `json:"details_lines,omitempty"`
@@ -137,14 +110,13 @@ type ProgressRecord struct {
 	UpdatedAt    string   `json:"updated_at"`
 }
 
-// ProgressInput captures fields to insert or merge into project_progress.
+// ProgressInput captures fields to insert or update in project_progress.
 type ProgressInput struct {
 	Scope       string
 	SessionID   string
 	Track       string
 	Category    string
 	SubCategory string
-	Status      string
 	Summary     string
 	Details     string
 	NextStep    string
@@ -153,29 +125,21 @@ type ProgressInput struct {
 	Source      string
 }
 
-// ProgressTrackSummary aggregates progress counts for one work track.
+// ProgressTrackSummary aggregates activity counts for one work track.
 type ProgressTrackSummary struct {
-	Scope             string  `json:"scope"`
-	ProjectName       string  `json:"project_name"`
-	SessionID         string  `json:"session_id,omitempty"`
-	Kind              string  `json:"kind"`
-	Track             string  `json:"track"`
-	Category          string  `json:"category,omitempty"`
-	SubCategory       string  `json:"sub_category,omitempty"`
-	Status            string  `json:"status"`
-	LatestID          int64   `json:"latest_id"`
-	LatestSummary     string  `json:"latest_summary"`
-	LatestNextStep    string  `json:"latest_next_step,omitempty"`
-	LatestUpdatedAt   string  `json:"latest_updated_at"`
-	TotalCount        int     `json:"total_count"`
-	DoneCount         int     `json:"done_count"`
-	InProgressCount   int     `json:"in_progress_count"`
-	NeedsSyncCount    int     `json:"needs_sync_count"`
-	PlannedCount      int     `json:"planned_count"`
-	BlockedCount      int     `json:"blocked_count"`
-	ActiveCount       int     `json:"active_count"`
-	DonePct           float64 `json:"done_pct"`
-	LinkedMemoryCount int     `json:"linked_memory_count"`
+	Scope             string `json:"scope"`
+	ProjectName       string `json:"project_name"`
+	SessionID         string `json:"session_id,omitempty"`
+	Kind              string `json:"kind"`
+	Track             string `json:"track"`
+	Category          string `json:"category,omitempty"`
+	SubCategory       string `json:"sub_category,omitempty"`
+	LatestID          int64  `json:"latest_id"`
+	LatestSummary     string `json:"latest_summary"`
+	LatestNextStep    string `json:"latest_next_step,omitempty"`
+	LatestUpdatedAt   string `json:"latest_updated_at"`
+	TotalCount        int    `json:"total_count"`
+	LinkedMemoryCount int    `json:"linked_memory_count"`
 }
 
 // ProgressDateGroup groups progress records under one YYYY-MM-DD header.
@@ -189,13 +153,6 @@ type ProgressCategorySummary struct {
 	Category          string   `json:"category"`
 	SubCategories     []string `json:"sub_categories,omitempty"`
 	TotalCount        int      `json:"total_count"`
-	DoneCount         int      `json:"done_count"`
-	InProgressCount   int      `json:"in_progress_count"`
-	NeedsSyncCount    int      `json:"needs_sync_count"`
-	PlannedCount      int      `json:"planned_count"`
-	BlockedCount      int      `json:"blocked_count"`
-	DonePct           float64  `json:"done_pct"`
-	LatestStatus      string   `json:"latest_status"`
 	LatestSummary     string   `json:"latest_summary"`
 	LatestNextStep    string   `json:"latest_next_step,omitempty"`
 	LatestUpdatedAt   string   `json:"latest_updated_at"`
@@ -219,31 +176,27 @@ type ProgressSyncResult struct {
 	HeadCommit     string `json:"head_commit,omitempty"`
 	SyncedMemories int    `json:"synced_memories"`
 	SyncedCommits  int    `json:"synced_commits"`
-	ResolvedSyncs  int    `json:"resolved_syncs"`
 }
 
-// ProgressNextStepItem highlights a next step surfaced on the progress dashboard.
-type ProgressNextStepItem struct {
-	ID            int64  `json:"id"`
-	Scope         string `json:"scope"`
-	ProjectName   string `json:"project_name"`
-	SessionID     string `json:"session_id,omitempty"`
-	Kind          string `json:"kind"`
-	Track         string `json:"track"`
-	Status        string `json:"status"`
-	NextStep      string `json:"next_step"`
-	ParentSummary string `json:"parent_summary"`
-	UpdatedAt     string `json:"updated_at"`
+// ProgressProjectSummary aggregates recent activity counts and flow for one project scope.
+type ProgressProjectSummary struct {
+	Scope           string           `json:"scope"`
+	ProjectName     string           `json:"project_name"`
+	LatestUpdatedAt string           `json:"latest_updated_at"`
+	TotalCount      int              `json:"total_count"`
+	WorkCount       int              `json:"work_count"`
+	MemoryCount     int              `json:"memory_count"`
+	GitCount        int              `json:"git_count"`
+	RecentHistory   []ProgressRecord `json:"recent_history,omitempty"`
 }
 
-// ProgressQuery filters progress board and timeline queries.
+// ProgressQuery filters progress activity board and timeline queries.
 type ProgressQuery struct {
 	Scope        string
 	Kind         string
 	SessionID    string
 	Track        string
 	Category     string
-	Status       string
 	DoneWindow   string
 	ExplicitRepo string
 	Page         int
@@ -258,14 +211,9 @@ type ProgressOverview struct {
 	Page            int                       `json:"page"`
 	PageSize        int                       `json:"page_size"`
 	TotalPages      int                       `json:"total_pages"`
-	StatusCounts    map[string]int            `json:"status_counts"`
 	KindCounts      map[string]int            `json:"kind_counts,omitempty"`
-	Sessions        []SessionSummary          `json:"sessions,omitempty"`
-	ActiveTracks    []ProgressTrackSummary    `json:"active_tracks"`
-	DoingTracks     []ProgressTrackSummary    `json:"doing_tracks"`
-	PlannedTracks   []ProgressTrackSummary    `json:"planned_tracks"`
-	NextStepItems   []ProgressNextStepItem    `json:"next_step_items"`
-	RecentDone      []ProgressRecord          `json:"recent_done"`
+	Projects        []ProgressProjectSummary  `json:"projects"`
+	RecentHistory   []ProgressRecord          `json:"recent_history"`
 	DoneWindow      string                    `json:"done_window,omitempty"`
 	DoneWindowTotal int                       `json:"done_window_total,omitempty"`
 	DoneWindowStart string                    `json:"done_window_start,omitempty"`
@@ -275,19 +223,4 @@ type ProgressOverview struct {
 	Timeline        []ProgressDateGroup       `json:"timeline"`
 	Records         []ProgressRecord          `json:"records"`
 	Sync            ProgressSyncState         `json:"sync"`
-}
-
-// LiveSession represents an ephemeral active IDE/MCP session kept strictly in memory.
-type LiveSession struct {
-	SessionID     string  `json:"session_id"`
-	Scope         string  `json:"scope"`
-	Project       string  `json:"project"`
-	Tool          string  `json:"tool,omitempty"`
-	Target        string  `json:"target,omitempty"`
-	StartedAt     string  `json:"started_at,omitempty"`
-	UpdatedAt     string  `json:"updated_at"`
-	AgeSec        int64   `json:"age_sec"`
-	SessionAgeSec int64   `json:"session_age_sec,omitempty"`
-	HookCalls     int     `json:"hook_calls,omitempty"`
-	HookElapsedMs float64 `json:"hook_elapsed_ms,omitempty"`
 }

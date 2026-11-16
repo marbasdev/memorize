@@ -31,17 +31,24 @@ type MutationEvent struct {
 // MutationListener receives notifications whenever active memory facts are created, updated, or consolidated.
 type MutationListener func(ctx context.Context, ev MutationEvent)
 
+// ExtraFactsProvider injects read-only external facts (such as declarative Team Rule Pack rules)
+// into retrieval queries without exposing them to local mutations, consolidation, or overwrites.
+type ExtraFactsProvider interface {
+	LoadExtraFacts(ctx context.Context, scopeA, scopeB, category string) ([]domain.Fact, error)
+}
+
 // Service owns persistent long-term memory storage, relevance retrieval, taxonomy, consolidation, and Git rule sync.
 type Service struct {
-	db           *sql.DB
-	dbPath       string
-	router       *router.Router
-	bus          *eventbus.Bus
-	mu           sync.Mutex
-	sent         map[string]map[int64]bool
-	syncSeen     map[string]string
-	autoGitSync  bool
-	mutListeners []MutationListener
+	db             *sql.DB
+	dbPath         string
+	router         *router.Router
+	bus            *eventbus.Bus
+	mu             sync.Mutex
+	sent           map[string]map[int64]bool
+	syncSeen       map[string]string
+	autoGitSync    bool
+	mutListeners   []MutationListener
+	extraProviders []ExtraFactsProvider
 }
 
 // New constructs a memory Service from shared infrastructure components.
@@ -119,6 +126,45 @@ func (s *Service) emitMutation(ctx context.Context, ev MutationEvent) {
 	s.mu.Unlock()
 	for _, fn := range listeners {
 		fn(ctx, ev)
+	}
+}
+
+// AttachExtraFactsProvider registers a read-only provider whose facts participate in retrieval queries only.
+func (s *Service) AttachExtraFactsProvider(p ExtraFactsProvider) {
+	if p == nil {
+		return
+	}
+	s.mu.Lock()
+	s.extraProviders = append(s.extraProviders, p)
+	s.mu.Unlock()
+}
+
+// InvalidateSessionIDs drops session delivery watermarks for ids so updated rules re-deliver cleanly.
+func (s *Service) InvalidateSessionIDs(ctx context.Context, ids ...int64) {
+	if len(ids) == 0 {
+		return
+	}
+	idSet := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		if id > 0 {
+			idSet[id] = true
+		}
+	}
+	if len(idSet) == 0 {
+		return
+	}
+	s.mu.Lock()
+	for _, seen := range s.sent {
+		for id := range idSet {
+			delete(seen, id)
+		}
+	}
+	s.mu.Unlock()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for id := range idSet {
+		_, _ = s.db.ExecContext(ctx, `DELETE FROM session_sent WHERE memory_id = ?`, id)
 	}
 }
 
@@ -201,6 +247,8 @@ func parseTagStr(raw string) []string {
 	return strings.Fields(raw)
 }
 
+const factSelectColumns = `id, scope, COALESCE(account, ''), category, COALESCE(sub_category, ''), tags, content, pinned`
+
 // LoadActiveFacts loads active facts matching up to three scopes and an optional category filter.
 func (s *Service) LoadActiveFacts(ctx context.Context, scopeA, scopeB, category string, extraScopes ...string) ([]domain.Fact, error) {
 	scopeC := scopeA
@@ -217,7 +265,7 @@ func (s *Service) LoadActiveFacts(ctx context.Context, scopeA, scopeB, category 
 	}
 	acc := s.CurrentAccount(ctx)
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, scope, COALESCE(account, ''), category, COALESCE(sub_category, ''), tags, content, pinned
+		`SELECT `+factSelectColumns+`
 		 FROM memories
 		 WHERE active = 1 AND scope IN (?, ?, ?)
 		   AND (scope != 'personal' OR account = ?)
@@ -228,7 +276,10 @@ func (s *Service) LoadActiveFacts(ctx context.Context, scopeA, scopeB, category 
 		return nil, err
 	}
 	defer rows.Close()
+	return scanFactRows(rows)
+}
 
+func scanFactRows(rows *sql.Rows) ([]domain.Fact, error) {
 	var facts []domain.Fact
 	for rows.Next() {
 		var f domain.Fact
@@ -241,8 +292,27 @@ func (s *Service) LoadActiveFacts(ctx context.Context, scopeA, scopeB, category 
 		f.Tags = parseTagStr(tagStr)
 		facts = append(facts, f)
 	}
-	if err := rows.Err(); err != nil {
+	return facts, rows.Err()
+}
+
+// loadQueryFacts combines active local memories with read-only external facts (e.g. Team Rules)
+// for query/session retrieval only, keeping write mutations strictly isolated to local memories.
+func (s *Service) loadQueryFacts(ctx context.Context, scopeA, scopeB, category string, extraScopes ...string) ([]domain.Fact, error) {
+	facts, err := s.LoadActiveFacts(ctx, scopeA, scopeB, category, extraScopes...)
+	if err != nil {
 		return nil, err
+	}
+	s.mu.Lock()
+	providers := append([]ExtraFactsProvider(nil), s.extraProviders...)
+	s.mu.Unlock()
+	for _, p := range providers {
+		extra, err := p.LoadExtraFacts(ctx, scopeA, scopeB, category)
+		if err != nil {
+			return nil, err
+		}
+		if len(extra) > 0 {
+			facts = append(facts, extra...)
+		}
 	}
 	return facts, nil
 }
@@ -267,23 +337,20 @@ func (s *Service) FactsByIDs(ctx context.Context, ids []int64) (map[int64]domain
 	if len(ph) == 0 {
 		return out, nil
 	}
-	q := fmt.Sprintf(`SELECT id, scope, COALESCE(account, ''), category, COALESCE(sub_category, ''), tags, content, pinned FROM memories WHERE id IN (%s)`, strings.Join(ph, ","))
+	q := fmt.Sprintf(`SELECT %s FROM memories WHERE id IN (%s)`, factSelectColumns, strings.Join(ph, ","))
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	for rows.Next() {
-		var f domain.Fact
-		var tagStr string
-		var pin int
-		if err := rows.Scan(&f.ID, &f.Scope, &f.Account, &f.Category, &f.SubCategory, &tagStr, &f.Content, &pin); err == nil {
-			f.Pinned = pin == 1
-			f.Tags = parseTagStr(tagStr)
-			out[f.ID] = f
-		}
+	facts, err := scanFactRows(rows)
+	if err != nil {
+		return nil, err
 	}
-	return out, rows.Err()
+	for _, f := range facts {
+		out[f.ID] = f
+	}
+	return out, nil
 }
 
 func formatFactLine(f domain.Fact, suffix string, compact bool) string {
@@ -299,10 +366,18 @@ func formatFactLine(f domain.Fact, suffix string, compact bool) string {
 		catLabel = f.Category + "/" + f.SubCategory
 	}
 	var line string
-	if compact {
-		line = fmt.Sprintf("- [#%d %s/%s] %s%s", f.ID, f.Scope, catLabel, f.Content, suffix)
+	if f.IsTeam() {
+		if compact {
+			line = fmt.Sprintf("- [TEAM %s/%s] %s%s", f.Scope, catLabel, f.Content, suffix)
+		} else {
+			line = fmt.Sprintf("- **[%s / %s TEAM]**%s %s%s", f.Scope, catLabel, tagPart, f.Content, suffix)
+		}
 	} else {
-		line = fmt.Sprintf("- **[%s / %s #%d]**%s %s%s", f.Scope, catLabel, f.ID, tagPart, f.Content, suffix)
+		if compact {
+			line = fmt.Sprintf("- [#%d %s/%s] %s%s", f.ID, f.Scope, catLabel, f.Content, suffix)
+		} else {
+			line = fmt.Sprintf("- **[%s / %s #%d]**%s %s%s", f.Scope, catLabel, f.ID, tagPart, f.Content, suffix)
+		}
 	}
 	if len(f.Superseded) > 0 {
 		line += fmt.Sprintf(" *(Replaces: %s)*", strings.Join(f.Superseded, "; "))
@@ -325,7 +400,7 @@ func (s *Service) evaluateRelevance(ctx context.Context, rawScope, category, que
 	if strings.HasPrefix(scA, "project:") && s.IncludePersonalInProject(ctx) {
 		extraScopes = append(extraScopes, "personal")
 	}
-	facts, err := s.LoadActiveFacts(ctx, scA, scB, category, extraScopes...)
+	facts, err := s.loadQueryFacts(ctx, scA, scB, category, extraScopes...)
 	if err != nil {
 		return scA, 0, nil, nil, nil, err
 	}
@@ -438,12 +513,20 @@ func (s *Service) applyEvaluatedCommit(ctx context.Context, targetScope, candida
 	}
 
 	if dec.Action == "IGNORE" && len(targetIDs) > 0 {
-		for _, id := range targetIDs {
-			_, _ = s.db.ExecContext(ctx,
-				`UPDATE memories SET confidence = MIN(1.0, 1.0 - (1.0 - confidence) * 0.8)
-				 WHERE id = ? AND scope = ? AND (scope != 'personal' OR account = ?) AND active = 1`,
-				id, targetScope, acc)
-		}
+		_ = s.withTx(ctx, func(tx *sql.Tx) error {
+			for _, id := range targetIDs {
+				res, uerr := tx.ExecContext(ctx,
+					`UPDATE memories SET confidence = MIN(1.0, 1.0 - (1.0 - confidence) * 0.8)
+					 WHERE id = ? AND scope = ? AND (scope != 'personal' OR account = ?) AND active = 1`,
+					id, targetScope, acc)
+				if uerr == nil {
+					if n, _ := res.RowsAffected(); n > 0 {
+						_ = recordMemoryTxInTx(ctx, tx, "", id, domain.SyncOpUpsert, "", 0)
+					}
+				}
+			}
+			return nil
+		})
 		s.MarkTurnScopeMutated(targetScope)
 		return fmt.Sprintf("SKIPPED (duplicate confirmed in %s; boosted confidence of %v)", targetScope, targetIDs), nil
 	}
@@ -459,43 +542,48 @@ func (s *Service) applyEvaluatedCommit(ctx context.Context, targetScope, candida
 		pinned = 1
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return "", err
-	}
-	defer tx.Rollback()
-
-	res, err := tx.ExecContext(ctx,
-		`INSERT INTO memories (scope, account, category, sub_category, tags, content, confidence, pinned, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-		targetScope, acc, cat, subCat, tagStr, strings.TrimSpace(candidateFact), dec.Confidence, pinned)
-	if err != nil {
-		return "", err
-	}
-	newID, _ := res.LastInsertId()
-
 	catDisplay := cat
 	if subCat != "" {
 		catDisplay = cat + "/" + subCat
 	}
-	var status string
-	actionKind := "commit"
-	if dec.Action == "OVERWRITE" && len(targetIDs) > 0 {
-		actionKind = "overwrite"
-		for _, oldID := range targetIDs {
-			_, err := tx.ExecContext(ctx,
-				`UPDATE memories SET active = 0, superseded_by = ?
-				 WHERE id = ? AND scope = ? AND (scope != 'personal' OR account = ?) AND active = 1`,
-				newID, oldID, targetScope, acc)
-			if err != nil {
-				return "", err
-			}
+	var (
+		newID      int64
+		status     string
+		actionKind = "commit"
+	)
+	if err := s.withTx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx,
+			`INSERT INTO memories (scope, account, category, sub_category, tags, content, confidence, pinned, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+			targetScope, acc, cat, subCat, tagStr, strings.TrimSpace(candidateFact), dec.Confidence, pinned)
+		if err != nil {
+			return err
 		}
-		status = fmt.Sprintf("OVERWRITTEN (id=%d superseded %v, scope=%s, category=%s, tags=%v, pinned=%v)", newID, targetIDs, targetScope, catDisplay, tags, pinned == 1)
-	} else {
-		status = fmt.Sprintf("COMMITTED (id=%d, scope=%s, category=%s, tags=%v, pinned=%v)", newID, targetScope, catDisplay, tags, pinned == 1)
-	}
-
-	if err := tx.Commit(); err != nil {
+		newID, _ = res.LastInsertId()
+		if err := recordMemoryTxInTx(ctx, tx, "", newID, domain.SyncOpUpsert, "", 0); err != nil {
+			return err
+		}
+		if dec.Action == "OVERWRITE" && len(targetIDs) > 0 {
+			actionKind = "overwrite"
+			for _, oldID := range targetIDs {
+				resUpd, err := tx.ExecContext(ctx,
+					`UPDATE memories SET active = 0, superseded_by = ?
+					 WHERE id = ? AND scope = ? AND (scope != 'personal' OR account = ?) AND active = 1`,
+					newID, oldID, targetScope, acc)
+				if err != nil {
+					return err
+				}
+				if n, _ := resUpd.RowsAffected(); n > 0 {
+					if err := recordMemoryTxInTx(ctx, tx, "", oldID, domain.SyncOpUpsert, "", 0); err != nil {
+						return err
+					}
+				}
+			}
+			status = fmt.Sprintf("OVERWRITTEN (id=%d superseded %v, scope=%s, category=%s, tags=%v, pinned=%v)", newID, targetIDs, targetScope, catDisplay, tags, pinned == 1)
+		} else {
+			status = fmt.Sprintf("COMMITTED (id=%d, scope=%s, category=%s, tags=%v, pinned=%v)", newID, targetScope, catDisplay, tags, pinned == 1)
+		}
+		return nil
+	}); err != nil {
 		return "", err
 	}
 	s.MarkTurnScopeMutated(targetScope)
@@ -514,4 +602,8 @@ func (s *Service) applyEvaluatedCommit(ctx context.Context, targetScope, candida
 		Content:     candidateFact,
 	})
 	return status, nil
+}
+
+func (s *Service) withTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
+	return sqlite.WithTx(ctx, s.db, fn)
 }

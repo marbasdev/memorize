@@ -2,104 +2,48 @@
 
 [한국어 (ARCHITECTURE.ko.md)](./ARCHITECTURE.ko.md) | [Back to README](./README.md)
 
-## 1. Execution Pipeline
+## 1. Execution Pipeline & Guardrails
 
 ```mermaid
 flowchart LR
     A["Stdio Bridge / Streamable HTTP (/mcp) / Hook"] --> B["Unified Local Daemon (127.0.0.1:18095)"]
-    B --> C["Write Gatekeeper (transient drop / 1:N overwrite)"]
-    B --> D["Parallel Full-Scope Evaluator (relevance & verify)"]
-    D --> E["Session Delta & Revocation Filter"]
-    D --> F["PreToolUse / git pre-commit Guardrail"]
+    B --> C["Write Gatekeeper (noise drop / 1:N overwrite)"]
+    B --> D["Parallel Full-Scope Eval (System 1 & Gen Companion)"]
+    D --> E["Session Delta & [REVOKED] Filter"]
+    D --> F["Hybrid Guardrail (PreToolUse + Stop Auto-Fix + pre-commit)"]
 ```
 
-### 1.1 Unified Local Daemon (`127.0.0.1:18095`)
-- **Auto-Startup & Ownership**: Auto-spawned on the first `stdio` or hook invocation; owns SQLite (`WAL`), `llama-server` GGUF runtime (default `:18088`), the SSE Web Console, `/mcp`, `/api/daemon/mcp`, `/api/daemon/hook`, and `/api/daemon/port`.
-- **Port Persistence & Auto-Fallback**: Saves preferred ports to `ports.json` beside the DB and publishes the active bind address to `daemon.json`; port changes (`memorize daemon port` or the Web Console) and busy-port fallbacks are discovered automatically by CLI commands, hooks, and open `stdio` bridges.
-- **Reload Safety & Hook Budgets**: Hot-reloads versioned binary upgrades cleanly without breaking active chats (restricting CWD binary/live-asset hot-reload to `MEMORIZE_DEV_HOTRELOAD=1`), applies dynamic manifest-derived `timeout_ms` budgets (`git pre-commit` runs unbounded), and ships zero static `AGENTS.md`/`CLAUDE.md` rule files—driving behavior via MCP `serverInstructions`, hooks, and scoped SQLite rules.
+| Component | Responsibility | State / Interface |
+| :--- | :--- | :--- |
+| **Unified Daemon** | Auto-spawns on first MCP/hook call; owns SQLite (`WAL`), local `llama-server` (`:18088`), Web Console, and port fallback | `/mcp`, `/api/daemon/*`, SSE `/api/events`, `ports.json`, `daemon.json` |
+| **Write Gatekeeper** | Filters chatter (`transient`), atomically retires superseded rules (`1:N`), and emits replacement/`[REVOKED]` notices | `memories` (`core rule` / `pinned`, lineage `superseded_by`) |
+| **Session Delta & Recovery** | Skips already-delivered facts (`0` eval on repeat turns), evaluates unsent rules in parallel (`KV`-cached static prefix), and auto-restores after compaction | `session_sent`, `session_compacts` (`PostCompact`, `CHECKPOINT`) |
+| **System 1 & Routing** | Routes judgment tasks (`relevance`, `mutation`, `verify`, `calibrate`) to 0-output-token engines and synthesis (`consolidate`, `progress`, `taxonomy`) to companion gen models with `429`/`503` fallback | 7 `EvalTask` routes, `eval_telemetry` metrics |
+| **Isolated Stores & Team Pack** | Separates activity history (Auto-TTL) and guardrail audits from rules; parses `.memorize/TEAM_RULES.md` into an in-memory cache without a SQLite rule-body mirror | `project_progress`, `guardrail_logs`, `team_rule_*` states |
 
-### 1.2 Write Gatekeeper & Lineage
-- **Noise Filtering**: Classifies candidate facts into `invariant`, `rule`, `preference`, or `transient`, dropping ephemeral chatter.
-- **Atomic `1:N` Replacement**: On exclusive conflicts, retires prior rules atomically inside one transaction (`active=0, superseded_by=<new_id>`).
-- **Revocation Notices**: Injects one-time `*(Replaces: ...)*`, `*(Updated #id ...)*`, and `[REVOKED #id]` notices so active sessions stay aligned.
-
-### 1.3 Session Delta, Parallel Full Eval & Compaction Recovery
-- **Pre-Filter & Static-Prefix KV Cache**: Excludes already-delivered IDs via `session_sent` before scoring (`0` inference calls on unchanged repeat turns), and evaluates `100%` of unsent rules in parallel chunks (`static prefix + dynamic suffix`)—avoiding `TOP-K` blind spots while maximizing KV-cache reuse and keeping `System 2` coding LLM context minimal.
-- **Automatic Compaction Recovery**: Detects compaction via Claude Code (`PostCompact`, `SessionStart(source="compact")`) and Antigravity (`transcriptPath` incremental `CHECKPOINT` scanning via `session_compacts`), clearing stale `session_sent` rows and feeding the compacted summary back into scoring.
-
-### 1.4 Intuitive `System 1` Scoring, Task Routing & Telemetry
-- **Intuitive `System 1` & Companion Generation**: Routes single-pass `0`-output-token judgment tasks (`relevance`, `write_gate`, `verify`, `calibrate`) to `Jev / Flide` or `gemini-decision-1` (`/v1beta/decisions`), while isolating heavy text synthesis (`consolidate`, `progress`, `taxonomy`) on `gen_provider`/`gen_model`. *(Requires an active inference engine—Local GGUF download or API/URL—after initial install.)*
-- **Runtime Telemetry**: Persists per-task/per-engine counts, average & P95 latency, cumulative ms, and timeout/error totals in `eval_telemetry`, surfaced in the collapsible telemetry bar on the Engines tab.
-
-### 1.5 Isolated Stores (`project_progress`, Live Sessions & `guardrail_logs`)
-- **Minimalism & Zero-Heuristics**: Avoids hardcoded keyword lists, string scraping, custom DOM morphers, and background cleanup timers.
-- **Persistent Work Board & Ephemeral Live Sessions**: Separates `project_progress` (strictly explicit/Git/manual records) from `memories` to prevent false rule triggers, while active turn/tool heartbeats and cumulative hook timing live in an in-memory 90s-TTL `LiveSession` registry (`GET /api/live-sessions`, `event: live` SSE).
-- **Guardrail Audit & SSE Updates**: Tracks check latency in `guardrail_logs.elapsed_ms`, streams `event: change` partial UI swaps via `GET /api/events`, and supports Auto-TTL retention (`0` = Forever) plus PASS-first / watermark-safe cleanup.
+### Hybrid Guardrail Flow (`PreToolUse` + `Stop` + `git pre-commit`)
+1. **Exempt & Pre-Mutate Gate (`PreToolUse`)**: Read-only tools and safe read-only commands pass with `0` inference calls; if the current prompt introduced an uncommitted rule change, mutations pause immediately (`[MEMORIZE PRE-MUTATE GATE]`) until memory is updated.
+2. **Immediate Shell Block (`PreToolUse`)**: Irreversible shell commands and explicit plan checks verify upfront against active local and team rules before execution.
+3. **Turn Baseline Capture (`PreToolUse`)**: Interactive file edits pass without per-edit inference stalls after the pre-mutate gate, snapshotting each file's pre-turn disk baseline once into `turn_pending_edits`.
+4. **Turn-End Auto-Fix (`Stop`) & Commit Gate**: On normal turn completion, cumulative per-file turn diffs are verified once per scope; violations re-enter the agent loop for self-correction (guarding against re-entry loops and cancellations), backed by `memorize -hook git-precommit` on staged commits.
 
 ---
 
-## 2. Package Architecture
+## 2. Package Layering
 
-### 2.1 Directory Layout
+**Strict Acyclic DAG**: `domain -> infra -> inference -> modules -> transport -> app <- cmd/memorize`
+*(Lower layers never import higher layers; `cmd` injects `RuntimeHooks` into `transport/cli` so `transport/*` never imports `app/*`; production `git` execution stays confined to `internal/infra/git`.)*
 
-```text
-memorize/
-├── cmd/
-│   └── memorize/                  # Minimal entrypoint (main.go injects RuntimeHooks, delegates to transport/cli)
-│
-├── internal/
-│   ├── domain/                    # [1] Pure domain models & contracts (stdlib-only; zero DB/HTTP/Git deps)
-│   │                              #     Fact, Scope, Progress, GuardrailLog, Evaluator, ChangeEvent, secret redaction
-│   │
-│   ├── infra/                     # [2] Technical infrastructure (domain-agnostic, node-level plumbing)
-│   │   ├── config/                #     Env vars, data dir paths, atomic ports.json / daemon.json store
-│   │   ├── sqlite/                #     WAL SQLite connection, schema migrations, repo_sync helpers
-│   │   ├── git/                   #     Git root detection, HEAD / commit diff & log inspection
-│   │   └── eventbus/              #     In-process SSE change & live-session event broadcaster
-│   │
-│   ├── inference/                 # [3] AI inference engine layer (domain-rule independent)
-│   │   ├── router/                #     Per-task routing, 429 cooldown/fallback chain, eval_telemetry persistence
-│   │   ├── providers/             #     Gemini (incl. decisions), System 1 (Jev/Flide), OpenAI-compatible, GGUF
-│   │   ├── discovery/             #     Preset model catalog & local endpoint probing
-│   │   └── localmodel/            #     llama-server lifecycle & GGUF download manager (macOS/Linux local only)
-│   │
-│   ├── modules/                   # [4] Vertical business modules (isolated tables & rules -> strict SSOT)
-│   │   ├── memory/                #     Memory CRUD, 1:N supersession, session delta, consolidate, taxonomy, playbook
-│   │   ├── progress/              #     project_progress board, Git commit sync, live sessions, TTL retention
-│   │   └── guardrail/             #     IDE/Git hook dispatch, edit diff verification, guardrail_logs, onboarding
-│   │
-│   ├── transport/                 # [5] External protocol adapters (I/O translation only)
-│   │   ├── cli/                   #     Flags, stdio bridge client, daemon/port CLI, install (RuntimeHooks-injected)
-│   │   ├── mcp/                   #     MCP tool/resource/prompt registration & workspace scope resolver
-│   │   ├── http/                  #     Shared HTTP mux, /mcp & daemon bridge routes, loopback/CSRF guards
-│   │   └── dashboard/             #     HTMX SSR Web Console (templates/, assets/, i18n, tab handlers)
-│   │
-│   └── app/                       # [6] Execution mode composition (Wiring / Lifecycle)
-│       └── localdaemon/           #     Single local daemon startup, port fallback & versioned binary handover
-│
-└── plugins/                       # Agent plugin manifests, hook runners & skills (Claude Code, Antigravity)
-```
-
-### 2.2 Dependency & Isolation Rules
-- **Strict Acyclic Layering**: `domain -> infra -> inference -> modules -> transport -> app <- cmd/memorize`. Packages may only import lower layers, never higher layers (`domain` depends only on the Go standard library).
-- **Intra-Layer Dependencies**:
-  - `infra`: `sqlite` imports `config` and `git`; `eventbus`, `config`, and `git` stay mutually independent.
-  - `inference`: `router` imports `localmodel` and `providers`; `discovery` imports `providers`.
-  - `modules`: `guardrail` imports `progress` and `memory`; `progress` imports `memory` (vertical modules interact through service contracts rather than bypassing another module's tables).
-  - `transport`: `cli` and `dashboard` import `http`; `http` mounts `mcp` (sharing loopback/CSRF security guards and daemon bridge types).
-- **Decoupled Entrypoint (`RuntimeHooks`)**: `cmd/memorize/main.go` injects `localdaemon.Hooks` (`RuntimeHooks`) into `internal/transport/cli`, preventing `transport/*` from ever importing `app/*`.
-
-### 2.3 Local-Only vs. Syncable Boundary & `v1.1+` Extension Points
-Separating node infrastructure from portable domain state allows post-`v1.0` team server and cross-device sync features to plug in cleanly without rewriting core rules:
-
-| Boundary | Owned Packages | Responsibility |
+| Layer | Packages | Role & Boundary |
 | :--- | :--- | :--- |
-| **Local Node Only** | `infra/config`, `inference/localmodel`, `modules/guardrail`, `app/localdaemon` | API keys, loopback port/PID bindings, local `llama-server`/GGUF, machine hooks & live sessions |
-| **Syncable State** | `modules/memory`, `modules/progress` | Scoped memory lineage (`global`, `project:*`, `personal`) and explicit/Git project progress |
+| **1. Domain** | `internal/domain` | Stdlib-only core models & validation (`Fact`, `Scope`, `Progress`, `Evaluator`, `RulePack`, `Sync`, secret redaction) |
+| **2. Infra** | `internal/infra/{config,sqlite,git,ssh,eventbus}` | Paths/`ports.json` store, SQLite `WAL` & migrations, Git root/commit inspection + isolated `worktree` `push`, hardened SSH pipe *(dormant)*, SSE domain broadcaster |
+| **3. Inference** | `internal/inference/{router,providers,discovery,localmodel}` | Per-task router & `429`/`503` cooldown fallback, declarative provider adapters (`GGUF`, `Gemini`/`Decisions`, `Jev`/`Flide`, OpenAI-compatible), preset probing, local `llama-server` lifecycle (`macOS`/`Linux`) |
+| **4. Modules** | `internal/modules/{memory,progress,rulepack,guardrail}` | Memory CRUD/deltas/consolidation *(+ gated `sync_*`)*, `project_progress` & TTL, `.memorize/TEAM_RULES.md` isolated `push` + CAS & conflict pause gate (`ErrBranchProtected` without PR fallback), Hybrid `PreToolUse`+`Stop`+`pre-commit` guardrails & onboarding |
+| **5. Transport** | `internal/transport/{cli,mcp,http,dashboard}` | Flags/daemon/port CLI *(+ gated `sync` CLI)*, 6 MCP tools/resource/prompt + `ScopeResolver`, HTTP mux & loopback/CSRF guards *(+ gated `/api/daemon/sync`)*, 6-tab HTMX SSR Web Console *(Sync UI hidden/gated)* |
+| **6. App & CLI** | `cmd/memorize`, `internal/app/localdaemon` | Minimal entrypoint wiring, unified daemon lifecycle, port fallback & versioned binary handover |
 
-- **Planned `v1.1+` Extension Points** *(not present in the current tree)*:
-  - `internal/modules/sync`: Cross-device / team delta push & pull built on top of `memory` and `progress`.
-  - `internal/app/teamserver`: Shared server composition assembling auth/tenant middleware and `modules/sync` without `inference/localmodel`.
+- **Cross-Device Sync Status (`v1.1`)**: Transaction-log sync, conflict isolation, and SSH pipe packages are staged in-tree and strictly gated off (`IsMemorySyncEnabled() == false`, zero `memory_tx_log` writes) pending log compaction and snapshot bootstrap in a later release.
 
 ---
 
@@ -107,40 +51,30 @@ Separating node infrastructure from portable domain state allows post-`v1.0` tea
 
 | Kind | Name | Purpose |
 | :--- | :--- | :--- |
-| **Tool** | `query_project_memory` | Full-scope active rule evaluation (`project:<repo>`, `global`, `personal`) + session delta |
-| **Tool** | `commit_memory` | Single/batch candidate evaluation + Git `synced_commit` update |
-| **Tool** | `verify_plan_against_memory` | Pre-execution compliance check against active rules |
-| **Tool** | `manage_memory` | `update`, `forget`, `undo`, `consolidate`, `purge`, `skip_onboarding`, `reset_onboarding` |
-| **Tool** | `project_progress` | Separated 3-lane work (`planned` / `in_progress` / `blocked` / `done`) & Git sync: `record`, `update`, `list`, `sync`, `delete` |
-| **Resource** | `memorize://playbook/memory-curator` | Embedded operating playbook |
-| **Prompt** | `memory-curator` | On-demand memory curation prompt |
+| **Tool** | `query_project_memory` | Evaluate active rules (`project:<repo>`, `global`, `personal` + `[TEAM]` mirror) with session delta |
+| **Tool** | `commit_memory` | Single/batch rule evaluation (`INSERT`, `1:N` overwrite, drop) + optional `synced_commit` update |
+| **Tool** | `verify_plan_against_memory` | Pre-execution compliance check against active local and team rules |
+| **Tool** | `manage_memory` | `update`, `forget`, `undo`, `consolidate` (`<= 180` chars), `purge`, `skip_onboarding`, `reset_onboarding` |
+| **Tool** | `project_progress` | Chronological project activity feed (`work`, `memory`, `git` milestones): `record`, `update`, `list`, `sync`, `delete` |
+| **Tool** | `team_rules` | `.memorize/TEAM_RULES.md` workflow: `list`, `sync`, `add`, `promote`, `update`, `remove`, `resolve_conflict`, `duplicates`, `clean_duplicates`, `set_config` |
+| **Resource / Prompt** | `memorize://playbook/memory-curator` · `memory-curator` | Embedded memory curation playbook and prompt template |
 
 ---
 
-## 4. Environment Variables
+## 4. Environment Variables & CI/CD
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `MEMORY_DATA_DIR` | `~/.memorize` | Shared root directory for `memories.db`, `bin/`, `models/`, `ports.json`, and `daemon.json` (`%USERPROFILE%\.memorize` on Windows) |
-| `MEMORY_DB_PATH` | `~/.memorize/memories.db` | SQLite WAL DB path (`0600`) |
-| `MEMORY_MODELS_DIR` | `~/.memorize/models` | Local GGUF & `llama-server` directory (`macOS`/`Linux`) |
-| `MEMORY_PROVIDER` | `gguf` *(macOS/Linux)* / `local` *(Windows)* | `gguf`, `local`, `jev` / `flide`, or `gemini` |
-| `GEMINI_API_KEY` / `GEMINI_MODEL` | *(empty)* / `gemini-3.5-flash-lite` | Gemini API key & model (`gemini-decision-1` routes decision tasks to `/v1beta/decisions`) |
-| `JEV_API_URL` / `JEV_MODEL` | `http://127.0.0.1:8000` / `jev-latest` | System 1 API (`OmniJev/Flide` or TypeSafe Cloud; `TYPESAFE_API_KEY` optional locally) |
-| `LOCAL_MODEL_URL` / `LOCAL_MODEL_NAME` | `http://127.0.0.1:11434/v1` / *(auto)* | OpenAI-compatible server (`Ollama`, `LM Studio`, `vLLM`; `LOCAL_API_KEY` optional) |
-| `MEMORY_DAEMON_ADDR` | *(default `127.0.0.1:18095` or `ports.json`)* | Explicit daemon & dashboard bind address override |
-| `MEMORY_HOOK_TIMEOUT` | *(from manifest)* | Hook deadline override (`8s`, `0`/`off` for unlimited) |
-| `MEMORY_INCLUDE_PERSONAL` | `0` | Set `1` to include `personal` memories inside project queries |
-| `MEMORY_DISABLE_BG_DASHBOARD` | `0` | Set `1` for isolated inline MCP `stdio` mode |
-| `MEMORY_GUARDRAIL_FAIL_CLOSED` | `0` | Set `1` to deny tool execution when PreToolUse / guardrail verification fails or has no active engine |
-| `MEMORIZE_DEV_HOTRELOAD` | `0` | Opt-in dev mode (`1` enables CWD binary watching and live dashboard template/asset reload from disk) |
-| `MEMORIZE_DEV_BUILD` | `0` | Set `1` in `run-memorize.sh` to permit `go build` from local source instead of strict release archive SHA256 download |
-| `MEMORIZE_RELEASE_BASE_URL` | *(from `plugin.json`)* | Mirror URL; `GITHUB_TOKEN` / `MEMORIZE_GITLAB_TOKEN` for private releases |
+| `MEMORY_DATA_DIR` / `MEMORY_DB_PATH` | `~/.memorize` · `memories.db` | Shared data root (`%USERPROFILE%\.memorize` on Windows) and SQLite `WAL` path (`0600`) |
+| `MEMORY_MODELS_DIR` | `~/.memorize/models` | Local GGUF models & `llama-server` directory (`macOS`/`Linux`) |
+| `MEMORY_PROVIDER` | `gguf` *(Unix)* / `local` *(Windows)* | Active engine: `gguf`, `local`, `jev` / `flide`, or `gemini` |
+| `GEMINI_API_KEY` / `GEMINI_MODEL` | *(empty)* / `gemini-3.5-flash-lite` | Gemini key & model (`gemini-decision-1` uses `/v1beta/decisions`) |
+| `JEV_API_URL` / `JEV_MODEL` | `http://127.0.0.1:8000` / `jev-latest` | System 1 API endpoint/model (`TYPESAFE_API_KEY` for cloud) |
+| `LOCAL_MODEL_URL` / `LOCAL_MODEL_NAME` | `http://127.0.0.1:11434/v1` / *(auto)* | OpenAI-compatible local server (`Ollama`, `LM Studio`, `vLLM`) |
+| `MEMORY_DAEMON_ADDR` / `MEMORY_HOOK_TIMEOUT` | `ports.json` (`:18095`) / *(manifest)* | Explicit daemon address override and hook timeout (`8s`, `0`/`off`) |
+| `MEMORY_INCLUDE_PERSONAL` / `MEMORY_ACCOUNT` | `0` / *(OS user)* | Overlay `personal` memories in projects; isolate `personal` scope by user (`AGY_ACCOUNT` alias) |
+| `MEMORY_GIT_SYNC` / `MEMORY_AUTO_GIT_SYNC` | `0` / `0` | Enable manual/hook Git baseline onboarding & incremental commit rule sync |
+| `MEMORY_GUARDRAIL_FAIL_CLOSED` | `0` | Set `1` to block on `PreToolUse` / `Stop` / `git pre-commit` verification errors or missing engines |
 
----
-
-## 5. CI/CD Release Automation
-
-- **Pipelines**: [GitHub Actions CI (`ci.yml`)](./.github/workflows/ci.yml) · [GitHub Actions Release (`release.yml`)](./.github/workflows/release.yml) · [GitLab CI (`.gitlab-ci.yml`)](./.gitlab-ci.yml)
-- **Automated Test Matrix**: Cross-OS `go vet`, Unix `go test -v -race -count=1 ./...` (`ubuntu-latest`, `macos-latest`), and Windows `CGO_ENABLED=0 go test -v -count=1 ./...` (`windows-latest`)
-- **Release Artifacts (`v*.*.*` tags)**: Cross-compiles `CGO_ENABLED=0` archives (`darwin/arm64`, `darwin/amd64`, `linux/arm64`, `linux/amd64`, `windows/amd64`) plus `SHA256SUMS` automatically
+- **Additional Overrides**: `MEMORY_DEFAULT_SCOPE`, `MEMORY_DAEMON_LOG`, `MEMORY_DISABLE_BG_DASHBOARD`, `LOCAL_GGUF_URL`/`LOCAL_GGUF_MODEL`, `LOCAL_API_KEY`/`OPENAI_API_KEY`, `FLIDE_*`, `MEMORIZE_DEV_HOTRELOAD`, `MEMORIZE_DEV_BUILD`, `MEMORIZE_RELEASE_BASE_URL` (`GITHUB_TOKEN`/`MEMORIZE_GITLAB_TOKEN`).
+- **CI/CD Pipelines**: [GitHub CI (`ci.yml`)](./.github/workflows/ci.yml), [Release (`release.yml`)](./.github/workflows/release.yml), and [GitLab CI (`.gitlab-ci.yml`)](./.gitlab-ci.yml) verify `gofmt`, 5-target `CGO_ENABLED=0 go vet` + cross-builds (`darwin/arm64|amd64`, `linux/arm64|amd64`, `windows/amd64`), `-race -count=1` tests + Windows CGO-free tests, and publish `SHA256SUMS` archives on `v*.*.*` tags.

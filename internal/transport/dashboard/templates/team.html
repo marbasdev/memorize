@@ -1,0 +1,185 @@
+{{define "team_section"}}
+<div x-data="{ teamAddOpen: false, editAuthor: false }">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:0.65rem;margin-bottom:0.85rem;">
+    <div>
+      <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+        <h2 style="margin:0;font-size:1.02rem;">{{t .Lang "tab_team"}}</h2>
+        {{if gt .PendingConflicts 0}}
+          <span class="badge b-danger">{{.PendingConflicts}} conflict(s)</span>
+        {{end}}
+        {{if .ShortHash}}
+          <span class="badge b-muted" style="font-family:var(--mono);" title="{{.FileHash}}">#{{.ShortHash}}</span>
+        {{end}}
+        <span class="badge b-accent">{{.TotalRules}} rules</span>
+        {{if .Author}}
+          <button type="button" class="badge b-muted" style="font-family:var(--mono);cursor:pointer;border:1px solid var(--border);"
+            @click="editAuthor = !editAuthor" title="{{t .Lang "team_author_tip"}}">{{.Author}}</button>
+        {{end}}
+      </div>
+      <div style="font-size:0.76rem;color:var(--muted);margin-top:0.2rem;">
+        {{t .Lang "team_subtitle"}}{{if .RepoRoot}} · <span style="font-family:var(--mono);">{{.RepoRoot}}</span>{{end}}
+      </div>
+    </div>
+
+    <div style="display:flex;gap:0.4rem;flex-wrap:wrap;align-items:center;">
+      <button type="button" class="btn btn-sm" id="btnTeamSync"
+        {{if not .SelectedScope}}disabled{{end}}
+        hx-post="/ui/team/sync" hx-include="#teamFilterForm" hx-target="#teamSection" hx-swap="innerHTML">
+        {{t .Lang "team_btn_sync"}}
+      </button>
+      <button type="button" class="btn btn-sm" id="btnTeamDupes"
+        {{if not .SelectedScope}}disabled{{end}}
+        hx-get="/ui/modal/team-duplicates" hx-include="#teamFilterForm" hx-target="#modalHost" hx-swap="innerHTML">
+        {{t .Lang "team_btn_dupes"}}
+      </button>
+      <button type="button" class="btn btn-primary btn-sm" id="btnTeamToggleAdd"
+        {{if not .SelectedScope}}disabled{{end}}
+        @click="teamAddOpen = !teamAddOpen">
+        {{t .Lang "team_btn_add"}}
+      </button>
+    </div>
+  </div>
+
+  {{if not .ProjectScopes}}
+    <div class="sub-panel" style="padding:1.25rem;text-align:center;color:var(--muted);">
+      {{t .Lang "team_no_projects"}}
+    </div>
+  {{else}}
+    <form id="teamFilterForm" class="team-toolbar"
+      hx-post="/ui/team/config" hx-target="#teamSection" hx-swap="innerHTML">
+      <div class="field-col" style="min-width:190px;flex:1 1 200px;">
+        <label for="teamScopeSelect">{{t .Lang "team_project_lbl"}}</label>
+        <select id="teamScopeSelect" name="team_scope"
+          hx-get="/ui/team" hx-trigger="change" hx-include="#teamFilterForm" hx-target="#teamSection" hx-swap="innerHTML">
+          {{range .ProjectScopes}}
+            <option value="{{.}}" {{if eq $.SelectedScope .}}selected{{end}}>{{.}}</option>
+          {{end}}
+        </select>
+      </div>
+    </form>
+
+    <form class="add-drawer" :class="{ 'open': editAuthor }" id="teamAuthorForm"
+      hx-post="/ui/team/config" hx-include="#teamScopeSelect" hx-target="#teamSection" hx-swap="innerHTML">
+      <input id="teamAuthorInput" name="author" class="input" style="max-width:260px;font-family:var(--mono);" value="{{.Author}}" placeholder="{{t .Lang "team_author_ph"}}">
+      <button type="submit" class="btn btn-primary btn-sm">{{t .Lang "team_btn_save_cfg"}}</button>
+    </form>
+
+    <form class="add-drawer" :class="{ 'open': teamAddOpen }" id="teamAddForm"
+      x-data="{ catVal: '', subVal: '', subMap: {{jsonAttr .AllSubCategories}} }"
+      hx-post="/ui/modal/team-draft" hx-include="#teamScopeSelect" hx-target="#modalHost" hx-swap="innerHTML">
+      <div class="combo-box" style="width:140px;" x-data='comboBox({{jsonAttr .Categories}}, "", false)'>
+        <input name="category" class="input" autocomplete="off" x-model="val" @input="catVal = val" @click="open = true" @click.outside="open = false" placeholder="{{t .Lang "ph_new_cat"}}" aria-label="Category">
+        <button type="button" class="combo-btn" @click.stop="open = !open" tabindex="-1">▾</button>
+        <div class="combo-menu" :class="{ 'open': open }">
+          <template x-for="item in items" :key="item">
+            <div class="combo-item" @click="pick(item); catVal = item;"><span x-text="item"></span></div>
+          </template>
+        </div>
+      </div>
+      <div class="combo-box" style="width:145px;" x-data="{ open: false }" @click.outside="open = false">
+        <input name="sub_category" class="input" autocomplete="off" x-model="subVal" @click="open = true" placeholder="{{t .Lang "ph_new_subcat"}}" aria-label="Sub-Category">
+        <button type="button" class="combo-btn" @click.stop="open = !open" tabindex="-1">▾</button>
+        <div class="combo-menu" :class="{ 'open': open }">
+          <template x-for="item in subOptionsFor(subMap, catVal)" :key="item">
+            <div class="combo-item" @click="subVal = item; open = false;"><span x-text="item"></span></div>
+          </template>
+        </div>
+      </div>
+      <input name="raw_rule" class="input" style="flex:1;min-width:240px;" placeholder="{{t .Lang "team_raw_rule_ph"}}" required aria-label="Team Rule">
+      <button type="submit" class="btn btn-primary btn-sm">{{t .Lang "team_btn_draft"}}</button>
+    </form>
+
+    {{if .LastError}}
+      <div class="setup-alert" style="margin-bottom:0.75rem;border-color:var(--danger);">{{.LastError}}</div>
+    {{end}}
+
+    {{if gt (len .Conflicts) 0}}
+      <div class="team-conflict-wrap">
+        <div style="font-weight:700;font-size:0.84rem;color:var(--danger);margin-bottom:0.5rem;">
+          {{t .Lang "team_conflicts_title"}} ({{len .Conflicts}})
+        </div>
+        {{range .Conflicts}}
+          <div class="team-conflict-card">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+              <span class="tag-chip">{{.TeamRule.Category}}{{if .TeamRule.SubCategory}}/{{.TeamRule.SubCategory}}{{end}}</span>
+              <span style="font-size:0.75rem;color:var(--muted);">{{.Reason}}</span>
+            </div>
+            <div class="grid-2" style="gap:0.6rem;margin:0.45rem 0;">
+              <div class="sub-panel" style="padding:0.55rem 0.65rem;">
+                <div style="font-size:0.7rem;color:var(--accent);font-weight:700;margin-bottom:0.2rem;">TEAM RULE ({{.TeamRule.AddedBy}} · {{.TeamRule.AddedAt}})</div>
+                <div style="font-size:0.81rem;font-weight:600;">{{.TeamRule.Title}}</div>
+              </div>
+              <div class="sub-panel" style="padding:0.55rem 0.65rem;">
+                <div style="font-size:0.7rem;color:var(--warn);font-weight:700;margin-bottom:0.2rem;">LOCAL MEMORY #{{.LocalMemoryID}}</div>
+                <div style="font-size:0.81rem;">{{.LocalContent}}</div>
+              </div>
+            </div>
+            <div style="display:flex;gap:0.45rem;flex-wrap:wrap;justify-content:flex-end;">
+              <button type="button" class="btn btn-primary btn-sm"
+                hx-post="/ui/team/conflict" hx-include="#teamScopeSelect"
+                hx-vals='{"rule_key":"{{.RuleKey}}","decision":"adopt_team"}'
+                hx-target="#teamSection" hx-swap="innerHTML">{{t $.Lang "team_btn_adopt"}}</button>
+              <button type="button" class="btn btn-warn btn-sm"
+                hx-post="/ui/team/conflict" hx-include="#teamScopeSelect"
+                hx-vals='{"rule_key":"{{.RuleKey}}","decision":"local_override"}'
+                hx-target="#teamSection" hx-swap="innerHTML">{{t $.Lang "team_btn_override"}}</button>
+              <button type="button" class="btn btn-sm"
+                hx-post="/ui/team/conflict" hx-include="#teamScopeSelect"
+                hx-vals='{"rule_key":"{{.RuleKey}}","decision":"mark_updated"}'
+                hx-target="#teamSection" hx-swap="innerHTML">{{t $.Lang "team_btn_mark_resolved"}}</button>
+            </div>
+          </div>
+        {{end}}
+      </div>
+    {{end}}
+
+    {{if not .Groups}}
+      <div class="sub-panel" style="padding:1.4rem;text-align:center;color:var(--muted);margin-top:0.6rem;">
+        {{t .Lang "team_empty_rules"}}
+      </div>
+    {{else}}
+      <div class="team-doc-groups">
+        {{range .Groups}}
+          <div class="team-cat-group">
+            <div class="team-cat-head">
+              <strong>{{.HeadingTitle}}</strong>
+              <span class="tag-chip">{{.Category}} · {{len .Rules}}</span>
+            </div>
+            <div class="team-rule-list">
+              {{range .Rules}}
+                <div class="team-rule-card {{if eq .Resolution "local_override"}}overridden{{end}}">
+                  <div class="team-rule-head">
+                    <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+                      {{if .SubCategory}}<span class="tag-chip">{{.SubCategory}}</span>{{end}}
+                      {{if eq .Resolution "local_override"}}<span class="badge b-danger">local_override</span>{{end}}
+                      {{if eq .Resolution "conflict_pending"}}<span class="badge b-danger">conflict</span>{{end}}
+                    </div>
+                    <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+                      <span class="team-added">{{.AddedBy}} · {{.AddedAt}}</span>
+                      {{if eq .Resolution "local_override"}}
+                        <button type="button" class="btn btn-sm"
+                          hx-post="/ui/team/conflict" hx-include="#teamScopeSelect"
+                          hx-vals='{"rule_key":"{{.RuleKey}}","decision":"mark_updated"}'
+                          hx-target="#teamSection" hx-swap="innerHTML">{{t $.Lang "team_btn_restore"}}</button>
+                      {{end}}
+                      <button type="button" class="btn btn-sm"
+                        hx-get="/ui/modal/team-edit?team_scope={{urlquery $.SelectedScope}}&rule_key={{urlquery .RuleKey}}"
+                        hx-target="#modalHost" hx-swap="innerHTML">{{t $.Lang "team_btn_edit"}}</button>
+                      <button type="button" class="btn btn-danger btn-sm"
+                        hx-post="/ui/team/delete" hx-include="#teamScopeSelect"
+                        hx-vals='{"rule_key":"{{.RuleKey}}"}'
+                        hx-confirm='{{t $.Lang "team_confirm_delete"}}'
+                        hx-target="#teamSection" hx-swap="innerHTML">{{t $.Lang "team_btn_delete"}}</button>
+                    </div>
+                  </div>
+                  <div class="team-rule-title">{{.Title}}</div>
+                </div>
+              {{end}}
+            </div>
+          </div>
+        {{end}}
+      </div>
+    {{end}}
+  {{end}}
+</div>
+{{end}}

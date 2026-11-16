@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -58,7 +57,7 @@ func NewGeminiAdapterConfig(apiKey, model string) *BatchEvaluator {
 		return NewGeminiDecisionsAdapterConfig(k, m)
 	}
 	tr := &GeminiAdapter{apiKey: k, model: m}
-	return NewBatchEvaluator("gemini:"+m, newSchemaEvaluator(tr), 25, 6)
+	return NewBatchEvaluator("gemini:"+m, newSchemaEvaluator(tr), 80, 2)
 }
 
 func geminiBaseURL() string {
@@ -200,15 +199,7 @@ func (g *GeminiAdapter) doGenerateJSON(ctx context.Context, model, prompt string
 	if err != nil {
 		return 0, "", err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return 0, "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if g.apiKey != "" {
-		req.Header.Set("x-goog-api-key", g.apiKey)
-	}
-	resp, err := httpClient.Do(req)
+	resp, err := postJSONRaw(ctx, httpClient, endpoint, body, "x-goog-api-key", g.apiKey)
 	if err != nil {
 		return 0, "", err
 	}

@@ -3,7 +3,6 @@ package progress
 import (
 	"context"
 	"database/sql"
-	"sync"
 	"sync/atomic"
 
 	"memorize/internal/inference/router"
@@ -12,15 +11,13 @@ import (
 )
 
 // Service owns persistent project_progress tracking, Git/memory sync milestones,
-// completion retention TTL, and ephemeral in-memory live IDE/MCP sessions.
+// and completion retention TTL.
 type Service struct {
 	mem                *memory.Service
 	db                 *sql.DB
 	dbPath             string
 	router             *router.Router
 	bus                *eventbus.Bus
-	mu                 sync.Mutex
-	liveSessions       map[string]liveSessionEntry
 	lastRetentionSweep atomic.Int64
 }
 
@@ -43,12 +40,11 @@ func New(mem *memory.Service) *Service {
 		bus = eventbus.New()
 	}
 	s := &Service{
-		mem:          mem,
-		db:           db,
-		dbPath:       dbPath,
-		router:       rtr,
-		bus:          bus,
-		liveSessions: make(map[string]liveSessionEntry),
+		mem:    mem,
+		db:     db,
+		dbPath: dbPath,
+		router: rtr,
+		bus:    bus,
 	}
 	if mem != nil {
 		mem.AddMutationListener(func(ctx context.Context, ev memory.MutationEvent) {
@@ -66,11 +62,5 @@ func (s *Service) Memory() *memory.Service {
 func (s *Service) notifyProgressChange() {
 	if s != nil && s.bus != nil {
 		s.bus.Publish("progress")
-	}
-}
-
-func (s *Service) notifyLive() {
-	if s != nil && s.bus != nil {
-		s.bus.PublishLive()
 	}
 }

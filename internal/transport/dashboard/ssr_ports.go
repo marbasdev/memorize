@@ -126,16 +126,15 @@ func registerSSRPortRoutes(mux *http.ServeMux, d Deps) {
 			if activeGGUF == 0 {
 				activeGGUF = gp
 			}
-			toast := fmt.Sprintf("Ports saved (Daemon :%d · GGUF :%d)", dp, activeGGUF)
-			if lang == "ko" {
-				toast = fmt.Sprintf("포트 설정 저장됨 (데몬 :%d · GGUF :%d)", dp, activeGGUF)
-			}
+			toast := langText(lang,
+				fmt.Sprintf("Ports saved (Daemon :%d · GGUF :%d)", dp, activeGGUF),
+				fmt.Sprintf("포트 설정 저장됨 (데몬 :%d · GGUF :%d)", dp, activeGGUF),
+			)
 			if res.Restarting && res.NewURL != "" {
-				if lang == "ko" {
-					toast = fmt.Sprintf("데몬 포트를 %s로 변경하여 재기동합니다...", res.NewURL)
-				} else {
-					toast = fmt.Sprintf("Restarting daemon on %s...", res.NewURL)
-				}
+				toast = langText(lang,
+					fmt.Sprintf("Restarting daemon on %s...", res.NewURL),
+					fmt.Sprintf("데몬 포트를 %s로 변경하여 재기동합니다...", res.NewURL),
+				)
 				setHXPortTriggers(w, toast, res.NewURL, true)
 				renderEnginesSection(w, r, d, lang, url.Values{"view": {"gguf"}}, "", "")
 				return
@@ -158,10 +157,10 @@ func registerSSRPortRoutes(mux *http.ServeMux, d Deps) {
 			}
 		}
 		_ = config.SyncManagedGGUFEndpoint(r.Context(), d.Memory.DB(), d.Memory.DBPath(), fmt.Sprintf("http://127.0.0.1:%d", effGGUFPort))
-		toast := fmt.Sprintf("Ports saved (Daemon :%d · GGUF :%d)", dp, effGGUFPort)
-		if lang == "ko" {
-			toast = fmt.Sprintf("포트 설정 저장됨 (데몬 :%d · GGUF :%d)", dp, effGGUFPort)
-		}
+		toast := langText(lang,
+			fmt.Sprintf("Ports saved (Daemon :%d · GGUF :%d)", dp, effGGUFPort),
+			fmt.Sprintf("포트 설정 저장됨 (데몬 :%d · GGUF :%d)", dp, effGGUFPort),
+		)
 		setHXPortTriggers(w, toast, "", true)
 		renderEnginesSection(w, r, d, lang, url.Values{"view": {"gguf"}}, "", "")
 	}))

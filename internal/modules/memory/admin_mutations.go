@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -61,21 +62,22 @@ func (s *Service) ForgetMemories(ctx context.Context, ids []int64) (int64, error
 			}
 		}
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
 	var total int64
-	for _, id := range ids {
-		res, err := tx.ExecContext(ctx, `UPDATE memories SET active = 0 WHERE id = ? AND active = 1`, id)
-		if err != nil {
-			return 0, err
+	if err := s.withTx(ctx, func(tx *sql.Tx) error {
+		for _, id := range ids {
+			res, err := tx.ExecContext(ctx, `UPDATE memories SET active = 0 WHERE id = ? AND active = 1`, id)
+			if err != nil {
+				return err
+			}
+			if n, _ := res.RowsAffected(); n > 0 {
+				if err := recordMemoryTxInTx(ctx, tx, "", id, domain.SyncOpUpsert, "", 0); err != nil {
+					return err
+				}
+				total += n
+			}
 		}
-		n, _ := res.RowsAffected()
-		total += n
-	}
-	if err := tx.Commit(); err != nil {
+		return nil
+	}); err != nil {
 		return 0, err
 	}
 	for _, id := range ids {
@@ -111,36 +113,44 @@ func (s *Service) UndoMemory(ctx context.Context, id int64) (string, error) {
 	}
 	rows.Close()
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
+	var msg string
+	if err := s.withTx(ctx, func(tx *sql.Tx) error {
+		if act == 1 && len(children) > 0 {
+			if _, err := tx.ExecContext(ctx, `UPDATE memories SET active = 0 WHERE id = ?`, id); err != nil {
+				return err
+			}
+			if err := recordMemoryTxInTx(ctx, tx, "", id, domain.SyncOpUpsert, "", 0); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE memories SET active = 1, superseded_by = NULL WHERE superseded_by = ?`, id); err != nil {
+				return err
+			}
+			for _, cid := range children {
+				if err := recordMemoryTxInTx(ctx, tx, "", cid, domain.SyncOpUpsert, "", 0); err != nil {
+					return err
+				}
+			}
+			msg = fmt.Sprintf("UNDONE OVERWRITE: deactivated #%d and restored %v", id, children)
+			return nil
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE memories SET active = 1, superseded_by = NULL WHERE id = ?`, id); err != nil {
+			return err
+		}
+		if err := recordMemoryTxInTx(ctx, tx, "", id, domain.SyncOpUpsert, "", 0); err != nil {
+			return err
+		}
+		msg = fmt.Sprintf("RESTORED: memory #%d is active again", id)
+		return nil
+	}); err != nil {
 		return "", err
 	}
-	defer tx.Rollback()
-
 	if act == 1 && len(children) > 0 {
-		if _, err := tx.ExecContext(ctx, `UPDATE memories SET active = 0 WHERE id = ?`, id); err != nil {
-			return "", err
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE memories SET active = 1, superseded_by = NULL WHERE superseded_by = ?`, id); err != nil {
-			return "", err
-		}
-		if err := tx.Commit(); err != nil {
-			return "", err
-		}
 		s.clearSessionIDs(append(children, id)...)
-		s.MarkAllTurnsMutated()
-		return fmt.Sprintf("UNDONE OVERWRITE: deactivated #%d and restored %v", id, children), nil
+	} else {
+		s.clearSessionIDs(id)
 	}
-
-	if _, err := tx.ExecContext(ctx, `UPDATE memories SET active = 1, superseded_by = NULL WHERE id = ?`, id); err != nil {
-		return "", err
-	}
-	if err := tx.Commit(); err != nil {
-		return "", err
-	}
-	s.clearSessionIDs(id)
 	s.MarkAllTurnsMutated()
-	return fmt.Sprintf("RESTORED: memory #%d is active again", id), nil
+	return msg, nil
 }
 
 // UpdateMemory updates a memory's category, content, and pinned state.
@@ -190,8 +200,15 @@ func (s *Service) UpdateMemoryFull(ctx context.Context, id int64, rawScope, cate
 	if pinned != nil {
 		pin = boolToInt(*pinned)
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE memories SET scope = ?, account = ?, category = ?, sub_category = ?, content = ?, pinned = ? WHERE id = ?`, scope, acc, cat, sub, txt, pin, id)
-	if err == nil && txt != curContent {
+	if err := s.withTx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `UPDATE memories SET scope = ?, account = ?, category = ?, sub_category = ?, content = ?, pinned = ? WHERE id = ?`, scope, acc, cat, sub, txt, pin, id); err != nil {
+			return err
+		}
+		return recordMemoryTxInTx(ctx, tx, "", id, domain.SyncOpUpsert, "", 0)
+	}); err != nil {
+		return err
+	}
+	if txt != curContent {
 		_, _ = s.db.ExecContext(ctx, `
 			INSERT INTO session_updates (session_id, memory_id, prev_content, updated_at)
 			SELECT session_id, ?, ?, CURRENT_TIMESTAMP FROM session_sent WHERE memory_id = ?
@@ -200,10 +217,8 @@ func (s *Service) UpdateMemoryFull(ctx context.Context, id int64, rawScope, cate
 	}
 	s.clearSessionIDs(id)
 	s.MarkAllTurnsMutated()
-	if err == nil {
-		s.RegisterTaxonomyAppendOnly(ctx, scope, cat, sub)
-	}
-	if err == nil && (txt != curContent || cat != curCat || sub != curSub) {
+	s.RegisterTaxonomyAppendOnly(ctx, scope, cat, sub)
+	if txt != curContent || cat != curCat || sub != curSub {
 		s.emitMutation(ctx, MutationEvent{
 			Scope:       scope,
 			Category:    cat,
@@ -213,7 +228,7 @@ func (s *Service) UpdateMemoryFull(ctx context.Context, id int64, rawScope, cate
 			Content:     txt,
 		})
 	}
-	return err
+	return nil
 }
 
 // UpdateMemoryAccount reassigns the owning account for memory id.
@@ -225,9 +240,16 @@ func (s *Service) UpdateMemoryAccount(ctx context.Context, id int64, rawAccount 
 	if acc == "" {
 		acc = s.CurrentAccount(ctx)
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE memories SET account = ? WHERE id = ?`, acc, id)
+	if err := s.withTx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `UPDATE memories SET account = ? WHERE id = ?`, acc, id); err != nil {
+			return err
+		}
+		return recordMemoryTxInTx(ctx, tx, "", id, domain.SyncOpUpsert, "", 0)
+	}); err != nil {
+		return err
+	}
 	s.clearSessionIDs(id)
-	return err
+	return nil
 }
 
 // UpdateMemoryTags normalizes and overwrites tags for memory id.
@@ -240,9 +262,16 @@ func (s *Service) UpdateMemoryTags(ctx context.Context, id int64, rawTags string
 		return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == '#'
 	})
 	tags := domain.NormalizeTags(scope, parts)
-	_, err = s.db.ExecContext(ctx, `UPDATE memories SET tags = ? WHERE id = ?`, strings.Join(tags, " "), id)
+	if err := s.withTx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `UPDATE memories SET tags = ? WHERE id = ?`, strings.Join(tags, " "), id); err != nil {
+			return err
+		}
+		return recordMemoryTxInTx(ctx, tx, "", id, domain.SyncOpUpsert, "", 0)
+	}); err != nil {
+		return err
+	}
 	s.clearSessionIDs(id)
-	return err
+	return nil
 }
 
 // PurgeTombstones permanently deletes inactive memories while preserving superseded lineage on active parent records.
@@ -250,49 +279,85 @@ func (s *Service) PurgeTombstones(ctx context.Context, scopeFilter string) (int6
 	sc := strings.TrimSpace(scopeFilter)
 	isAdmin := domain.IsAdminContext(ctx)
 	curAcc := s.CurrentAccount(ctx)
-	// Snapshot direct superseded lineage into parent's replaces_text before deleting inactive rows
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT superseded_by, content FROM memories
-		WHERE active = 0 AND superseded_by IS NOT NULL AND (? = '' OR scope = ?)
-		  AND (? = 1 OR scope != 'personal' OR account = ?)
-		ORDER BY id ASC`, sc, sc, boolToInt(isAdmin), curAcc)
-	if err == nil {
-		byParent := make(map[int64][]string)
-		for rows.Next() {
-			var pid int64
-			var c string
-			if rows.Scan(&pid, &c) == nil && strings.TrimSpace(c) != "" {
-				byParent[pid] = append(byParent[pid], strings.TrimSpace(c))
-			}
-		}
-		rows.Close()
-		for pid, items := range byParent {
-			var existing string
-			_ = s.db.QueryRowContext(ctx, `SELECT COALESCE(replaces_text, '') FROM memories WHERE id = ?`, pid).Scan(&existing)
-			seen := make(map[string]bool)
-			var merged []string
-			for _, line := range strings.Split(existing, "\n") {
-				if line = strings.TrimSpace(line); line != "" && !seen[line] {
-					seen[line] = true
-					merged = append(merged, line)
+	var n int64
+	if err := s.withTx(ctx, func(tx *sql.Tx) error {
+		// Snapshot direct superseded lineage into parent's replaces_text before deleting inactive rows
+		rows, err := tx.QueryContext(ctx, `
+			SELECT superseded_by, content FROM memories
+			WHERE active = 0 AND superseded_by IS NOT NULL AND (? = '' OR scope = ?)
+			  AND (? = 1 OR scope != 'personal' OR account = ?)
+			ORDER BY id ASC`, sc, sc, boolToInt(isAdmin), curAcc)
+		if err == nil {
+			byParent := make(map[int64][]string)
+			for rows.Next() {
+				var pid int64
+				var c string
+				if rows.Scan(&pid, &c) == nil && strings.TrimSpace(c) != "" {
+					byParent[pid] = append(byParent[pid], strings.TrimSpace(c))
 				}
 			}
-			for _, it := range items {
-				if !seen[it] {
-					seen[it] = true
-					merged = append(merged, it)
+			rows.Close()
+			for pid, items := range byParent {
+				var existing string
+				_ = tx.QueryRowContext(ctx, `SELECT COALESCE(replaces_text, '') FROM memories WHERE id = ?`, pid).Scan(&existing)
+				seen := make(map[string]bool)
+				var merged []string
+				for _, line := range strings.Split(existing, "\n") {
+					if line = strings.TrimSpace(line); line != "" && !seen[line] {
+						seen[line] = true
+						merged = append(merged, line)
+					}
+				}
+				for _, it := range items {
+					if !seen[it] {
+						seen[it] = true
+						merged = append(merged, it)
+					}
+				}
+				resP, perr := tx.ExecContext(ctx, `UPDATE memories SET replaces_text = ? WHERE id = ?`, strings.Join(merged, "\n"), pid)
+				if perr != nil {
+					return perr
+				}
+				if pn, _ := resP.RowsAffected(); pn > 0 {
+					if err := recordMemoryTxInTx(ctx, tx, "", pid, domain.SyncOpUpsert, "", 0); err != nil {
+						return err
+					}
 				}
 			}
-			_, _ = s.db.ExecContext(ctx, `UPDATE memories SET replaces_text = ? WHERE id = ?`, strings.Join(merged, "\n"), pid)
 		}
-	}
 
-	_, _ = s.db.ExecContext(ctx, `DELETE FROM session_sent WHERE memory_id IN (SELECT id FROM memories WHERE active = 0 AND (? = '' OR scope = ?) AND (? = 1 OR scope != 'personal' OR account = ?))`, sc, sc, boolToInt(isAdmin), curAcc)
-	res, err := s.db.ExecContext(ctx, `DELETE FROM memories WHERE active = 0 AND (? = '' OR scope = ?) AND (? = 1 OR scope != 'personal' OR account = ?)`, sc, sc, boolToInt(isAdmin), curAcc)
-	if err != nil {
+		purgeRows, err := tx.QueryContext(ctx, `
+			SELECT id FROM memories
+			WHERE active = 0 AND (? = '' OR scope = ?)
+			  AND (? = 1 OR scope != 'personal' OR account = ?)
+			ORDER BY id ASC`, sc, sc, boolToInt(isAdmin), curAcc)
+		if err != nil {
+			return err
+		}
+		var purgeIDs []int64
+		for purgeRows.Next() {
+			var pid int64
+			if purgeRows.Scan(&pid) == nil {
+				purgeIDs = append(purgeIDs, pid)
+			}
+		}
+		_ = purgeRows.Close()
+		for _, pid := range purgeIDs {
+			if err := recordMemoryTxInTx(ctx, tx, "", pid, domain.SyncOpPurge, "", 0); err != nil {
+				return err
+			}
+		}
+
+		_, _ = tx.ExecContext(ctx, `DELETE FROM session_sent WHERE memory_id IN (SELECT id FROM memories WHERE active = 0 AND (? = '' OR scope = ?) AND (? = 1 OR scope != 'personal' OR account = ?))`, sc, sc, boolToInt(isAdmin), curAcc)
+		res, err := tx.ExecContext(ctx, `DELETE FROM memories WHERE active = 0 AND (? = '' OR scope = ?) AND (? = 1 OR scope != 'personal' OR account = ?)`, sc, sc, boolToInt(isAdmin), curAcc)
+		if err != nil {
+			return err
+		}
+		n, _ = res.RowsAffected()
+		return nil
+	}); err != nil {
 		return 0, err
 	}
-	n, _ := res.RowsAffected()
 	if n > 0 {
 		s.bus.Publish("memories")
 	}
@@ -362,29 +427,29 @@ func (s *Service) RecalibrateConfidence(ctx context.Context, scopeFilter string)
 			return 0, err
 		}
 		for id, conf := range part {
-			updates[id] = clamp(conf, 0.05, 1.00)
+			updates[id] = domain.Clamp(conf, 0.05, 1.00)
 		}
 	}
 	if len(updates) == 0 {
 		return 0, nil
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
 	updated := 0
-	for id, conf := range updates {
-		res, err := tx.ExecContext(ctx, `UPDATE memories SET confidence = ? WHERE id = ? AND active = 1`, conf, id)
-		if err != nil {
-			return 0, err
+	if err := s.withTx(ctx, func(tx *sql.Tx) error {
+		for id, conf := range updates {
+			res, err := tx.ExecContext(ctx, `UPDATE memories SET confidence = ? WHERE id = ? AND active = 1`, conf, id)
+			if err != nil {
+				return err
+			}
+			if n, _ := res.RowsAffected(); n > 0 {
+				if err := recordMemoryTxInTx(ctx, tx, "", id, domain.SyncOpUpsert, "", 0); err != nil {
+					return err
+				}
+				updated++
+			}
 		}
-		if n, _ := res.RowsAffected(); n > 0 {
-			updated++
-		}
-	}
-	if err := tx.Commit(); err != nil {
+		return nil
+	}); err != nil {
 		return 0, err
 	}
 	if updated > 0 {

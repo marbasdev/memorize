@@ -2,7 +2,9 @@ package guardrail_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -87,8 +89,12 @@ func TestTurnPreMutateCodeGateAndSameTurnRuleEnforcement(t *testing.T) {
 		t.Fatalf("antigravity-turn failed: code=%d err=%v", code, err)
 	}
 
+	clientFile := filepath.Join(repo, "client.go")
+	if err := os.WriteFile(clientFile, []byte("package client\n// base\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	violatingEdit := fmt.Sprintf(`{"conversationId":"conv-gate-1","workspacePaths":[%q],"toolCall":{"name":"edit_file","args":{"Path":%q,"Replacement":"http.DefaultClient.Get(externalAPI) // 타임아웃 없음"}}}`,
-		repo, filepath.Join(repo, "client.go"))
+		repo, clientFile)
 	gateOut, gateCode, _ := st.gr.ExecuteHook(ctx, "antigravity-pretool", []byte(violatingEdit), "")
 	if gateCode != 0 || !strings.Contains(gateOut, `"decision":"deny"`) || !strings.Contains(gateOut, "[MEMORIZE PRE-MUTATE GATE]") {
 		t.Fatalf("expected Pre-Mutate Code Gate to deny edit before commit_memory, got code=%d out=%s", gateCode, gateOut)
@@ -105,17 +111,42 @@ func TestTurnPreMutateCodeGateAndSameTurnRuleEnforcement(t *testing.T) {
 			Confidence:  0.95,
 		},
 	}
-	guardOut, guardCode, _ := st.gr.ExecuteHook(ctx, "antigravity-pretool", []byte(violatingEdit), "")
-	if guardCode != 0 || !strings.Contains(guardOut, `"decision":"deny"`) || !strings.Contains(guardOut, "[MEMORIZE GUARDRAIL BLOCKED]") || !strings.Contains(guardOut, "3초 타임아웃") {
-		t.Fatalf("expected same-turn Guardrail to block violating edit against newly committed rule #1, got code=%d out=%s", guardCode, guardOut)
+	// Irreversible shell command still blocks immediately at PreToolUse against newly committed rule #1.
+	badCmd := fmt.Sprintf(`{"conversationId":"conv-gate-1","workspacePaths":[%q],"toolCall":{"name":"run_command","args":{"CommandLine":"go run ./cmd/fetch --no-timeout"}}}`, repo)
+	cmdDenyOut, cmdDenyCode, _ := st.gr.ExecuteHook(ctx, "antigravity-pretool", []byte(badCmd), "")
+	if cmdDenyCode != 0 || !strings.Contains(cmdDenyOut, `"decision":"deny"`) || !strings.Contains(cmdDenyOut, "[MEMORIZE GUARDRAIL BLOCKED]") || !strings.Contains(cmdDenyOut, "3초 타임아웃") {
+		t.Fatalf("expected same-turn Guardrail to block violating run_command immediately, got code=%d out=%s", cmdDenyCode, cmdDenyOut)
 	}
 
+	// File edits pass PreToolUse after Pre-Mutate Gate and trigger self-correction at Stop.
+	editAllowOut, editAllowCode, _ := st.gr.ExecuteHook(ctx, "antigravity-pretool", []byte(violatingEdit), "")
+	if editAllowCode != 0 || editAllowOut != `{"decision":"allow"}` {
+		t.Fatalf("expected edit_file to allow after Pre-Mutate Gate and defer check to Stop, got code=%d out=%s", editAllowCode, editAllowOut)
+	}
+	if err := os.WriteFile(clientFile, []byte("package client\nhttp.DefaultClient.Get(externalAPI) // 타임아웃 없음\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stopPayload := fmt.Sprintf(`{"conversationId":"conv-gate-1","workspacePaths":[%q],"terminationReason":"NO_TOOL_CALL","continuationActive":false}`, repo)
+	stopFixOut, stopFixCode, _ := st.gr.ExecuteHook(ctx, "antigravity-stop", []byte(stopPayload), "")
+	if stopFixCode != 0 || !strings.Contains(stopFixOut, `"decision":"continue"`) || !strings.Contains(stopFixOut, "[MEMORIZE GUARDRAIL — FIX BEFORE FINISHING]") || !strings.Contains(stopFixOut, "3초 타임아웃") {
+		t.Fatalf("expected Stop hook to force continuation fix on violating edit against newly committed rule #1, got code=%d out=%s", stopFixCode, stopFixOut)
+	}
+
+	// Re-entry edit resolves violation; subsequent Stop with continuationActive=true finishes cleanly.
 	eval.violations = nil
 	okEdit := fmt.Sprintf(`{"conversationId":"conv-gate-1","workspacePaths":[%q],"toolCall":{"name":"edit_file","args":{"Path":%q,"Replacement":"client := &http.Client{Timeout: 3 * time.Second}"}}}`,
-		repo, filepath.Join(repo, "client.go"))
+		repo, clientFile)
 	okOut, okCode, _ := st.gr.ExecuteHook(ctx, "antigravity-pretool", []byte(okEdit), "")
 	if okCode != 0 || okOut != `{"decision":"allow"}` {
 		t.Fatalf("expected compliant edit to allow, got code=%d out=%s", okCode, okOut)
+	}
+	if err := os.WriteFile(clientFile, []byte("package client\nvar c = &http.Client{Timeout: 3 * time.Second}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stopDonePayload := fmt.Sprintf(`{"conversationId":"conv-gate-1","workspacePaths":[%q],"terminationReason":"NO_TOOL_CALL","continuationActive":true}`, repo)
+	stopDoneOut, stopDoneCode, _ := st.gr.ExecuteHook(ctx, "antigravity-stop", []byte(stopDonePayload), "")
+	if stopDoneCode != 0 || stopDoneOut != `{}` {
+		t.Fatalf("expected Stop with continuationActive=true to finish cleanly without looping, got code=%d out=%s", stopDoneCode, stopDoneOut)
 	}
 }
 
@@ -191,11 +222,19 @@ func TestFirstChatOnboardingOfferSkipAndGuardrailFlow(t *testing.T) {
 			Confidence:  0.95,
 		},
 	}
+	workerFile := filepath.Join(repo, "worker.go")
+	_ = os.WriteFile(workerFile, []byte("package worker\n"), 0o600)
 	legacyEdit := fmt.Sprintf(`{"conversationId":"conv-post-onboard","workspacePaths":[%q],"toolCall":{"name":"edit_file","args":{"Path":%q,"Replacement":"fmt.Println(err)"}}}`,
-		repo, filepath.Join(repo, "worker.go"))
-	denyOut, denyCode, _ := st.gr.ExecuteHook(ctx, "antigravity-pretool", []byte(legacyEdit), "")
-	if denyCode != 0 || !strings.Contains(denyOut, `"decision":"deny"`) || !strings.Contains(denyOut, "log/slog") {
-		t.Fatalf("expected guardrail to block legacy fmt.Println edit, got code=%d out=%s", denyCode, denyOut)
+		repo, workerFile)
+	editAllowOut, editAllowCode, _ := st.gr.ExecuteHook(ctx, "antigravity-pretool", []byte(legacyEdit), "")
+	if editAllowCode != 0 || editAllowOut != `{"decision":"allow"}` {
+		t.Fatalf("expected edit_file to allow at PreToolUse and batch at Stop, got code=%d out=%s", editAllowCode, editAllowOut)
+	}
+	_ = os.WriteFile(workerFile, []byte("package worker\nfunc f(err error) { fmt.Println(err) }\n"), 0o600)
+	stopDenyOut, stopDenyCode, _ := st.gr.ExecuteHook(ctx, "antigravity-stop",
+		[]byte(fmt.Sprintf(`{"conversationId":"conv-post-onboard","workspacePaths":[%q],"terminationReason":"NO_TOOL_CALL"}`, repo)), "")
+	if stopDenyCode != 0 || !strings.Contains(stopDenyOut, `"decision":"continue"`) || !strings.Contains(stopDenyOut, "log/slog") {
+		t.Fatalf("expected Stop hook to block and request fix for legacy fmt.Println edit, got code=%d out=%s", stopDenyCode, stopDenyOut)
 	}
 }
 
@@ -228,62 +267,69 @@ func TestPreToolDiffEditSnippetAndUTF8Safety(t *testing.T) {
 	scope := "project:" + strings.ToLower(filepath.Base(repo))
 	_, _ = st.mem.CommitMemory(ctx, "AGENTS.md와 CLAUDE.md는 제외하고 CONSTRAINTS.md 및 핵심규칙만 유지한다", "architecture", scope)
 
-	replacePayload := fmt.Sprintf(`{"workspacePaths":[%q],"toolCall":{"name":"edit_file","args":{"Path":%q,"Target":"var manifests = []string{\n\t\"AGENTS.md\", \"CLAUDE.md\", \"CONSTRAINTS.md\", \"README.md\",\n\t\"go.mod\",\n}","Replacement":"var manifests = []string{\n\t\"CONSTRAINTS.md\", \"README.md\",\n\t\"go.mod\",\n}"}}}`,
-		repo, filepath.Join(repo, "gitsync.go"))
+	targetFile := filepath.Join(repo, "gitsync.go")
+	orig1 := "var manifests = []string{\n\t\"AGENTS.md\", \"CLAUDE.md\", \"CONSTRAINTS.md\", \"README.md\",\n\t\"go.mod\",\n}"
+	new1 := "var manifests = []string{\n\t\"CONSTRAINTS.md\", \"README.md\",\n\t\"go.mod\",\n}"
+	_ = os.WriteFile(targetFile, []byte(orig1), 0o600)
+	replacePayload := fmt.Sprintf(`{"conversationId":"conv-diff-1","workspacePaths":[%q],"toolCall":{"name":"edit_file","args":{"Path":%q,"Target":%q,"Replacement":%q}}}`,
+		repo, targetFile, orig1, new1)
 	out, code, _ := st.gr.ExecuteHook(ctx, "antigravity-pretool", []byte(replacePayload), "")
-	if code != 0 || out != `{"decision":"allow"}` {
-		t.Fatalf("expected clean replacement to allow, got code=%d out=%s", code, out)
+	if code != 0 || out != `{"decision":"allow"}` || len(eval.capturedPlans) != 0 {
+		t.Fatalf("expected edit_file PreToolUse to allow with 0 VerifyPlan calls, got code=%d calls=%d out=%s", code, len(eval.capturedPlans), out)
+	}
+	_ = os.WriteFile(targetFile, []byte(new1), 0o600)
+	stopPayload := fmt.Sprintf(`{"conversationId":"conv-diff-1","workspacePaths":[%q],"terminationReason":"NO_TOOL_CALL"}`, repo)
+	if sOut, sCode, _ := st.gr.ExecuteHook(ctx, "antigravity-stop", []byte(stopPayload), ""); sCode != 0 || sOut != `{}` {
+		t.Fatalf("expected clean Stop batch verify to pass, got code=%d out=%s", sCode, sOut)
 	}
 	if len(eval.capturedPlans) != 1 {
-		t.Fatalf("expected VerifyPlan to be called once, got %d", len(eval.capturedPlans))
+		t.Fatalf("expected VerifyPlan to be called once at Stop, got %d", len(eval.capturedPlans))
 	}
 	p1 := eval.capturedPlans[0]
 	if !strings.Contains(p1, `- 	"AGENTS.md", "CLAUDE.md", "CONSTRAINTS.md", "README.md",`) ||
 		!strings.Contains(p1, `+ 	"CONSTRAINTS.md", "README.md",`) ||
 		strings.Contains(p1, "var manifests") || strings.Contains(p1, `"go.mod"`) {
-		t.Fatalf("expected unified -/+ diff snippet without unchanged context lines, got:\n%s", p1)
+		t.Fatalf("expected net -/+ hunk diff without unchanged context lines, got:\n%s", p1)
 	}
 
-	delPayload := fmt.Sprintf(`{"workspacePaths":[%q],"toolCall":{"name":"edit_file","args":{"Path":%q,"Target":"keep1\nAGENTS.md\nkeep2","Replacement":"keep1\nkeep2"}}}`,
-		repo, filepath.Join(repo, "gitsync.go"))
+	orig2 := "keep1\nAGENTS.md\nkeep2"
+	new2 := "keep1\nkeep2"
+	_ = os.WriteFile(targetFile, []byte(orig2), 0o600)
+	delPayload := fmt.Sprintf(`{"conversationId":"conv-diff-1","workspacePaths":[%q],"toolCall":{"name":"edit_file","args":{"Path":%q,"Target":%q,"Replacement":%q}}}`,
+		repo, targetFile, orig2, new2)
 	_, _, _ = st.gr.ExecuteHook(ctx, "antigravity-pretool", []byte(delPayload), "")
+	_ = os.WriteFile(targetFile, []byte(new2), 0o600)
+	_, _, _ = st.gr.ExecuteHook(ctx, "antigravity-stop", []byte(stopPayload), "")
 	if len(eval.capturedPlans) != 2 || !strings.Contains(eval.capturedPlans[1], "Removed:\nAGENTS.md") {
 		t.Fatalf("expected pure deletion to report Removed: block, got: %+v", eval.capturedPlans)
 	}
 
 	longOld := "AGENTS.md " + strings.Repeat("한글규칙문맥", 120)
 	longNew := "CONSTRAINTS.md 핵심규칙 " + strings.Repeat("가나다라마바사", 40)
-	utf8Payload := fmt.Sprintf(`{"workspacePaths":[%q],"toolCall":{"name":"edit_file","args":{"Path":%q,"Target":%q,"Replacement":%q}}}`,
-		repo, filepath.Join(repo, "gitsync.go"), "ctx\n"+longOld, "ctx\n"+longNew)
+	_ = os.WriteFile(targetFile, []byte("ctx\n"+longOld), 0o600)
+	utf8Payload := fmt.Sprintf(`{"conversationId":"conv-diff-1","workspacePaths":[%q],"toolCall":{"name":"edit_file","args":{"Path":%q,"Target":%q,"Replacement":%q}}}`,
+		repo, targetFile, "ctx\n"+longOld, "ctx\n"+longNew)
 	_, _, _ = st.gr.ExecuteHook(ctx, "antigravity-pretool", []byte(utf8Payload), "")
+	_ = os.WriteFile(targetFile, []byte("ctx\n"+longNew), 0o600)
+	_, _, _ = st.gr.ExecuteHook(ctx, "antigravity-stop", []byte(stopPayload), "")
 	if len(eval.capturedPlans) != 3 {
-		t.Fatalf("expected 3rd VerifyPlan call, got %d", len(eval.capturedPlans))
+		t.Fatalf("expected 3rd VerifyPlan call at Stop, got %d", len(eval.capturedPlans))
 	}
 	p3 := eval.capturedPlans[2]
 	if !utf8.ValidString(p3) || !strings.Contains(p3, "- AGENTS.md") || !strings.Contains(p3, "+ CONSTRAINTS.md") {
-		t.Fatalf("expected valid UTF-8 and both -/+ sides preserved after truncation, valid=%v got:\n%s", utf8.ValidString(p3), p3)
+		t.Fatalf("expected valid UTF-8 and changed hunks preserved after truncation, valid=%v got:\n%s", utf8.ValidString(p3), p3)
 	}
 }
 
 type spyReadyEval struct {
+	stubEval
 	scoreCalls int
-	dec        domain.MutationDecision
 }
 
 func (s *spyReadyEval) Name() string { return "spy-ready" }
-func (s *spyReadyEval) ScoreRelevance(_ context.Context, _ string, facts []domain.Fact) ([]domain.ScoredFact, error) {
+func (s *spyReadyEval) ScoreRelevance(ctx context.Context, task string, facts []domain.Fact) ([]domain.ScoredFact, error) {
 	s.scoreCalls++
-	out := make([]domain.ScoredFact, len(facts))
-	for i, f := range facts {
-		out[i] = domain.ScoredFact{Fact: f, Score: 4.5, Confidence: 0.9}
-	}
-	return out, nil
-}
-func (s *spyReadyEval) EvaluateMutation(_ context.Context, _ string, _ string, _ []domain.Fact) (domain.MutationDecision, error) {
-	return s.dec, nil
-}
-func (s *spyReadyEval) VerifyPlan(_ context.Context, _ string, _ []domain.Fact) ([]domain.PlanViolation, error) {
-	return nil, nil
+	return s.stubEval.ScoreRelevance(ctx, task, facts)
 }
 
 func TestFirstRunEngineSetupGateAndExplicitEnvProvider(t *testing.T) {
@@ -397,5 +443,222 @@ func TestFirstRunEngineSetupGateAndExplicitEnvProvider(t *testing.T) {
 	}
 	if !strings.Contains(outColdReady, "[ONBOARDING AVAILABLE for ") {
 		t.Fatalf("expected onboarding notice to activate once engine becomes ready, got:\n%s", outColdReady)
+	}
+}
+
+func TestReadOnlyShellPureGoEnvPrefixes(t *testing.T) {
+	ctx := context.Background()
+	eval := &batchVerifyEval{
+		stubEval: stubEval{
+			dec: domain.MutationDecision{
+				Category:    "architecture",
+				Tier:        "rule",
+				IsPermanent: 0.95,
+				Action:      "INSERT",
+				Confidence:  0.95,
+			},
+		},
+	}
+	st := newTestStack(t, ":memory:", eval)
+
+	repo := t.TempDir()
+	scope := "project:" + strings.ToLower(filepath.Base(repo))
+	if _, err := st.mem.CommitMemory(ctx, "CGO_ENABLED=0 순수 Go 바이너리 빌드만 허용한다", "architecture", scope); err != nil {
+		t.Fatalf("CommitMemory: %v", err)
+	}
+
+	eval.violate = true
+	preTool := func(cmd string) string {
+		t.Helper()
+		payload, _ := json.Marshal(map[string]any{
+			"session_id": "sess-go-env-prefix",
+			"tool_name":  "run_command",
+			"tool_input": map[string]any{"command": cmd},
+			"cwd":        repo,
+		})
+		out, code, err := st.gr.ExecuteHook(ctx, "antigravity-pretool", payload, repo)
+		if err != nil || code != 0 {
+			t.Fatalf("ExecuteHook(%q) error=%v code=%d out=%s", cmd, err, code, out)
+		}
+		return out
+	}
+
+	bypassCmds := []string{
+		"GOOS=darwin CGO_ENABLED=0 go vet ./...",
+		"GOOS=linux CGO_ENABLED=0 go vet ./...",
+		"GOOS=windows CGO_ENABLED=0 go vet ./...",
+		"CGO_ENABLED=0 GOARCH=arm64 go test -race -count=1 ./...",
+		"GOOS=darwin CGO_ENABLED=0 go vet ./... && GOOS=linux CGO_ENABLED=0 go vet ./...",
+		"go list ./...",
+		"go version",
+		"go env GOPATH",
+		"gofmt -l .",
+		"gofmt -d internal/modules/guardrail",
+	}
+	for _, cmd := range bypassCmds {
+		before := len(eval.capturedPlans)
+		out := preTool(cmd)
+		if len(eval.capturedPlans) != before {
+			t.Fatalf("expected pure-Go read-only command %q to bypass VerifyPlan, calls grew %d -> %d", cmd, before, len(eval.capturedPlans))
+		}
+		if !strings.Contains(out, `"decision":"allow"`) {
+			t.Fatalf("expected bypass command %q to return allow, got %s", cmd, out)
+		}
+	}
+
+	checkedCmds := []string{
+		"CGO_ENABLED=1 go test ./...",
+		"CGO_ENABLED=0 go build ./cmd/memorize",
+		"FOO=bar go vet ./...",
+		"CGO_ENABLED=0 ls",
+		"go test -c ./...",
+		"go test -o=/tmp/t.bin ./...",
+		"go test -exec=true ./...",
+		"go env -w GOOS=linux",
+		"gofmt -w .",
+		"gofmt -lw internal/",
+	}
+	for _, cmd := range checkedCmds {
+		before := len(eval.capturedPlans)
+		out := preTool(cmd)
+		if len(eval.capturedPlans) != before+1 {
+			t.Fatalf("expected non-exempt command %q to invoke VerifyPlan once, calls=%d -> %d", cmd, before, len(eval.capturedPlans))
+		}
+		if !strings.Contains(out, `"decision":"deny"`) {
+			t.Fatalf("expected non-exempt command %q to deny when violate=true, got %s", cmd, out)
+		}
+	}
+}
+
+type lazyOverrideVerifyEval struct {
+	stubEval
+	capturedPlans  []string
+	capturedCounts []int
+}
+
+func (e *lazyOverrideVerifyEval) VerifyPlan(_ context.Context, plan string, rules []domain.Fact) ([]domain.PlanViolation, error) {
+	e.capturedPlans = append(e.capturedPlans, plan)
+	e.capturedCounts = append(e.capturedCounts, len(rules))
+	if strings.Contains(plan, "Turn Context") && strings.Contains(plan, "allow explicit exception") {
+		return nil, nil
+	}
+	if len(rules) > 0 {
+		return []domain.PlanViolation{{Fact: rules[0], Probability: 0.94, Confidence: 0.90}}, nil
+	}
+	return nil, nil
+}
+
+func TestGuardrailOmitsStaleTurnPromptAfterMutation(t *testing.T) {
+	ctx := context.Background()
+	eval := &batchVerifyEval{
+		stubEval: stubEval{
+			dec: domain.MutationDecision{
+				Category:    "architecture",
+				Tier:        "rule",
+				IsPermanent: 0.95,
+				Action:      "INSERT",
+				Confidence:  0.95,
+			},
+		},
+	}
+	st := newTestStack(t, ":memory:", eval)
+
+	repo := t.TempDir()
+	scope := "project:" + strings.ToLower(filepath.Base(repo))
+	if _, err := st.mem.CommitMemory(ctx, "project_progress stores events without status", "architecture", scope); err != nil {
+		t.Fatalf("CommitMemory: %v", err)
+	}
+	eval.dec = domain.MutationDecision{Action: "IGNORE"}
+
+	const sessID = "sess-mutated-prompt"
+	const prompt = "drop project_progress.status and update rule"
+	turnPayload, _ := json.Marshal(map[string]any{
+		"session_id": sessID,
+		"cwd":        repo,
+		"prompt":     prompt,
+	})
+	_, _, _ = st.gr.ExecuteHook(ctx, "claude-turn", turnPayload, repo)
+
+	buildPayload, _ := json.Marshal(map[string]any{
+		"session_id": sessID,
+		"cwd":        repo,
+		"tool_name":  "run_command",
+		"tool_input": map[string]any{"command": "CGO_ENABLED=0 go build ./cmd/memorize"},
+	})
+
+	// Clean Phase 1 plans must NEVER receive conversational turn prompt prose.
+	if _, _, err := st.gr.ExecuteHook(ctx, "claude-pretool", buildPayload, repo); err != nil {
+		t.Fatalf("ExecuteHook clean pretool: %v", err)
+	}
+	if len(eval.capturedPlans) != 1 || strings.Contains(eval.capturedPlans[0], prompt) {
+		t.Fatalf("expected clean Phase 1 call without prompt prose, got %+v", eval.capturedPlans)
+	}
+
+	// Unmutated flagging triggers lazy Phase 2 override check with turn prompt context.
+	eval.violate = true
+	if _, _, err := st.gr.ExecuteHook(ctx, "claude-pretool", buildPayload, repo); err != nil {
+		t.Fatalf("ExecuteHook violated pretool before mutate: %v", err)
+	}
+	if len(eval.capturedPlans) != 3 || strings.Contains(eval.capturedPlans[1], prompt) || !strings.Contains(eval.capturedPlans[2], prompt) {
+		t.Fatalf("expected Phase 1 (clean) + Phase 2 (with prompt) before mutate, got %+v", eval.capturedPlans)
+	}
+
+	// Once turn is mutated, Phase 2 must skip stale rule-change prompt.
+	st.mem.MarkTurnScopeMutated(scope)
+	if _, _, err := st.gr.ExecuteHook(ctx, "claude-pretool", buildPayload, repo); err != nil {
+		t.Fatalf("ExecuteHook pretool after mutate: %v", err)
+	}
+	if len(eval.capturedPlans) != 4 {
+		t.Fatalf("expected single Phase 1 call without Phase 2 after mutate, got %d plans", len(eval.capturedPlans))
+	}
+	if strings.Contains(eval.capturedPlans[3], prompt) {
+		t.Fatalf("expected mutated turn NOT to re-attach stale rule-change prompt, got:\n%s", eval.capturedPlans[3])
+	}
+}
+
+func TestGuardrailLazyOverrideAllowsExplicitExceptionAcrossFlaggedRulesOnly(t *testing.T) {
+	ctx := context.Background()
+	eval := &lazyOverrideVerifyEval{
+		stubEval: stubEval{
+			dec: domain.MutationDecision{
+				Category:    "architecture",
+				Tier:        "rule",
+				IsPermanent: 0.95,
+				Action:      "INSERT",
+				Confidence:  0.95,
+			},
+		},
+	}
+	st := newTestStack(t, ":memory:", eval)
+
+	repo := t.TempDir()
+	scope := "project:" + strings.ToLower(filepath.Base(repo))
+	for _, r := range []string{"Rule one forbid X", "Rule two forbid Y", "Rule three forbid Z"} {
+		if _, err := st.mem.CommitMemory(ctx, r, "architecture", scope); err != nil {
+			t.Fatalf("CommitMemory: %v", err)
+		}
+	}
+	eval.dec = domain.MutationDecision{Action: "IGNORE"}
+
+	const sessID = "sess-lazy-override"
+	turnPayload, _ := json.Marshal(map[string]any{
+		"session_id": sessID,
+		"cwd":        repo,
+		"prompt":     "Please allow explicit exception to run tool once",
+	})
+	_, _, _ = st.gr.ExecuteHook(ctx, "antigravity-turn", turnPayload, repo)
+
+	cmdPayload, _ := json.Marshal(map[string]any{
+		"session_id": sessID,
+		"cwd":        repo,
+		"tool_name":  "run_command",
+		"tool_input": map[string]any{"command": "echo-via-custom-runner"},
+	})
+	out, code, err := st.gr.ExecuteHook(ctx, "antigravity-pretool", cmdPayload, repo)
+	if err != nil || code != 0 || !strings.Contains(out, `"decision":"allow"`) {
+		t.Fatalf("expected lazy Phase 2 override to allow cleanly, got code=%d err=%v out=%s", code, err, out)
+	}
+	if len(eval.capturedCounts) != 2 || eval.capturedCounts[0] != 3 || eval.capturedCounts[1] != 1 {
+		t.Fatalf("expected Phase 1 (3 rules) -> Phase 2 (only 1 flagged rule), got counts=%v", eval.capturedCounts)
 	}
 }

@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -167,15 +166,7 @@ func (j *JevAdapter) CallDecisions(ctx context.Context, state string, questions 
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, j.endpoint, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if j.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+j.apiKey)
-	}
-	resp, err := httpClient.Do(req)
+	resp, err := postJSONRaw(ctx, httpClient, j.endpoint, body, "Authorization", bearerAuth(j.apiKey))
 	if err != nil {
 		return nil, fmt.Errorf("System 1 endpoint unreachable (%s): %w", j.endpoint, err)
 	}

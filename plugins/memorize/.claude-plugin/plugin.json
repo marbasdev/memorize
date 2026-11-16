@@ -1,7 +1,7 @@
 {
   "name": "memorize",
-  "version": "1.0.1",
-  "description": "State-evaluated MCP memory server backed by SQLite with lifecycle context injection, Git rule sync, PreToolUse guardrails, and web console.",
+  "version": "1.1.0",
+  "description": "State-evaluated MCP memory server backed by SQLite with lifecycle context injection, Git rule sync, hybrid PreToolUse/Stop guardrails, and web console.",
   "license": "MIT",
   "repository": "https://github.com/marbasdev/memorize",
   "mcpServers": {

@@ -6,17 +6,18 @@ Security updates are applied to the latest release tag on `main`:
 
 | Version | Supported |
 | :--- | :--- |
-| `1.0.x` (`main`) | Yes |
+| `1.x` (`main`) | Yes |
 | `< 1.0.0` | No |
 
 ## Threat Model & Built-in Mitigations
 
 `memorize` is designed to run locally on a developer workstation:
 
-- **Loopback Binding & CSRF Protection**: The unified daemon binds to `127.0.0.1` by default and validates `Host`, `Origin`, and `Sec-Fetch-Site` on mutating endpoints (`/ui/*` requires `HX-Request`).
+- **Loopback Binding & CSRF Protection**: The unified daemon binds to `127.0.0.1` by default and validates `Host`, `Origin`, and `Sec-Fetch-Site` on mutating endpoints (`/ui/*` requires `HX-Request`; `/api/daemon/*` validates local JSON POST).
 - **SQLite Storage**: Local state is stored in SQLite (`WAL` mode) with `0600` file permissions and `0700` data/model directories.
-- **Credential Storage & Redaction**: API keys may be provided via environment variables or stored in local SQLite config (never echoed raw in API responses or SSR HTML, and secret-redacted in `guardrail_logs`).
+- **Credential Storage & Redaction**: API keys may be provided via environment variables or stored in local SQLite config (never echoed raw in API responses or SSR HTML, strictly host-matched on dispatch, and secret-redacted in `guardrail_logs`).
 - **Path & Download Safety**: Managed GGUF operations validate safe `.gguf` filenames, reject path traversal, restrict remote model downloads to `https://` (or loopback `http://127.0.0.1|localhost`), and verify `SHA256SUMS` during release binary bootstrapping.
+- **Git Worktree & SSH Sync Isolation**: Declarative `.memorize/TEAM_RULES.md` mutations commit and push only from clean temporary `git worktree` directories with `GIT_TERMINAL_PROMPT=0` so active workspace files never leak. Dormant cross-device SSH transport enforces non-interactive `BatchMode=yes`, `--` option termination, and flag/shell-metacharacter rejection (`ParseSyncTarget` / `ValidateRemoteBin`), and remains disabled by default in `v1.1`.
 
 ## Reporting a Vulnerability
 

@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -191,15 +190,7 @@ func (g *GGUFAdapter) CallJSON(ctx context.Context, prompt string, schema map[st
 		if err != nil {
 			return nil, err
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		if g.apiKey != "" {
-			req.Header.Set("Authorization", "Bearer "+g.apiKey)
-		}
-		return ggufClient.Do(req)
+		return postJSONRaw(ctx, ggufClient, url, body, "Authorization", bearerAuth(g.apiKey))
 	}
 
 	resp, err := sendOnce(minimal)

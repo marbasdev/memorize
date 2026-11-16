@@ -16,6 +16,7 @@ import (
 	"memorize/internal/modules/guardrail"
 	"memorize/internal/modules/memory"
 	"memorize/internal/modules/progress"
+	"memorize/internal/modules/rulepack"
 	thttp "memorize/internal/transport/http"
 )
 
@@ -27,6 +28,7 @@ type Deps struct {
 	Memory     *memory.Service
 	Progress   *progress.Service
 	Guardrail  *guardrail.Service
+	RulePack   *rulepack.Service
 	LocalModel *localmodel.Manager
 	Hooks      thttp.DashboardHooks
 }
@@ -42,6 +44,9 @@ func NewHandler(d Deps) http.Handler {
 		}
 		if d.Guardrail == nil {
 			d.Guardrail = guardrail.New(d.Memory, d.Progress)
+		}
+		if d.RulePack == nil {
+			d.RulePack = rulepack.New(d.Memory)
 		}
 	}
 	mux := http.NewServeMux()

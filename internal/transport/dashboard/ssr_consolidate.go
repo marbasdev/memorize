@@ -354,10 +354,10 @@ func registerSSRConsolidateRoutes(mux *http.ServeMux, d Deps) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		toast := fmt.Sprintf("Updated categories for %d memory(ies)", updated)
-		if lang == "ko" {
-			toast = fmt.Sprintf("AI 분류 정리 완료 (%d건 카테고리 반영)", updated)
-		}
+		toast := langText(lang,
+			fmt.Sprintf("Updated categories for %d memory(ies)", updated),
+			fmt.Sprintf("AI 분류 정리 완료 (%d건 카테고리 반영)", updated),
+		)
 		renderMemoriesAfterMutation(w, r, d, lang, toast, true, true)
 	}))
 

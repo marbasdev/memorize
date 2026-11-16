@@ -117,6 +117,32 @@ func parseFormIDs(vals url.Values) []int64 {
 	return out
 }
 
+func langText(lang, en, ko string) string {
+	if lang == "ko" {
+		return ko
+	}
+	return en
+}
+
+func formatRetentionToast(lang, kindEN, kindKO string, days, deleted int) string {
+	lbl := formatRetentionLabel(lang, days)
+	if deleted > 0 {
+		return langText(lang,
+			fmt.Sprintf("Saved (%s) · cleaned %d expired entries", lbl, deleted),
+			fmt.Sprintf("보관 정책 저장 (%s) · 만료 기록 %d건 자동 정리", lbl, deleted),
+		)
+	}
+	return langText(lang,
+		fmt.Sprintf("%s (%s)", kindEN, lbl),
+		fmt.Sprintf("%s (%s)", kindKO, lbl),
+	)
+}
+
+func parsePositiveInt64(raw string) int64 {
+	id, _ := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	return id
+}
+
 func renderMemoriesAfterMutation(w http.ResponseWriter, r *http.Request, d Deps, lang string, toast string, closeModal, clearSel bool) {
 	memView, err := buildMemoriesView(r.Context(), d, lang, r.Form, true)
 	if err != nil {
@@ -131,6 +157,18 @@ func renderEnginesSection(w http.ResponseWriter, r *http.Request, d Deps, lang s
 	view := buildEnginesView(r.Context(), d, lang, q, overrideKey, overrideURL)
 	view.OOB = true
 	writeHTMLTemplate(w, "engines_section", view)
+}
+
+func renderEnginesToast(w http.ResponseWriter, r *http.Request, d Deps, lang, toast, view string) {
+	setHXTriggers(w, toast, false, false)
+	q := url.Values{}
+	if strings.TrimSpace(view) != "" {
+		q.Set("view", strings.TrimSpace(view))
+	}
+	if tw := strings.TrimSpace(r.FormValue("tw")); tw != "" {
+		q.Set("tw", tw)
+	}
+	renderEnginesSection(w, r, d, lang, q, "", "")
 }
 
 func registerSSRRoutes(mux *http.ServeMux, d Deps) {
@@ -151,12 +189,14 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 			return
 		}
 		progView, _ := buildProgressView(ctx, d, lang, r.URL.Query())
+		teamView := buildTeamView(ctx, d, lang, r.URL.Query())
 		grView := buildGuardrailsView(ctx, d, lang, r.URL.Query(), memView.Scopes)
 		engView := buildEnginesView(ctx, d, lang, r.URL.Query(), "", "")
 		calView := buildCalibrateView(ctx, d, lang, r.URL.Query(), memView.Scopes)
 		writeHTMLTemplate(w, "layout", ssrPageData{
 			Lang:       lang,
 			Memories:   memView,
+			Team:       teamView,
 			Progress:   progView,
 			Guardrails: grView,
 			Engines:    engView,
@@ -385,13 +425,11 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		msg := fmt.Sprintf("Saved & applied engine: %s", strings.ToUpper(prov))
-		if lang == "ko" {
-			msg = fmt.Sprintf("추론 엔진 저장 완료: %s", strings.ToUpper(prov))
-		}
-		setHXTriggers(w, msg, false, false)
-		q := url.Values{"view": {prov}}
-		renderEnginesSection(w, r, d, lang, q, "", "")
+		msg := langText(lang,
+			fmt.Sprintf("Saved & applied engine: %s", strings.ToUpper(prov)),
+			fmt.Sprintf("추론 엔진 저장 완료: %s", strings.ToUpper(prov)),
+		)
+		renderEnginesToast(w, r, d, lang, msg, prov)
 	}))
 
 	mux.HandleFunc("/ui/engines/routing", postHX(func(w http.ResponseWriter, r *http.Request) {
@@ -426,24 +464,11 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		msg := "Feature model routing saved"
+		msg := langText(lang, "Feature model routing saved", "기능별 모델 라우팅을 저장했습니다")
 		if mode == "reset_all" {
-			msg = "All features reset to bulk default engine"
-			if lang == "ko" {
-				msg = "모든 기능을 일괄 기본 엔진으로 되돌렸습니다"
-			}
-		} else if lang == "ko" {
-			msg = "기능별 모델 라우팅을 저장했습니다"
+			msg = langText(lang, "All features reset to bulk default engine", "모든 기능을 일괄 기본 엔진으로 되돌렸습니다")
 		}
-		setHXTriggers(w, msg, false, false)
-		q := url.Values{}
-		if v := strings.TrimSpace(r.FormValue("view")); v != "" {
-			q.Set("view", v)
-		}
-		if tw := strings.TrimSpace(r.FormValue("tw")); tw != "" {
-			q.Set("tw", tw)
-		}
-		renderEnginesSection(w, r, d, lang, q, "", "")
+		renderEnginesToast(w, r, d, lang, msg, r.FormValue("view"))
 	}))
 
 	mux.HandleFunc("/ui/engines/telemetry/reset", postHX(func(w http.ResponseWriter, r *http.Request) {
@@ -452,19 +477,7 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		msg := "Evaluator telemetry reset"
-		if lang == "ko" {
-			msg = "추론 엔진 텔레메트리를 초기화했습니다"
-		}
-		setHXTriggers(w, msg, false, false)
-		q := url.Values{}
-		if v := strings.TrimSpace(r.FormValue("view")); v != "" {
-			q.Set("view", v)
-		}
-		if tw := strings.TrimSpace(r.FormValue("tw")); tw != "" {
-			q.Set("tw", tw)
-		}
-		renderEnginesSection(w, r, d, lang, q, "", "")
+		renderEnginesToast(w, r, d, lang, langText(lang, "Evaluator telemetry reset", "추론 엔진 텔레메트리를 초기화했습니다"), r.FormValue("view"))
 	}))
 
 	mux.HandleFunc("/ui/models/download", postHX(func(w http.ResponseWriter, r *http.Request) {
@@ -489,8 +502,7 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 			}
 			toast = "Downloading " + fname
 		}
-		setHXTriggers(w, toast, false, false)
-		renderEnginesSection(w, r, d, lang, url.Values{"view": {"gguf"}}, "", "")
+		renderEnginesToast(w, r, d, lang, toast, "gguf")
 	}))
 
 	mux.HandleFunc("/ui/models/server", postHX(func(w http.ResponseWriter, r *http.Request) {
@@ -538,9 +550,10 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 			http.Error(w, "unknown server action", http.StatusBadRequest)
 			return
 		}
-		setHXTriggers(w, toast, false, false)
-		renderEnginesSection(w, r, d, lang, url.Values{"view": {"gguf"}}, "", "")
+		renderEnginesToast(w, r, d, lang, toast, "gguf")
 	}))
 
 	registerSSRCalibrateRoutes(mux, d)
+	registerSSRTeamRoutes(mux, d)
+	registerSSRSyncRoutes(mux, d)
 }

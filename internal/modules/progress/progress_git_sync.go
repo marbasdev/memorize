@@ -11,7 +11,7 @@ import (
 )
 
 // AutoSyncProgressCommits performs fast, deterministic (<5ms, zero-LLM) incremental Git commit sync
-// into project_progress on SessionStart when a project scope already has an anchored synced_commit.
+// into project_progress on SessionStart/PreInvocation turns.
 func (s *Service) AutoSyncProgressCommits(ctx context.Context, rawScope, repoDir string) int {
 	sc := domain.NormalizeScope(rawScope)
 	if !strings.HasPrefix(sc, "project:") {
@@ -22,9 +22,6 @@ func (s *Service) AutoSyncProgressCommits(ctx context.Context, rawScope, repoDir
 		return 0
 	}
 	lastCommit := s.mem.GetSyncedCommit(ctx, sc)
-	if lastCommit == "" {
-		return 0
-	}
 	head, pending := s.collectPendingGitCommits(ctx, sc, root, lastCommit, 10)
 	if head == "" || len(pending) == 0 {
 		return 0
@@ -75,7 +72,6 @@ func (s *Service) AutoSyncProgressCommits(ctx context.Context, rawScope, repoDir
 			Track:       ms.track,
 			Category:    ms.cat,
 			SubCategory: ms.sub,
-			Status:      domain.ProgressStatusDone,
 			Summary:     combinedSum,
 			Details:     strings.Join(ms.details, "\n"),
 			CommitSHA:   ms.headSHA,
@@ -126,7 +122,6 @@ func (s *Service) SyncProjectProgress(ctx context.Context, rawScope, explicitRep
 				Track:       track,
 				Category:    k.cat,
 				SubCategory: k.sub,
-				Status:      domain.ProgressStatusDone,
 				Summary:     sum,
 				Details:     details,
 				MemoryIDs:   ids,
@@ -209,7 +204,6 @@ func (s *Service) SyncProjectProgress(ctx context.Context, rawScope, explicitRep
 				Track:       ms.track,
 				Category:    ms.cat,
 				SubCategory: ms.sub,
-				Status:      domain.ProgressStatusDone,
 				Summary:     combinedSum,
 				Details:     strings.Join(ms.details, "\n"),
 				CommitSHA:   ms.headSHA,
@@ -217,20 +211,6 @@ func (s *Service) SyncProjectProgress(ctx context.Context, rawScope, explicitRep
 			}); err == nil {
 				res.SyncedCommits += ms.count
 			}
-		}
-	}
-
-	// 3. Resolve memory-triggered 'needs_sync' items when repository sync completes at HEAD
-	if state.HeadCommit != "" && (res.SyncedCommits > 0 || state.SyncedCommit != state.HeadCommit) {
-		if r, err := s.db.ExecContext(ctx, `
-			UPDATE project_progress
-			SET status = 'done',
-			    commit_sha = CASE WHEN COALESCE(commit_sha, '') = '' THEN ? ELSE commit_sha END,
-			    updated_at = CURRENT_TIMESTAMP
-			WHERE scope = ? AND status = 'needs_sync'
-		`, state.HeadCommit, sc); err == nil {
-			n, _ := r.RowsAffected()
-			res.ResolvedSyncs = int(n)
 		}
 	}
 
@@ -311,7 +291,6 @@ func (s *Service) SyncAllProjectsProgress(ctx context.Context, lang string) (dom
 		}
 		total.SyncedMemories += r.SyncedMemories
 		total.SyncedCommits += r.SyncedCommits
-		total.ResolvedSyncs += r.ResolvedSyncs
 		if total.HeadCommit == "" && r.HeadCommit != "" {
 			total.HeadCommit = r.HeadCommit
 		}

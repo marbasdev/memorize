@@ -119,7 +119,7 @@
     <rect class="sub-err" x="30" y="294" width="940" height="44" rx="6" />
     <text x="44" y="320" class="mono t-err" font-size="11" font-weight="700">BLOCKED · git-precommit · Violated #1 (CGO)</text>
     <rect class="sub" x="30" y="346" width="940" height="44" rx="6" />
-    <text x="44" y="372" class="mono t-ok" font-size="11">PASS · pretool · Edit(README.md)</text>
+    <text x="44" y="372" class="mono t-ok" font-size="11">PASS · stop · Edit(README.md)</text>
   </g>
   <g class="f2">
     <rect class="sub-err" x="30" y="294" width="940" height="44" rx="6" />

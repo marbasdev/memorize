@@ -113,6 +113,7 @@
         <select id="guardrailSource" name="gr_source" class="gr-filter-sel" aria-label="Guardrail Source Filter">
           <option value="" {{if eq .Query.Source ""}}selected{{end}}>{{t .Lang "gr_src_all"}}</option>
           <option value="pretool" {{if eq .Query.Source "pretool"}}selected{{end}}>{{t .Lang "gr_src_pretool"}}</option>
+          <option value="stop" {{if eq .Query.Source "stop"}}selected{{end}}>{{t .Lang "gr_src_stop"}}</option>
           <option value="git-precommit" {{if eq .Query.Source "git-precommit"}}selected{{end}}>{{t .Lang "gr_src_git"}}</option>
           <option value="verify" {{if eq .Query.Source "verify"}}selected{{end}}>{{t .Lang "gr_src_verify"}}</option>
         </select>

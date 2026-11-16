@@ -128,7 +128,6 @@ func (s *Service) RecordMemoryMutationProgress(ctx context.Context, rawScope, ca
 			Track:       track,
 			Category:    cat,
 			SubCategory: sub,
-			Status:      domain.ProgressStatusDone,
 			Summary:     entryLine,
 			Details:     entryLine,
 			MemoryIDs:   []int64{newID},
@@ -143,7 +142,7 @@ func (s *Service) RecordMemoryMutationProgress(ctx context.Context, rawScope, ca
 		SELECT id, COALESCE(memory_ids, '')
 		FROM project_progress
 		WHERE scope = ? AND category = ? AND COALESCE(sub_category, '') = ?
-		  AND source = 'memory' AND status = 'done'
+		  AND source = 'memory'
 		  AND updated_at >= datetime('now', '-15 minutes')
 		ORDER BY id DESC LIMIT 1
 	`, sc, cat, sub).Scan(&recentID, &recentMems)
@@ -177,7 +176,6 @@ func (s *Service) RecordMemoryMutationProgress(ctx context.Context, rawScope, ca
 			UPDATE project_progress
 			SET track = ?,
 			    session_id = CASE WHEN COALESCE(session_id, '') = '' THEN ? ELSE session_id END,
-			    status = 'done',
 			    summary = ?,
 			    details = ?,
 			    memory_ids = ?,
@@ -196,7 +194,6 @@ func (s *Service) RecordMemoryMutationProgress(ctx context.Context, rawScope, ca
 		Track:       track,
 		Category:    cat,
 		SubCategory: sub,
-		Status:      domain.ProgressStatusDone,
 		Summary:     sum,
 		Details:     det,
 		MemoryIDs:   []int64{newID},
@@ -372,16 +369,15 @@ func (s *Service) upgradeLegacyMemorySyncRows(ctx context.Context, scope string)
 		cat    string
 		sub    string
 		source string
-		status string
 		memIDs []int64
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, scope, category, COALESCE(sub_category, ''), COALESCE(source, ''), status, COALESCE(memory_ids, '')
+		SELECT id, scope, category, COALESCE(sub_category, ''), COALESCE(source, ''), COALESCE(memory_ids, '')
 		FROM project_progress
 		WHERE (? = '' OR scope = ?)
 		  AND source IN ('memory_sync', 'memory')
 		  AND COALESCE(memory_ids, '') != ''
-		  AND (COALESCE(details, '') = '' OR status = 'needs_sync')
+		  AND COALESCE(details, '') = ''
 		ORDER BY id ASC
 	`, scope, scope)
 	if err != nil {
@@ -391,7 +387,7 @@ func (s *Service) upgradeLegacyMemorySyncRows(ctx context.Context, scope string)
 	for rows.Next() {
 		var r legacyRow
 		var raw string
-		if rows.Scan(&r.id, &r.sc, &r.cat, &r.sub, &r.source, &r.status, &raw) == nil {
+		if rows.Scan(&r.id, &r.sc, &r.cat, &r.sub, &r.source, &raw) == nil {
 			r.memIDs = ParseMemoryIDsStr(raw)
 			if len(r.memIDs) > 0 {
 				targets = append(targets, r)
@@ -400,49 +396,7 @@ func (s *Service) upgradeLegacyMemorySyncRows(ctx context.Context, scope string)
 	}
 	rows.Close()
 
-	type needsSyncKey struct{ sc, cat, sub string }
-	type coalescedGroup struct {
-		keepID    int64
-		cat       string
-		sub       string
-		memIDs    []int64
-		seenMems  map[int64]bool
-		deleteIDs []int64
-		rowCount  int
-	}
-	nsGroups := make(map[needsSyncKey]*coalescedGroup)
-	var nsOrder []needsSyncKey
-
 	for _, t := range targets {
-		if t.source == "memory" && t.status == domain.ProgressStatusNeedsSync {
-			k := needsSyncKey{t.sc, t.cat, t.sub}
-			g := nsGroups[k]
-			if g == nil {
-				g = &coalescedGroup{keepID: t.id, cat: t.cat, sub: t.sub, seenMems: map[int64]bool{}}
-				nsGroups[k] = g
-				nsOrder = append(nsOrder, k)
-			} else {
-				g.deleteIDs = append(g.deleteIDs, g.keepID)
-				g.keepID = t.id
-			}
-			g.rowCount++
-			for _, id := range t.memIDs {
-				if g.seenMems[id] {
-					var next []int64
-					for _, x := range g.memIDs {
-						if x != id {
-							next = append(next, x)
-						}
-					}
-					g.memIDs = append(next, id)
-				} else {
-					g.seenMems[id] = true
-					g.memIDs = append(g.memIDs, id)
-				}
-			}
-			continue
-		}
-
 		facts := s.factsForProgressIDs(ctx, t.memIDs)
 		if len(facts) == 0 {
 			continue
@@ -457,38 +411,10 @@ func (s *Service) upgradeLegacyMemorySyncRows(ctx context.Context, scope string)
 			_, _ = s.db.ExecContext(ctx, `
 				UPDATE project_progress
 				SET track = CASE WHEN COALESCE(track, '') = '' THEN ? ELSE track END,
-				    status = 'done',
 				    summary = ?,
 				    details = ?
 				WHERE id = ?
 			`, track, sum, details, t.id)
 		}
 	}
-
-	for _, k := range nsOrder {
-		g := nsGroups[k]
-		facts := s.factsForProgressIDs(ctx, g.memIDs)
-		if len(facts) > 0 {
-			track, sum, details := buildMemoryMutationSummaryAndDetails(g.cat, g.sub, facts)
-			_, _ = s.db.ExecContext(ctx, `
-				UPDATE project_progress
-				SET track = CASE WHEN COALESCE(track, '') = '' THEN ? ELSE track END,
-				    status = 'done',
-				    summary = ?,
-				    details = ?,
-				    memory_ids = ?
-				WHERE id = ?
-			`, track, sum, details, formatMemoryIDsStr(g.memIDs), g.keepID)
-		}
-		for _, delID := range g.deleteIDs {
-			_, _ = s.db.ExecContext(ctx, `DELETE FROM project_progress WHERE id = ?`, delID)
-		}
-	}
-
-	// Retire any remaining legacy 'needs_sync' rows into completed history ('done').
-	_, _ = s.db.ExecContext(ctx, `
-		UPDATE project_progress
-		SET status = 'done'
-		WHERE (? = '' OR scope = ?) AND status = 'needs_sync'
-	`, scope, scope)
 }

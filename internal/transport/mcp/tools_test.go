@@ -182,9 +182,9 @@ func TestMCPToolHandlersRoundtrip(t *testing.T) {
 	scope := "project:mcptest"
 
 	commitFn := handleCommitTool(deps.Memory, deps.Progress, resolver)
-	queryFn := handleQueryTool(deps.Memory, deps.Progress, resolver)
+	queryFn := handleQueryTool(deps.Memory, deps.Progress, deps.RulePack, resolver)
 	verifyFn := handleVerifyTool(deps.Guardrail, deps.Progress, resolver)
-	manageFn := handleManageTool(deps.Memory, deps.Guardrail, resolver)
+	manageFn := handleManageTool(deps.Memory, deps.Guardrail, deps.Progress, resolver)
 	progressFn := handleProgressTool(deps.Progress, resolver)
 
 	// 1. Commit batch
@@ -306,7 +306,6 @@ func TestMCPToolHandlersRoundtrip(t *testing.T) {
 		"track":        "OSS Prep",
 		"category":     "architecture",
 		"sub_category": "testing",
-		"status":       "in_progress",
 		"summary":      "Expand command handler tests",
 		"details":      "Line 1\nLine 2",
 		"next_step":    "Run coverage check",
@@ -315,7 +314,7 @@ func TestMCPToolHandlersRoundtrip(t *testing.T) {
 	if err != nil || res.IsError {
 		t.Fatalf("progress record failed: %v %s", err, mcpText(t, res))
 	}
-	ov, err := deps.Progress.GetProgressOverviewByTrack(ctx, scope, "OSS Prep", "", "", "")
+	ov, err := deps.Progress.GetProgressOverviewByTrack(ctx, scope, "OSS Prep", "", "")
 	if err != nil || len(ov.Records) == 0 {
 		t.Fatalf("GetProgressOverviewByTrack failed: len=%d err=%v", len(ov.Records), err)
 	}
@@ -324,13 +323,12 @@ func TestMCPToolHandlersRoundtrip(t *testing.T) {
 	res, err = progressFn(ctx, mcpReq(map[string]any{
 		"action": "update",
 		"id":     progID,
-		"status": "done",
 	}))
 	if err != nil || res.IsError {
 		t.Fatalf("progress update failed: %v %s", err, mcpText(t, res))
 	}
 	gotProg, err := deps.Progress.GetProgressByID(ctx, progID)
-	if err != nil || gotProg.Status != "done" || gotProg.NextStep != "Run coverage check" {
+	if err != nil || gotProg.NextStep != "Run coverage check" {
 		t.Fatalf("unexpected progress after update: %+v err=%v", gotProg, err)
 	}
 
@@ -351,37 +349,5 @@ func TestMCPToolHandlersRoundtrip(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(t.TempDir(), "nonexistent")); !os.IsNotExist(err) {
 		t.Fatalf("unexpected file state")
-	}
-}
-
-func TestTouchMCPLiveSessionDoesNotCrossTalk(t *testing.T) {
-	deps, _ := newMCPTestDeps(t)
-	ctx := context.Background()
-	repo := t.TempDir()
-	scope := "project:" + strings.ToLower(filepath.Base(repo))
-	sidA := "conv-mcp-isolated-a"
-
-	_, _, _ = deps.Guardrail.ExecuteHook(ctx, "antigravity-turn", []byte(`{"conversationId":"`+sidA+`","workspacePaths":["`+repo+`"],"lastUserInput":"작업 1"}`), "")
-	_, _, _ = deps.Guardrail.ExecuteHook(ctx, "antigravity-stop", []byte(`{"conversationId":"`+sidA+`","workspacePaths":["`+repo+`"],"fullyIdle":true}`), "")
-
-	// Generic bridge MCP call without explicit session_id must NOT guess turn_state or resurrect finished Session A.
-	bridgeCtx := domain.WithSessionID(ctx, "bridge-999")
-	touchMCPLiveSession(bridgeCtx, deps.Progress, scope, "", "commit_memory")
-	if live := deps.Progress.ListLiveSessions(); len(live) != 0 {
-		t.Fatalf("expected generic bridge MCP call not to resurrect finished sidA, got %+v", live)
-	}
-
-	// Explicit non-generic session_id updates live session status cleanly without polluting Progress DB.
-	touchMCPLiveSession(bridgeCtx, deps.Progress, scope, "conv-explicit-mcp", "query_project_memory")
-	live := deps.Progress.ListLiveSessions()
-	if len(live) != 1 || live[0].SessionID != "conv-explicit-mcp" || live[0].Tool != "query_project_memory" {
-		t.Fatalf("expected explicit session_id MCP call in ListLiveSessions, got %+v", live)
-	}
-	ov, err := deps.Progress.GetProgressOverviewWithQuery(ctx, domain.ProgressQuery{Scope: scope})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ov.TotalCount != 0 {
-		t.Fatalf("expected live MCP session not to pollute persistent Progress DB, got total=%d", ov.TotalCount)
 	}
 }

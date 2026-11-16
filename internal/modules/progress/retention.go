@@ -39,15 +39,14 @@ func (s *Service) getProgressPrunedMemHWM(ctx context.Context, scope string) int
 	return v
 }
 
-// CleanupProgressHistory deletes only completed ('done') progress entries matching scope and age cutoff
-// (olderThanDays == 0 deletes all completed entries; >0 deletes entries older than N days),
-// protecting active ('in_progress', 'blocked', 'planned') tracks and recording a memory watermark
-// so pruned historical memories are not re-created on subsequent Progress/Git syncs.
+// CleanupProgressHistory deletes recorded progress entries matching scope and age cutoff
+// (olderThanDays == 0 deletes all entries for the scope; >0 deletes entries older than N days),
+// recording memory and git watermarks so pruned items are not re-created on subsequent syncs.
 func (s *Service) CleanupProgressHistory(ctx context.Context, rawScope string, olderThanDays int) (int, error) {
 	if olderThanDays < 0 {
 		return 0, fmt.Errorf("older_than_days must be >= 0")
 	}
-	conds := []string{`status = 'done'`}
+	var conds []string
 	var args []any
 	if strings.TrimSpace(rawScope) != "" {
 		sc := domain.NormalizeScope(rawScope)
@@ -58,7 +57,10 @@ func (s *Service) CleanupProgressHistory(ctx context.Context, rawScope string, o
 		conds = append(conds, `datetime(COALESCE(NULLIF(updated_at, ''), created_at)) <= datetime('now', ?)`)
 		args = append(args, fmt.Sprintf("-%d days", olderThanDays))
 	}
-	whereSQL := strings.Join(conds, " AND ")
+	whereSQL := "1=1"
+	if len(conds) > 0 {
+		whereSQL = strings.Join(conds, " AND ")
+	}
 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT scope, COALESCE(memory_ids, ''), COALESCE(commit_sha, '')

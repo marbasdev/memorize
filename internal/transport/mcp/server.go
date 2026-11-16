@@ -10,6 +10,7 @@ import (
 	"memorize/internal/modules/guardrail"
 	"memorize/internal/modules/memory"
 	"memorize/internal/modules/progress"
+	"memorize/internal/modules/rulepack"
 )
 
 // ServerInstructions holds the protocol guidance sent to MCP clients during initialize.
@@ -19,7 +20,9 @@ const ServerInstructions = `Memorize Protocol:
 3. Commit Before Mutating: commit user decisions/approvals atomically (1 behavior = 1 item in candidate_facts, user's language) via commit_memory or manage_memory(update) BEFORE edits/commands; commit new choices before finishing.
 4. Onboarding: if [ONBOARDING AVAILABLE], ask user first; call manage_memory(skip_onboarding) if declined, or inspect files, resolve conflicts, commit, and offer cleanup.
 5. SSOT: active memories replace static rule files (CLAUDE.md/AGENTS.md) and override older turns; ignore (Replaces: ...) and [REVOKED ...].
-6. Progress: use project_progress for work tracks ('planned' unstarted, 'in_progress' active, 'blocked' halted with blocker in next_step, 'done').`
+6. Progress: optionally call project_progress(action="record") after completing notable tasks or milestones to log completed work in the activity feed.
+7. Team Rules: use team_rules for shared .memorize/TEAM_RULES.md rules (list/sync/add/promote/resolve_conflict/duplicates); NEVER hand-edit TEAM_RULES.md so workspace code stays unmixed.
+8. Verify Plan: call verify_plan_against_memory once before multi-file refactors; shell commands gate PreToolUse while file edits batch-verify on Stop.`
 
 // BridgeReqMeta carries per-request metadata forwarded by the stateless stdio HTTP bridge.
 type BridgeReqMeta struct {
@@ -50,6 +53,7 @@ type Deps struct {
 	Memory    *memory.Service
 	Progress  *progress.Service
 	Guardrail *guardrail.Service
+	RulePack  *rulepack.Service
 	Version   string
 }
 
@@ -57,7 +61,10 @@ type Deps struct {
 func NewServer(deps Deps) *server.MCPServer {
 	ver := deps.Version
 	if ver == "" {
-		ver = "1.0.1"
+		ver = "1.1.0"
+	}
+	if deps.Memory != nil && deps.RulePack == nil {
+		deps.RulePack = rulepack.New(deps.Memory)
 	}
 	srv := server.NewMCPServer("memorize", ver,
 		server.WithToolCapabilities(false),

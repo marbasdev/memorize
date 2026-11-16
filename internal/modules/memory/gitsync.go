@@ -176,26 +176,48 @@ func (s *Service) CommitBatch(ctx context.Context, facts []string, category, raw
 			seenInBatch[key] = true
 		}
 
-		g, gctx := errgroup.WithContext(evalCtx)
-		g.SetLimit(4)
+		var evalIdxs []int
+		var evalCands []string
 		for i, fact := range clean {
 			if slots[i].skipMsg != "" {
 				continue
 			}
-			idx, cand := i, fact
-			g.Go(func() error {
-				evalStart := time.Now()
-				d, err := ev.EvaluateMutation(gctx, targetScope, cand, existing)
-				s.router.RecordTelemetry(gctx, domain.TaskMutation, ev, evalStart, len(existing), err)
-				if err != nil {
-					return err
-				}
-				slots[idx].dec = d
-				return nil
-			})
+			evalIdxs = append(evalIdxs, i)
+			evalCands = append(evalCands, fact)
 		}
-		if err := g.Wait(); err != nil {
-			return "", err
+		if len(evalCands) > 0 {
+			if bm, ok := ev.(domain.BatchMutationEvaluator); ok {
+				evalStart := time.Now()
+				decs, err := bm.EvaluateMutations(evalCtx, targetScope, evalCands, existing)
+				s.router.RecordTelemetry(evalCtx, domain.TaskMutation, ev, evalStart, max(len(existing), len(evalCands)), err)
+				if err != nil {
+					return "", err
+				}
+				for j, idx := range evalIdxs {
+					if j < len(decs) {
+						slots[idx].dec = decs[j]
+					}
+				}
+			} else {
+				g, gctx := errgroup.WithContext(evalCtx)
+				g.SetLimit(1)
+				for j, idx := range evalIdxs {
+					slotIdx, cand := idx, evalCands[j]
+					g.Go(func() error {
+						evalStart := time.Now()
+						d, err := ev.EvaluateMutation(gctx, targetScope, cand, existing)
+						s.router.RecordTelemetry(gctx, domain.TaskMutation, ev, evalStart, len(existing), err)
+						if err != nil {
+							return err
+						}
+						slots[slotIdx].dec = d
+						return nil
+					})
+				}
+				if err := g.Wait(); err != nil {
+					return "", err
+				}
+			}
 		}
 
 		for i, fact := range clean {

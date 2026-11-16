@@ -40,29 +40,13 @@ func registerRetentionAPIRoutes(mux *http.ServeMux, d Deps) {
 			case <-r.Context().Done():
 				return
 			case ev := <-ch:
-				if ev.Domain == "live" {
-					_, _ = fmt.Fprintf(w, "event: live\ndata: {\"seq\":%d}\n\n", ev.Seq)
-				} else {
-					_, _ = fmt.Fprintf(w, "event: change\ndata: {\"seq\":%d,\"domain\":%q}\n\n", ev.Seq, ev.Domain)
-				}
+				_, _ = fmt.Fprintf(w, "event: change\ndata: {\"seq\":%d,\"domain\":%q}\n\n", ev.Seq, ev.Domain)
 				flusher.Flush()
 			case <-ping.C:
 				_, _ = fmt.Fprint(w, ": ping\n\n")
 				flusher.Flush()
 			}
 		}
-	})
-
-	mux.HandleFunc("/api/live-sessions", func(w http.ResponseWriter, r *http.Request) {
-		if !thttp.IsAllowedLocalOrigin(r) {
-			thttp.WriteJSON(w, http.StatusForbidden, map[string]any{"error": "cross-origin request blocked"})
-			return
-		}
-		if r.Method != http.MethodGet {
-			thttp.WriteJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "GET required"})
-			return
-		}
-		thttp.WriteJSON(w, http.StatusOK, map[string]any{"sessions": d.Progress.ListLiveSessions()})
 	})
 
 	mux.HandleFunc("/api/retention", func(w http.ResponseWriter, r *http.Request) {

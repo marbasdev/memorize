@@ -78,100 +78,6 @@
     return null;
   }
 
-  let liveSessionsCache = [];
-
-  function formatLiveAction(s) {
-    const parts = [];
-    if (s.project) parts.push(s.project);
-    if (s.tool) parts.push(s.target ? `${s.tool}: ${s.target}` : s.tool);
-    else if (s.target) parts.push(s.target);
-    return parts.join(' · ');
-  }
-
-  function fmtLatencyMs(ms) {
-    const v = Math.max(0, Number(ms) || 0);
-    if (v === 0) return '0ms';
-    if (v > 0 && v < 1) return '<1ms';
-    if (v < 1000) return `${Math.round(v)}ms`;
-    return `${(v / 1000).toFixed(2)}s`;
-  }
-
-  function formatLiveHookMeta(s, isKO) {
-    const calls = Math.max(0, Number(s.hook_calls) || 0);
-    if (calls <= 0) return '';
-    const dur = fmtLatencyMs(s.hook_elapsed_ms || 0);
-    return isKO ? `훅 ${calls}회 · ${dur}` : `hooks ${calls}x · ${dur}`;
-  }
-
-  function renderLiveSessions(list) {
-    const sessions = Array.isArray(list) ? list : [];
-    liveSessionsCache = sessions;
-    const isKO = document.documentElement.lang === 'ko';
-
-    const badge = document.getElementById('liveSessionsBadge');
-    if (badge) {
-      badge.replaceChildren();
-      if (sessions.length === 0) {
-        badge.style.display = 'none';
-      } else {
-        const dot = document.createElement('span');
-        dot.className = 'live-dot';
-        const first = formatLiveAction(sessions[0]);
-        const hookMeta = formatLiveHookMeta(sessions[0], isKO);
-        const prefix = isKO ? `실행 중 ${sessions.length}` : `Live ${sessions.length}`;
-        const suffix = [first, hookMeta].filter(Boolean).join(' · ');
-        const label = document.createTextNode(suffix ? `${prefix} · ${suffix}` : prefix);
-        badge.append(dot, label);
-        badge.title = sessions.map(s => {
-          const hm = formatLiveHookMeta(s, isKO);
-          const span = Math.max(0, Number(s.session_age_sec) || Number(s.age_sec) || 0);
-          return `${s.session_id} · ${formatLiveAction(s)}${hm ? ' · ' + hm : ''} (${span}s)`;
-        }).join('\n');
-        badge.style.display = 'inline-flex';
-      }
-    }
-
-    const strip = document.getElementById('liveSessionsStrip');
-    if (strip) {
-      if (sessions.length === 0) {
-        strip.style.display = 'none';
-        strip.replaceChildren();
-      } else {
-        const nodes = [];
-        const hdr = document.createElement('span');
-        hdr.style.fontWeight = '600';
-        hdr.textContent = isKO ? '활성 세션' : 'Active sessions';
-        nodes.push(hdr);
-        for (const s of sessions) {
-          const chip = document.createElement('span');
-          chip.className = 'live-chip';
-          const spanSec = Math.max(0, Number(s.session_age_sec) || 0);
-          const hm = formatLiveHookMeta(s, isKO);
-          chip.title = `${s.session_id} (${s.scope})${spanSec ? ` · session ${spanSec}s` : ''}${hm ? ` · ${hm}` : ''}`;
-          const dot = document.createElement('span');
-          dot.className = 'live-dot';
-          const shortSID = s.session_id.length > 10 ? s.session_id.slice(0, 10) : s.session_id;
-          const desc = formatLiveAction(s);
-          const age = `${Math.max(0, Number(s.age_sec) || 0)}s`;
-          const textParts = [desc, hm, shortSID, age].filter(Boolean);
-          chip.append(dot, document.createTextNode(textParts.join(' · ')));
-          nodes.push(chip);
-        }
-        strip.replaceChildren(...nodes);
-        strip.style.display = 'flex';
-      }
-    }
-  }
-
-  async function refreshLiveSessions() {
-    try {
-      const res = await fetch('/api/live-sessions', { cache: 'no-store' });
-      if (!res.ok) return;
-      const data = await res.json();
-      renderLiveSessions(data && data.sessions ? data.sessions : []);
-    } catch (_) {}
-  }
-
   if (window.htmx && window.htmx.config) {
     window.htmx.config.defaultSettleDelay = 0;
     window.htmx.config.allowScriptTags = false;
@@ -182,15 +88,15 @@
       case 'progress':
         return ['progress'];
       case 'memories':
-        return ['memories', 'calibrate'];
+        return ['memories', 'team', 'calibrate'];
       case 'guardrails':
         return ['guardrails'];
       default:
-        return ['memories', 'progress', 'guardrails', 'engines', 'calibrate'];
+        return ['memories', 'team', 'progress', 'guardrails', 'engines', 'calibrate'];
     }
   }
 
-  const VALID_TABS = new Set(['memories', 'progress', 'guardrails', 'engines', 'calibrate']);
+  const VALID_TABS = new Set(['memories', 'team', 'progress', 'guardrails', 'engines', 'calibrate']);
 
   function hashTabName() {
     const raw = String(window.location.hash || '').replace(/^#/, '').trim().toLowerCase();
@@ -245,10 +151,12 @@
       if (this.selectedIDs.length > 0 || this.progCleanConfirm || this.grCleanConfirm) return true;
       const dr = document.getElementById('commitForm');
       if (dr && dr.classList.contains('open')) return true;
+      const tdr = document.getElementById('teamAddForm');
+      if (tdr && tdr.classList.contains('open')) return true;
       const ae = document.activeElement;
       if (!ae) return false;
       const tag = ae.tagName;
-      if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
+      if (tag === 'TEXTAREA') return true;
       return tag === 'INPUT' && ae.type !== 'checkbox' && ae.type !== 'button';
     },
 
@@ -259,6 +167,10 @@
         const f = document.getElementById('memoryFilterForm');
         const q = f ? new URLSearchParams(new FormData(f)).toString() : '';
         window.htmx.ajax('GET', '/ui/memories' + (q ? '?' + q : ''), { target: '#memoriesSection', swap: 'innerHTML' });
+      } else if (tabName === 'team') {
+        const f = document.getElementById('teamFilterForm');
+        const q = f ? new URLSearchParams(new FormData(f)).toString() : '';
+        window.htmx.ajax('GET', '/ui/team' + (q ? '?' + q : ''), { target: '#teamSection', swap: 'innerHTML' });
       } else if (tabName === 'progress') {
         const f = document.getElementById('progressFilterForm');
         const p = f ? new URLSearchParams(new FormData(f)) : new URLSearchParams();
@@ -292,7 +204,6 @@
 
     handleConnectivityResume() {
       refreshDaemonBadge();
-      refreshLiveSessions();
       if (!this._sse || (window.EventSource && this._sse.readyState === window.EventSource.CLOSED)) {
         if (this._sse) {
           try { this._sse.close(); } catch (_) {}
@@ -325,17 +236,12 @@
         this._lastSeq++;
         for (const t of domainToTabs('all')) this._dirtyTabs[t] = true;
         refreshDaemonBadge();
-        refreshLiveSessions();
         if (this.isBusyForLiveRefresh()) {
           this._pendingLive = true;
           return;
         }
         this._pendingLive = false;
         this.refreshTabLive(this.activeTab);
-      });
-      es.addEventListener('live', () => {
-        clearTimeout(this._livePillTimer);
-        this._livePillTimer = setTimeout(() => refreshLiveSessions(), 120);
       });
       es.addEventListener('change', ev => {
         let domain = 'all';
@@ -382,10 +288,8 @@
           if (winSel && winSel.value) e.detail.parameters['done_window'] = winSel.value;
         }
       });
-      document.body.addEventListener('htmx:afterSwap', e => {
-        if (e.detail && e.detail.target && e.detail.target.id === 'progressSection') {
-          renderLiveSessions(liveSessionsCache);
-        }
+      document.body.addEventListener('htmx:afterSwap', () => {
+        // Progress tab no longer renders client-side live sessions; SSR handles all content.
       });
       window.addEventListener('online', () => this.handleConnectivityResume());
       document.addEventListener('visibilitychange', () => {
@@ -444,24 +348,22 @@
         setTimeout(poll, 180);
       });
       refreshDaemonBadge();
-      refreshLiveSessions();
       setInterval(() => {
         refreshDaemonBadge();
-        if (liveSessionsCache.length > 0) refreshLiveSessions();
       }, 15000);
       this.connectLiveEvents();
       window.addEventListener('hashchange', () => {
         const next = hashTabName();
-        if (next && next !== this.activeTab) this.switchTab(next);
+        if (next && next !== this.activeTab) this.switchTab(next, true);
       });
     },
 
-    switchTab(name) {
+    switchTab(name, fromHash = false) {
       this.activeTab = name;
       sessionStorage.setItem('memorize_tab', name);
       const btn = document.getElementById('tabBtn-' + name);
       const hasOwnHXGet = Boolean(btn && btn.hasAttribute('hx-get'));
-      if (!hasOwnHXGet && (this._dirtyTabs[name] || this._lastSeq > (this._tabSeq[name] || 0)) && !this.isBusyForLiveRefresh()) {
+      if ((!hasOwnHXGet || fromHash) && (this._dirtyTabs[name] || this._lastSeq > (this._tabSeq[name] || 0)) && !this.isBusyForLiveRefresh()) {
         this.refreshTabLive(name);
       }
     },

@@ -5,6 +5,7 @@ const (
 	GuardrailVerdictRuleViolation = "rule_violation"
 	GuardrailVerdictPreMutateGate = "pre_mutate_gate"
 	GuardrailVerdictPlanViolation = "plan_violation"
+	GuardrailVerdictError         = "error"
 )
 
 // GuardrailLogInput records a single guardrail or plan verification audit event.

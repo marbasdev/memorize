@@ -197,6 +197,8 @@ func TestFlideAndJevSystemOneAdapterPrefixAndModels(t *testing.T) {
 						ch = "exclusive"
 					} else if _, hasInd := m["INDEPENDENT"]; hasInd {
 						ch = "INDEPENDENT"
+					} else if _, hasViol := m["VIOLATION"]; hasViol {
+						ch = "VIOLATION"
 					}
 				}
 				answers[k] = map[string]any{"type": "choice", "choice": ch, "confidence": 0.93}
@@ -244,6 +246,7 @@ func TestFlideAndJevSystemOneAdapterPrefixAndModels(t *testing.T) {
 }
 
 func TestGeminiDecisionsAdapterWireProtocolAndTasks(t *testing.T) {
+	verifyOutcome := "VIOLATION"
 	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := hits.Add(1)
@@ -298,6 +301,8 @@ func TestGeminiDecisionsAdapterWireProtocolAndTasks(t *testing.T) {
 						sel = "OVERWRITE"
 					case m["band_90"] != nil:
 						sel = "band_90"
+					case m["VIOLATION"] != nil:
+						sel = verifyOutcome
 					}
 				}
 				answers[k] = map[string]any{
@@ -352,6 +357,13 @@ func TestGeminiDecisionsAdapterWireProtocolAndTasks(t *testing.T) {
 	viols, err := ev.VerifyPlan(context.Background(), "Run DDL without transactions", facts)
 	if err != nil || len(viols) != 1 || viols[0].ID != 10 || viols[0].Probability < 0.9 {
 		t.Fatalf("VerifyPlan failed: viols=%+v err=%v", viols, err)
+	}
+	for _, nonViol := range []string{"ALLOW"} {
+		verifyOutcome = nonViol
+		got, err := ev.VerifyPlan(context.Background(), "Run gofmt -l .", facts)
+		if err != nil || len(got) != 0 {
+			t.Fatalf("expected %s to yield 0 violations, got %+v (err=%v)", nonViol, got, err)
+		}
 	}
 
 	cal, err := ev.CalibrateConfidence(context.Background(), "project:app", facts)

@@ -187,6 +187,26 @@ func CollectPendingCommits(ctx context.Context, repoRoot, lastCommit string, max
 	return head, commits
 }
 
+// DiffFile returns a minimal unified diff for a single modified file against HEAD (or the index if HEAD does not exist).
+func DiffFile(ctx context.Context, repoDir, filePath string) string {
+	if strings.TrimSpace(repoDir) == "" || strings.TrimSpace(filePath) == "" {
+		return ""
+	}
+	target := filePath
+	if filepath.IsAbs(filePath) {
+		if rel, err := filepath.Rel(repoDir, filePath); err == nil && !strings.HasPrefix(rel, "..") {
+			target = rel
+		}
+	}
+	if out, err := Run(ctx, repoDir, "diff", "HEAD", "--unified=0", "--", target); err == nil {
+		return out
+	}
+	if out, err := Run(ctx, repoDir, "diff", "--unified=0", "--", target); err == nil {
+		return out
+	}
+	return ""
+}
+
 // CleanCommitSubject strips conventional-commit prefixes (e.g. "feat(scope): ") when a meaningful body follows.
 func CleanCommitSubject(subject string) string {
 	s := strings.TrimSpace(subject)

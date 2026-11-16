@@ -14,6 +14,7 @@ import (
 	"memorize/internal/modules/guardrail"
 	"memorize/internal/modules/memory"
 	"memorize/internal/modules/progress"
+	"memorize/internal/modules/rulepack"
 )
 
 func toInt64(v any) (int64, bool) {
@@ -83,6 +84,30 @@ func combineCategory(cat, sub string) string {
 	return cat + "/" + sub
 }
 
+func trimmedArg(req mcp.CallToolRequest, key string) string {
+	return strings.TrimSpace(mcp.ParseString(req, key, ""))
+}
+
+func mcpResult(text string, err error) (*mcp.CallToolResult, error) {
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(text), nil
+}
+
+func resolveMCPRequest(ctx context.Context, req mcp.CallToolRequest, resolver *ScopeResolver, prog *progress.Service, rememberRepo bool) (context.Context, string, string, string) {
+	if acc := trimmedArg(req, "account"); acc != "" {
+		ctx = domain.WithAccount(ctx, acc)
+	}
+	sid := sessionIDFrom(ctx)
+	ctx = domain.WithSessionID(ctx, sid)
+	sc, repoDir := resolver.Resolve(ctx, mcp.ParseString(req, "scope", ""), trimmedArg(req, "repo_path"))
+	if rememberRepo && repoDir != "" && prog != nil {
+		prog.RememberRepoPath(ctx, sc, repoDir)
+	}
+	return ctx, sid, sc, repoDir
+}
+
 // RegisterResourcesAndPrompts exposes the embedded Memory Curator playbook resource and prompt.
 func RegisterResourcesAndPrompts(srv *server.MCPServer) {
 	srv.AddResource(
@@ -133,7 +158,7 @@ func RegisterTools(srv *server.MCPServer, deps Deps, resolver *ScopeResolver) {
 		mcp.WithString("repo_path", mcp.Description("Git repository path (auto-detected if omitted).")),
 		mcp.WithString("session_id", mcp.Description("Session ID to isolate delta deduplication.")),
 		mcp.WithBoolean("refresh", mcp.Description("Re-fetch active memories after compaction.")),
-	), handleQueryTool(deps.Memory, deps.Progress, resolver))
+	), handleQueryTool(deps.Memory, deps.Progress, deps.RulePack, resolver))
 
 	srv.AddTool(mcp.NewTool("commit_memory",
 		mcp.WithDescription("Evaluate and store rules/decisions via System 1 Gatekeeper (commit, 1:N overwrite, or skip), optionally advancing synced_commit."),
@@ -162,13 +187,13 @@ func RegisterTools(srv *server.MCPServer, deps Deps, resolver *ScopeResolver) {
 		mcp.WithString("content", mcp.Description("Updated or merged text (<= 180 chars for consolidate).")),
 		mcp.WithString("category", mcp.Description("Category or 'category/sub_category'.")),
 		mcp.WithString("sub_category", mcp.Description("Optional sub-category.")),
-		mcp.WithBoolean("pinned", mcp.Description("Pin as Core Invariant.")),
+		mcp.WithBoolean("pinned", mcp.Description("Pin as Core Rule (always included in context).")),
 		mcp.WithString("scope", mcp.Description(scopeDesc)),
 		mcp.WithString("account", mcp.Description(accountDesc)),
-	), handleManageTool(deps.Memory, deps.Guardrail, resolver))
+	), handleManageTool(deps.Memory, deps.Guardrail, deps.Progress, resolver))
 
 	srv.AddTool(mcp.NewTool("project_progress",
-		mcp.WithDescription("Manage separated work-track progress: 'record', 'update', 'list', 'sync', or 'delete'."),
+		mcp.WithDescription("Manage project activity history: 'record', 'update', 'list', 'sync', or 'delete'."),
 		mcp.WithString("action", mcp.Required(), mcp.Description("'record', 'update', 'list', 'sync', or 'delete'.")),
 		mcp.WithNumber("id", mcp.Description("Progress entry ID (update/delete).")),
 		mcp.WithString("scope", mcp.Description(scopeDesc)),
@@ -176,45 +201,28 @@ func RegisterTools(srv *server.MCPServer, deps Deps, resolver *ScopeResolver) {
 		mcp.WithString("track", mcp.Description("Work track title.")),
 		mcp.WithString("category", mcp.Description("Category or 'category/sub_category'.")),
 		mcp.WithString("sub_category", mcp.Description("Optional sub-category.")),
-		mcp.WithString("status", mcp.Description("'planned' (unstarted), 'in_progress' (active), 'blocked' (halted on blocker/user), or 'done'.")),
 		mcp.WithString("summary", mcp.Description("Summary in user's chat language (required for record).")),
 		mcp.WithString("details", mcp.Description("Newline-separated details.")),
-		mcp.WithString("next_step", mcp.Description("Next action or blocker reason.")),
+		mcp.WithString("next_step", mcp.Description("Optional follow-up note.")),
 		mcp.WithArray("memory_ids", mcp.WithNumberItems(), mcp.Description("Related memory #IDs.")),
 		mcp.WithString("commit_sha", mcp.Description("Related Git commit SHA.")),
 		mcp.WithString("repo_path", mcp.Description("Git repository path.")),
 	), handleProgressTool(deps.Progress, resolver))
+
+	registerTeamRuleTool(srv, deps, resolver)
 }
 
-func touchMCPLiveSession(ctx context.Context, prog *progress.Service, sc, explicitSID, toolName string) {
-	if prog == nil {
-		return
-	}
-	sid := strings.TrimSpace(explicitSID)
-	if sid == "" {
-		sid = domain.SessionIDFromContext(ctx)
-	}
-	if sid == "" || strings.HasPrefix(sid, "stdio-") || strings.HasPrefix(sid, "bridge-") {
-		return
-	}
-	prog.TouchLiveSession(sc, sid, toolName, "")
-}
-
-func handleQueryTool(mem *memory.Service, prog *progress.Service, resolver *ScopeResolver) server.ToolHandlerFunc {
+func handleQueryTool(mem *memory.Service, prog *progress.Service, rp *rulepack.Service, resolver *ScopeResolver) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		if acc := strings.TrimSpace(mcp.ParseString(req, "account", "")); acc != "" {
-			ctx = domain.WithAccount(ctx, acc)
-		}
-		sid := strings.TrimSpace(mcp.ParseString(req, "session_id", ""))
-		if sid == "" {
-			sid = sessionIDFrom(ctx)
+		ctx, sid, sc, repoDir := resolveMCPRequest(ctx, req, resolver, prog, true)
+		if explicitSID := trimmedArg(req, "session_id"); explicitSID != "" {
+			sid = explicitSID
 		}
 		refresh := mcp.ParseBoolean(req, "refresh", false)
-		sc, repoDir := resolver.Resolve(ctx, mcp.ParseString(req, "scope", ""), mcp.ParseString(req, "repo_path", ""))
-		if repoDir != "" && prog != nil {
-			prog.RememberRepoPath(ctx, sc, repoDir)
+		rpNotice := ""
+		if rp != nil && strings.HasPrefix(sc, "project:") {
+			rpNotice, _ = rp.SyncTurnNotice(ctx, sc, repoDir)
 		}
-		touchMCPLiveSession(ctx, prog, sc, sid, "query_project_memory")
 		syncHint := ""
 		if os.Getenv("MEMORY_GIT_SYNC") == "1" || os.Getenv("MEMORY_AUTO_GIT_SYNC") == "1" {
 			syncHint = mem.InspectRepoSync(ctx, sid, sc, repoDir, refresh)
@@ -227,28 +235,26 @@ func handleQueryTool(mem *memory.Service, prog *progress.Service, resolver *Scop
 			refresh,
 		)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return mcpResult("", err)
+		}
+		if notice := strings.TrimSpace(rpNotice); notice != "" {
+			out += "\n" + notice
 		}
 		if syncHint != "" {
 			out += "\n" + syncHint
 		}
-		return mcp.NewToolResultText(out), nil
+		return mcpResult(out, nil)
 	}
 }
 
 func handleCommitTool(mem *memory.Service, prog *progress.Service, resolver *ScopeResolver) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		if acc := strings.TrimSpace(mcp.ParseString(req, "account", "")); acc != "" {
-			ctx = domain.WithAccount(ctx, acc)
-		}
-		ctx = domain.WithSessionID(ctx, sessionIDFrom(ctx))
-		sc, repoDir := resolver.Resolve(ctx, mcp.ParseString(req, "scope", ""), mcp.ParseString(req, "repo_path", ""))
+		ctx, _, sc, repoDir := resolveMCPRequest(ctx, req, resolver, prog, false)
 		var facts []string
-		if single := strings.TrimSpace(mcp.ParseString(req, "candidate_fact", "")); single != "" {
+		if single := trimmedArg(req, "candidate_fact"); single != "" {
 			facts = append(facts, single)
 		}
 		facts = append(facts, req.GetStringSlice("candidate_facts", nil)...)
-		touchMCPLiveSession(ctx, prog, sc, "", "commit_memory")
 
 		cat := combineCategory(mcp.ParseString(req, "category", ""), mcp.ParseString(req, "sub_category", ""))
 		out, err := mem.CommitBatch(ctx,
@@ -258,38 +264,23 @@ func handleCommitTool(mem *memory.Service, prog *progress.Service, resolver *Sco
 			repoDir,
 			mcp.ParseString(req, "synced_commit", ""),
 		)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		return mcp.NewToolResultText(out), nil
+		return mcpResult(out, err)
 	}
 }
 
 func handleVerifyTool(gr *guardrail.Service, prog *progress.Service, resolver *ScopeResolver) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		if acc := strings.TrimSpace(mcp.ParseString(req, "account", "")); acc != "" {
-			ctx = domain.WithAccount(ctx, acc)
-		}
-		sc, _ := resolver.Resolve(ctx, mcp.ParseString(req, "scope", ""), "")
-		planText := mcp.ParseString(req, "proposed_plan", "")
-		touchMCPLiveSession(ctx, prog, sc, "", "verify_plan_against_memory")
-		out, err := gr.VerifyPlan(ctx, planText, sc)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		return mcp.NewToolResultText(out), nil
+		ctx, _, sc, _ := resolveMCPRequest(ctx, req, resolver, prog, false)
+		out, err := gr.VerifyPlan(ctx, mcp.ParseString(req, "proposed_plan", ""), sc)
+		return mcpResult(out, err)
 	}
 }
 
-func handleManageTool(mem *memory.Service, gr *guardrail.Service, resolver *ScopeResolver) server.ToolHandlerFunc {
+func handleManageTool(mem *memory.Service, gr *guardrail.Service, prog *progress.Service, resolver *ScopeResolver) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		if acc := strings.TrimSpace(mcp.ParseString(req, "account", "")); acc != "" {
-			ctx = domain.WithAccount(ctx, acc)
-		}
-		ctx = domain.WithSessionID(ctx, sessionIDFrom(ctx))
-		action := strings.ToLower(strings.TrimSpace(mcp.ParseString(req, "action", "")))
+		ctx, _, sc, _ := resolveMCPRequest(ctx, req, resolver, prog, false)
+		action := strings.ToLower(trimmedArg(req, "action"))
 		singleID, ids := parseIDs(req)
-		sc, _ := resolver.Resolve(ctx, mcp.ParseString(req, "scope", ""), "")
 
 		switch action {
 		case "forget":
@@ -297,19 +288,13 @@ func handleManageTool(mem *memory.Service, gr *guardrail.Service, resolver *Scop
 				return mcp.NewToolResultError("provide id or ids to forget"), nil
 			}
 			n, err := mem.ForgetMemories(ctx, ids)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(fmt.Sprintf("FORGOTTEN (deactivated=%d, ids=%v)", n, ids)), nil
+			return mcpResult(fmt.Sprintf("FORGOTTEN (deactivated=%d, ids=%v)", n, ids), err)
 		case "undo":
 			if singleID <= 0 {
 				return mcp.NewToolResultError("provide id to undo"), nil
 			}
 			msg, err := mem.UndoMemory(ctx, singleID)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(msg), nil
+			return mcpResult(msg, err)
 		case "consolidate":
 			cat := combineCategory(mcp.ParseString(req, "category", ""), mcp.ParseString(req, "sub_category", ""))
 			newID, err := mem.ConsolidateMemories(ctx,
@@ -319,28 +304,16 @@ func handleManageTool(mem *memory.Service, gr *guardrail.Service, resolver *Scop
 				mcp.ParseString(req, "content", ""),
 				mcp.ParseBoolean(req, "pinned", false),
 			)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(fmt.Sprintf("CONSOLIDATED (new_id=%d superseded %v, scope=%s)", newID, ids, sc)), nil
+			return mcpResult(fmt.Sprintf("CONSOLIDATED (new_id=%d superseded %v, scope=%s)", newID, ids, sc), err)
 		case "update", "set_pin":
 			return handleManageUpdate(ctx, mem, req, singleID, action)
 		case "purge":
 			n, err := mem.PurgeTombstones(ctx, sc)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(fmt.Sprintf("PURGED (deleted_tombstones=%d, scope=%s)", n, sc)), nil
+			return mcpResult(fmt.Sprintf("PURGED (deleted_tombstones=%d, scope=%s)", n, sc), err)
 		case "skip_onboarding":
-			if err := gr.SkipOnboarding(ctx, sc); err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(fmt.Sprintf("ONBOARDING_SKIPPED (scope=%s)", sc)), nil
+			return mcpResult(fmt.Sprintf("ONBOARDING_SKIPPED (scope=%s)", sc), gr.SkipOnboarding(ctx, sc))
 		case "reset_onboarding":
-			if err := gr.ResetOnboarding(ctx, sc); err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(fmt.Sprintf("ONBOARDING_RESET (scope=%s, status=pending)", sc)), nil
+			return mcpResult(fmt.Sprintf("ONBOARDING_RESET (scope=%s, status=pending)", sc), gr.ResetOnboarding(ctx, sc))
 		default:
 			return mcp.NewToolResultError("unknown action: expected forget, undo, consolidate, update, purge, skip_onboarding, or reset_onboarding"), nil
 		}
@@ -361,45 +334,38 @@ func handleManageUpdate(ctx context.Context, mem *memory.Service, req mcp.CallTo
 		v := mcp.ParseBoolean(req, "pinned", false)
 		pinnedPtr = &v
 	}
-	explicitScope := strings.TrimSpace(mcp.ParseString(req, "scope", ""))
 	err := mem.UpdateMemoryFull(ctx,
 		singleID,
-		explicitScope,
+		trimmedArg(req, "scope"),
 		mcp.ParseString(req, "category", ""),
 		subPtr,
 		mcp.ParseString(req, "content", ""),
 		pinnedPtr,
 	)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return mcpResult("", err)
 	}
 	if _, hasAcc := req.GetArguments()["account"]; hasAcc {
 		if err := mem.UpdateMemoryAccount(ctx, singleID, mcp.ParseString(req, "account", "")); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return mcpResult("", err)
 		}
 	}
-	return mcp.NewToolResultText(fmt.Sprintf("UPDATED (id=%d)", singleID)), nil
+	return mcpResult(fmt.Sprintf("UPDATED (id=%d)", singleID), nil)
 }
 
 func handleProgressTool(prog *progress.Service, resolver *ScopeResolver) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		ctx = domain.WithSessionID(ctx, sessionIDFrom(ctx))
-		action := strings.ToLower(strings.TrimSpace(mcp.ParseString(req, "action", "")))
-		explicitRepo := strings.TrimSpace(mcp.ParseString(req, "repo_path", ""))
-		sc, repoDir := resolver.Resolve(ctx, mcp.ParseString(req, "scope", ""), explicitRepo)
-		if repoDir != "" {
-			prog.RememberRepoPath(ctx, sc, repoDir)
-		}
+		ctx, _, sc, repoDir := resolveMCPRequest(ctx, req, resolver, prog, true)
+		action := strings.ToLower(trimmedArg(req, "action"))
 		singleID, _ := parseIDs(req)
-		explicitSID := strings.TrimSpace(mcp.ParseString(req, "session_id", ""))
-		track := strings.TrimSpace(mcp.ParseString(req, "track", ""))
-		cat := strings.TrimSpace(mcp.ParseString(req, "category", ""))
-		sub := strings.TrimSpace(mcp.ParseString(req, "sub_category", ""))
-		status := strings.TrimSpace(mcp.ParseString(req, "status", ""))
-		summary := strings.TrimSpace(mcp.ParseString(req, "summary", ""))
-		details := strings.TrimSpace(mcp.ParseString(req, "details", ""))
-		nextStep := strings.TrimSpace(mcp.ParseString(req, "next_step", ""))
-		commitSHA := strings.TrimSpace(mcp.ParseString(req, "commit_sha", ""))
+		explicitSID := trimmedArg(req, "session_id")
+		track := trimmedArg(req, "track")
+		cat := trimmedArg(req, "category")
+		sub := trimmedArg(req, "sub_category")
+		summary := trimmedArg(req, "summary")
+		details := trimmedArg(req, "details")
+		nextStep := trimmedArg(req, "next_step")
+		commitSHA := trimmedArg(req, "commit_sha")
 		memIDs, hasMemIDs := parseMemoryIDListArg(req)
 
 		switch action {
@@ -410,7 +376,6 @@ func handleProgressTool(prog *progress.Service, resolver *ScopeResolver) server.
 				Track:       track,
 				Category:    cat,
 				SubCategory: sub,
-				Status:      status,
 				Summary:     summary,
 				Details:     details,
 				NextStep:    nextStep,
@@ -418,10 +383,7 @@ func handleProgressTool(prog *progress.Service, resolver *ScopeResolver) server.
 				CommitSHA:   commitSHA,
 				Source:      "agent",
 			})
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(fmt.Sprintf("PROGRESS_RECORDED (id=%d, scope=%s, track=%s, status=%s)", rec.ID, rec.Scope, rec.Track, rec.Status)), nil
+			return mcpResult(fmt.Sprintf("PROGRESS_RECORDED (id=%d, scope=%s, track=%s)", rec.ID, rec.Scope, rec.Track), err)
 
 		case "update":
 			if singleID <= 0 {
@@ -429,7 +391,7 @@ func handleProgressTool(prog *progress.Service, resolver *ScopeResolver) server.
 			}
 			cur, err := prog.GetProgressByID(ctx, singleID)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return mcpResult("", err)
 			}
 			nextVal := cur.NextStep
 			if _, hasNext := req.GetArguments()["next_step"]; hasNext {
@@ -439,47 +401,37 @@ func handleProgressTool(prog *progress.Service, resolver *ScopeResolver) server.
 			if hasMemIDs {
 				updMems = memIDs
 			}
-			explicitScope := strings.TrimSpace(mcp.ParseString(req, "scope", ""))
-			if err := prog.UpdateProgress(ctx, singleID, domain.ProgressInput{
-				Scope:       explicitScope,
+			err = prog.UpdateProgress(ctx, singleID, domain.ProgressInput{
+				Scope:       trimmedArg(req, "scope"),
 				SessionID:   explicitSID,
 				Track:       track,
 				Category:    cat,
 				SubCategory: sub,
-				Status:      status,
 				Summary:     summary,
 				Details:     details,
 				NextStep:    nextVal,
 				MemoryIDs:   updMems,
 				CommitSHA:   commitSHA,
-			}); err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(fmt.Sprintf("PROGRESS_UPDATED (id=%d)", singleID)), nil
+			})
+			return mcpResult(fmt.Sprintf("PROGRESS_UPDATED (id=%d)", singleID), err)
 
 		case "delete", "remove":
 			if singleID <= 0 {
 				return mcp.NewToolResultError("provide id to delete progress"), nil
 			}
-			if err := prog.DeleteProgress(ctx, singleID); err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(fmt.Sprintf("PROGRESS_DELETED (id=%d)", singleID)), nil
+			return mcpResult(fmt.Sprintf("PROGRESS_DELETED (id=%d)", singleID), prog.DeleteProgress(ctx, singleID))
 
 		case "sync":
 			res, err := prog.SyncProjectProgress(ctx, sc, repoDir, "")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(fmt.Sprintf("PROGRESS_SYNCED (scope=%s, head=%s, synced_memories=%d, synced_commits=%d, resolved_needs_sync=%d)",
-				res.Scope, res.HeadCommit, res.SyncedMemories, res.SyncedCommits, res.ResolvedSyncs)), nil
+			return mcpResult(fmt.Sprintf("PROGRESS_SYNCED (scope=%s, head=%s, synced_memories=%d, synced_commits=%d)",
+				res.Scope, res.HeadCommit, res.SyncedMemories, res.SyncedCommits), err)
 
-		case "list", "overview", "status":
-			ov, err := prog.GetProgressOverviewByTrack(ctx, sc, track, cat, status, repoDir)
+		case "list", "overview":
+			ov, err := prog.GetProgressOverviewByTrack(ctx, sc, track, cat, repoDir)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return mcpResult("", err)
 			}
-			return mcp.NewToolResultText(formatProgressOverviewMD(ov)), nil
+			return mcpResult(formatProgressOverviewMD(ov), nil)
 
 		default:
 			return mcp.NewToolResultError("unknown action: expected record, update, list, sync, or delete"), nil
@@ -489,23 +441,13 @@ func handleProgressTool(prog *progress.Service, resolver *ScopeResolver) server.
 
 func formatProgressOverviewMD(ov domain.ProgressOverview) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "## Project Progress [%s] (total=%d | active_tracks=%d | in_sync=%v | unlinked_memories=%d | pending_commits=%d)\n",
-		ov.Scope, ov.TotalCount, len(ov.ActiveTracks), ov.Sync.InSync, ov.Sync.UnlinkedMemoryCount, len(ov.Sync.PendingCommits))
-	if len(ov.ActiveTracks) > 0 {
-		sb.WriteString("\n### Active Work Tracks\n")
-		for _, t := range ov.ActiveTracks {
-			fmt.Fprintf(&sb, "- **%s** [%s] (%d/%d done): %s", t.Track, t.Status, t.DoneCount, t.TotalCount, t.LatestSummary)
-			if t.LatestNextStep != "" {
-				fmt.Fprintf(&sb, " -> Next: %s", t.LatestNextStep)
-			}
-			sb.WriteByte('\n')
-		}
-	}
+	fmt.Fprintf(&sb, "## Project Progress [%s] (total=%d | in_sync=%v | unlinked_memories=%d | pending_commits=%d)\n",
+		ov.Scope, ov.TotalCount, ov.Sync.InSync, ov.Sync.UnlinkedMemoryCount, len(ov.Sync.PendingCommits))
 	if len(ov.Records) > 0 {
 		sb.WriteString("\n### Recent History\n")
 		limit := min(len(ov.Records), 20)
 		for _, r := range ov.Records[:limit] {
-			fmt.Fprintf(&sb, "- [#%d] (%s | [%s] | %s) %s", r.ID, r.Date, r.Track, r.Status, r.Summary)
+			fmt.Fprintf(&sb, "- [#%d] (%s | %s | [%s]) %s", r.ID, r.Date, r.Kind, r.Track, r.Summary)
 			if len(r.MemoryIDs) > 0 {
 				fmt.Fprintf(&sb, " (memories: %v)", r.MemoryIDs)
 			}
@@ -513,7 +455,7 @@ func formatProgressOverviewMD(ov domain.ProgressOverview) string {
 				fmt.Fprintf(&sb, " (commit: %s)", r.CommitSHA)
 			}
 			if r.NextStep != "" {
-				fmt.Fprintf(&sb, " | Next: %s", r.NextStep)
+				fmt.Fprintf(&sb, " | Note: %s", r.NextStep)
 			}
 			sb.WriteByte('\n')
 		}

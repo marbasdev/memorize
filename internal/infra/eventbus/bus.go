@@ -24,23 +24,6 @@ func New() *Bus {
 	}
 }
 
-// PublishLive emits an ephemeral live-session ping without triggering full DB reloads.
-func (b *Bus) PublishLive() {
-	if b == nil {
-		return
-	}
-	seq := b.seq.Add(1)
-	b.mu.Lock()
-	for ch := range b.domainSubs {
-		ev := domain.ChangeEvent{Seq: seq, Domain: "live"}
-		select {
-		case ch <- ev:
-		default:
-		}
-	}
-	b.mu.Unlock()
-}
-
 // Publish increments the monotonic state sequence and wakes SSE subscribers for dom.
 func (b *Bus) Publish(dom string) {
 	if b == nil {
@@ -119,7 +102,7 @@ func (b *Bus) SubscribeChanges() (uint64, <-chan uint64, func()) {
 
 // SubscribeDomainChanges registers a buffered domain-aware change channel and returns (initialSeq, ch, unsubscribe).
 func (b *Bus) SubscribeDomainChanges() (uint64, <-chan domain.ChangeEvent, func()) {
-	ch := make(chan domain.ChangeEvent, 4)
+	ch := make(chan domain.ChangeEvent, 16)
 	b.mu.Lock()
 	if b.domainSubs == nil {
 		b.domainSubs = make(map[chan domain.ChangeEvent]struct{})

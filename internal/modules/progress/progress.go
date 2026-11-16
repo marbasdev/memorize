@@ -130,7 +130,6 @@ func (s *Service) RecordProgress(ctx context.Context, in domain.ProgressInput) (
 	}
 	cat, sub := domain.SplitCategoryAndSub(sc, rawCat, in.SubCategory)
 	track := domain.EffectiveProgressTrack(trackRaw, cat, sub)
-	status := domain.NormalizeProgressStatus(in.Status)
 	src := strings.TrimSpace(in.Source)
 	if src == "" {
 		src = "agent"
@@ -146,9 +145,9 @@ func (s *Service) RecordProgress(ctx context.Context, in domain.ProgressInput) (
 	memStr := formatMemoryIDsStr(in.MemoryIDs)
 
 	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO project_progress (scope, session_id, track, category, sub_category, status, summary, details, next_step, memory_ids, commit_sha, source, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-	`, sc, sid, track, cat, sub, status, summary, details, nextStep, memStr, sha, src)
+		INSERT INTO project_progress (scope, session_id, track, category, sub_category, summary, details, next_step, memory_ids, commit_sha, source, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, sc, sid, track, cat, sub, summary, details, nextStep, memStr, sha, src)
 	if err != nil {
 		return domain.ProgressRecord{}, err
 	}
@@ -162,12 +161,12 @@ func (s *Service) GetProgressByID(ctx context.Context, id int64) (domain.Progres
 	var r domain.ProgressRecord
 	var memStr string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, scope, COALESCE(session_id, ''), COALESCE(track, ''), category, COALESCE(sub_category, ''), status,
+		SELECT id, scope, COALESCE(session_id, ''), COALESCE(track, ''), category, COALESCE(sub_category, ''),
 		       summary, COALESCE(details, ''), COALESCE(next_step, ''),
 		       COALESCE(memory_ids, ''), COALESCE(commit_sha, ''), COALESCE(source, 'manual'),
 		       COALESCE(created_at, ''), COALESCE(updated_at, '')
 		FROM project_progress WHERE id = ?
-	`, id).Scan(&r.ID, &r.Scope, &r.SessionID, &r.Track, &r.Category, &r.SubCategory, &r.Status,
+	`, id).Scan(&r.ID, &r.Scope, &r.SessionID, &r.Track, &r.Category, &r.SubCategory,
 		&r.Summary, &r.Details, &r.NextStep, &memStr, &r.CommitSHA, &r.Source, &r.CreatedAt, &r.UpdatedAt)
 	if err != nil {
 		return domain.ProgressRecord{}, fmt.Errorf("progress #%d not found", id)
@@ -215,10 +214,6 @@ func (s *Service) UpdateProgress(ctx context.Context, id int64, in domain.Progre
 			track = domain.EffectiveProgressTrack("", cat, sub)
 		}
 	}
-	status := cur.Status
-	if strings.TrimSpace(in.Status) != "" {
-		status = domain.NormalizeProgressStatus(in.Status)
-	}
 	summary := cur.Summary
 	if strings.TrimSpace(in.Summary) != "" {
 		summary = strings.TrimSpace(in.Summary)
@@ -244,31 +239,10 @@ func (s *Service) UpdateProgress(ctx context.Context, id int64, in domain.Progre
 	}
 	_, err = s.db.ExecContext(ctx, `
 		UPDATE project_progress
-		SET scope = ?, session_id = ?, track = ?, category = ?, sub_category = ?, status = ?, summary = ?, details = ?, next_step = ?,
+		SET scope = ?, session_id = ?, track = ?, category = ?, sub_category = ?, summary = ?, details = ?, next_step = ?,
 		    memory_ids = ?, commit_sha = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
-	`, sc, sid, track, cat, sub, status, summary, details, nextStep, memStr, sha, id)
-	if err == nil {
-		s.notifyProgressChange()
-	}
-	return err
-}
-
-// UpdateProgressStatus transitions the lifecycle status of a progress entry.
-func (s *Service) UpdateProgressStatus(ctx context.Context, id int64, rawStatus string) error {
-	cur, err := s.GetProgressByID(ctx, id)
-	if err != nil {
-		return err
-	}
-	st := domain.NormalizeProgressStatus(rawStatus)
-	sid := s.mem.ResolveEffectiveSessionID(ctx, cur.Scope, "")
-	_, err = s.db.ExecContext(ctx, `
-		UPDATE project_progress
-		SET status = ?,
-		    session_id = CASE WHEN COALESCE(session_id, '') = '' AND COALESCE(source, '') NOT IN ('git_sync', 'memory_sync') AND ? != '' THEN ? ELSE session_id END,
-		    updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?
-	`, st, sid, sid, id)
+	`, sc, sid, track, cat, sub, summary, details, nextStep, memStr, sha, id)
 	if err == nil {
 		s.notifyProgressChange()
 	}
@@ -288,33 +262,18 @@ func (s *Service) DeleteProgress(ctx context.Context, id int64) error {
 	return nil
 }
 
-func progressStatusPriority(status string) int {
-	switch status {
-	case domain.ProgressStatusInProgress:
-		return 1
-	case domain.ProgressStatusBlocked:
-		return 2
-	case domain.ProgressStatusNeedsSync:
-		return 3
-	case domain.ProgressStatusPlanned:
-		return 4
-	default:
-		return 5
-	}
+// GetProgressOverview returns the progress activity board/timeline for rawScope filtered by category and repo.
+func (s *Service) GetProgressOverview(ctx context.Context, rawScope, categoryFilter, explicitRepo string) (domain.ProgressOverview, error) {
+	return s.GetProgressOverviewByTrack(ctx, rawScope, "", categoryFilter, explicitRepo)
 }
 
-// GetProgressOverview returns the progress board/timeline for rawScope filtered by category, status, and repo.
-func (s *Service) GetProgressOverview(ctx context.Context, rawScope, categoryFilter, statusFilter, explicitRepo string) (domain.ProgressOverview, error) {
-	return s.GetProgressOverviewByTrack(ctx, rawScope, "", categoryFilter, statusFilter, explicitRepo)
+// GetProgressOverviewByTrack returns a track-filtered progress activity overview (up to 200 items).
+func (s *Service) GetProgressOverviewByTrack(ctx context.Context, rawScope, trackFilter, categoryFilter, explicitRepo string) (domain.ProgressOverview, error) {
+	return s.GetProgressOverviewPaged(ctx, rawScope, trackFilter, categoryFilter, explicitRepo, 1, 200)
 }
 
-// GetProgressOverviewByTrack returns a track-filtered progress overview (up to 200 items).
-func (s *Service) GetProgressOverviewByTrack(ctx context.Context, rawScope, trackFilter, categoryFilter, statusFilter, explicitRepo string) (domain.ProgressOverview, error) {
-	return s.GetProgressOverviewPaged(ctx, rawScope, trackFilter, categoryFilter, statusFilter, explicitRepo, 1, 200)
-}
-
-// GetProgressOverviewPaged returns a paginated progress overview for rawScope (defaulting to TopProjectScope when empty).
-func (s *Service) GetProgressOverviewPaged(ctx context.Context, rawScope, trackFilter, categoryFilter, statusFilter, explicitRepo string, page, pageSize int) (domain.ProgressOverview, error) {
+// GetProgressOverviewPaged returns a paginated progress activity overview for rawScope (defaulting to TopProjectScope when empty).
+func (s *Service) GetProgressOverviewPaged(ctx context.Context, rawScope, trackFilter, categoryFilter, explicitRepo string, page, pageSize int) (domain.ProgressOverview, error) {
 	sc := strings.TrimSpace(rawScope)
 	if sc == "" {
 		sc = s.TopProjectScope(ctx)
@@ -323,7 +282,6 @@ func (s *Service) GetProgressOverviewPaged(ctx context.Context, rawScope, trackF
 		Scope:        sc,
 		Track:        trackFilter,
 		Category:     categoryFilter,
-		Status:       statusFilter,
 		ExplicitRepo: explicitRepo,
 		Page:         page,
 		PageSize:     pageSize,

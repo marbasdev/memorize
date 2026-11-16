@@ -124,24 +124,24 @@ func fmtDoneWindowDesc(lang string, ov domain.ProgressOverview) string {
 	if rangeText != "" {
 		base += " (" + rangeText + ")"
 	}
-	shown := len(ov.RecentDone)
+	shown := len(ov.RecentHistory)
 	total := ov.DoneWindowTotal
 	if total <= 0 {
 		if lang == "ko" {
-			return base + " · 완료 기록 없음"
+			return base + " · 활동 기록 없음"
 		}
-		return base + " · 0 completed"
+		return base + " · 0 entries"
 	}
 	if total > shown {
 		if lang == "ko" {
-			return fmt.Sprintf("%s · %d건 중 최신 %d건 (완료 시각순)", base, total, shown)
+			return fmt.Sprintf("%s · %d건 중 최신 %d건 (최신 시각순)", base, total, shown)
 		}
-		return fmt.Sprintf("%s · latest %d of %d (by completion time)", base, shown, total)
+		return fmt.Sprintf("%s · latest %d of %d (by latest time)", base, shown, total)
 	}
 	if lang == "ko" {
-		return fmt.Sprintf("%s · 총 %d건 (완료 시각순)", base, total)
+		return fmt.Sprintf("%s · 총 %d건 (최신 시각순)", base, total)
 	}
-	return fmt.Sprintf("%s · %d completed (by completion time)", base, total)
+	return fmt.Sprintf("%s · %d entries (by latest time)", base, total)
 }
 
 func renderSSRTemplate(name string, data any) ([]byte, error) {

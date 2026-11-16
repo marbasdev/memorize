@@ -41,8 +41,8 @@ func parseGuardrailQuery(q url.Values) domain.GuardrailLogQuery {
 	if _, hasGrScope := q["gr_scope"]; !hasGrScope {
 		sc = strings.TrimSpace(q.Get("scope"))
 	}
-	page, _ := strconv.Atoi(firstNonEmptyStr(q.Get("gr_page"), q.Get("page")))
-	pageSize, _ := strconv.Atoi(firstNonEmptyStr(q.Get("gr_page_size"), q.Get("page_size")))
+	page, _ := strconv.Atoi(domain.FirstNonEmpty(q.Get("gr_page"), q.Get("page")))
+	pageSize, _ := strconv.Atoi(domain.FirstNonEmpty(q.Get("gr_page_size"), q.Get("page_size")))
 	if page <= 0 {
 		page = 1
 	}
@@ -56,15 +56,6 @@ func parseGuardrailQuery(q url.Values) domain.GuardrailLogQuery {
 		Page:     page,
 		PageSize: pageSize,
 	}
-}
-
-func firstNonEmptyStr(vals ...string) string {
-	for _, v := range vals {
-		if t := strings.TrimSpace(v); t != "" {
-			return t
-		}
-	}
-	return ""
 }
 
 func formatGuardrailPageInfo(lang string, p domain.GuardrailLogPage, isFiltered bool) string {
@@ -219,6 +210,17 @@ func registerSSRCalibrateRoutes(mux *http.ServeMux, d Deps) {
 		writeHTMLTemplate(w, "guardrail_logs_section", view)
 	}))
 
+	renderGuardrailLogsAfterMutation := func(w http.ResponseWriter, r *http.Request, lang, msg string) {
+		r.Form.Set("gr_page", "1")
+		view, err := buildGuardrailLogsView(r.Context(), d, lang, r.Form, false)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		setHXTriggers(w, msg, false, false)
+		writeHTMLTemplate(w, "guardrail_logs_section", view)
+	}
+
 	mux.HandleFunc("/ui/guardrail-logs/retention", postHX(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
 		days, err := strconv.Atoi(strings.TrimSpace(r.FormValue("retention_days")))
@@ -231,27 +233,8 @@ func registerSSRCalibrateRoutes(mux *http.ServeMux, d Deps) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		msg := fmt.Sprintf("Guardrail log policy saved (%s)", formatRetentionLabel(lang, pol.GuardrailDays))
-		if deleted > 0 {
-			msg = fmt.Sprintf("Saved (%s) · cleaned %d expired logs", formatRetentionLabel(lang, pol.GuardrailDays), deleted)
-		}
-		if lang == "ko" {
-			msg = fmt.Sprintf("가드레일 기록 보관 정책 저장 (%s)", formatRetentionLabel(lang, pol.GuardrailDays))
-			if deleted > 0 {
-				msg = fmt.Sprintf("보관 정책 저장 (%s) · 만료 기록 %d건 자동 정리", formatRetentionLabel(lang, pol.GuardrailDays), deleted)
-			}
-		}
-		if r.Form == nil {
-			r.Form = url.Values{}
-		}
-		r.Form.Set("gr_page", "1")
-		view, err := buildGuardrailLogsView(r.Context(), d, lang, r.Form, false)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		setHXTriggers(w, msg, false, false)
-		writeHTMLTemplate(w, "guardrail_logs_section", view)
+		msg := formatRetentionToast(lang, "Guardrail log policy saved", "가드레일 기록 보관 정책 저장", pol.GuardrailDays, deleted)
+		renderGuardrailLogsAfterMutation(w, r, lang, msg)
 	}))
 
 	mux.HandleFunc("/ui/guardrail-logs/cleanup", postHX(func(w http.ResponseWriter, r *http.Request) {
@@ -275,46 +258,30 @@ func registerSSRCalibrateRoutes(mux *http.ServeMux, d Deps) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		msg := fmt.Sprintf("Cleaned %d guardrail logs", deleted)
+		enMsg := fmt.Sprintf("Cleaned %d guardrail logs", deleted)
 		if !incBlocked {
-			msg = fmt.Sprintf("Cleaned %d PASS logs (blocked violations preserved)", deleted)
+			enMsg = fmt.Sprintf("Cleaned %d PASS logs (blocked violations preserved)", deleted)
 		}
-		if lang == "ko" {
-			if deleted == 0 {
-				msg = "선택한 조건에 정리할 가드레일 기록이 없습니다"
-			} else if incBlocked {
-				msg = fmt.Sprintf("가드레일 검증 기록 %d건 정리 완료 (위반 · 차단 포함)", deleted)
-			} else {
-				msg = fmt.Sprintf("가드레일 통과(PASS) 기록 %d건 정리 완료 (위반 · 차단 이력 보존)", deleted)
-			}
+		var koMsg string
+		switch {
+		case deleted == 0:
+			koMsg = "선택한 조건에 정리할 가드레일 기록이 없습니다"
+		case incBlocked:
+			koMsg = fmt.Sprintf("가드레일 검증 기록 %d건 정리 완료 (위반 · 차단 포함)", deleted)
+		default:
+			koMsg = fmt.Sprintf("가드레일 통과(PASS) 기록 %d건 정리 완료 (위반 · 차단 이력 보존)", deleted)
 		}
-		if r.Form == nil {
-			r.Form = url.Values{}
-		}
-		r.Form.Set("gr_page", "1")
-		view, err := buildGuardrailLogsView(r.Context(), d, lang, r.Form, false)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		setHXTriggers(w, msg, false, false)
-		writeHTMLTemplate(w, "guardrail_logs_section", view)
+		renderGuardrailLogsAfterMutation(w, r, lang, langText(lang, enMsg, koMsg))
 	}))
 
 	mux.HandleFunc("/ui/thresholds", postHX(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
 		ctx := r.Context()
 		var target domain.Thresholds
-		toast := "Thresholds saved"
-		if lang == "ko" {
-			toast = "판단 임계값 저장 완료"
-		}
+		toast := langText(lang, "Thresholds saved", "판단 임계값 저장 완료")
 		if r.FormValue("reset") == "1" {
 			target = domain.DefaultThresholds()
-			toast = "Thresholds reset"
-			if lang == "ko" {
-				toast = "임계값 기본값 복원 완료"
-			}
+			toast = langText(lang, "Thresholds reset", "임계값 기본값 복원 완료")
 		} else {
 			pf := func(k string, def float64) float64 {
 				if v, err := strconv.ParseFloat(strings.TrimSpace(r.FormValue(k)), 64); err == nil {
@@ -355,18 +322,14 @@ func registerSSRCalibrateRoutes(mux *http.ServeMux, d Deps) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		scopeLabel := calScope
-		if strings.TrimSpace(scopeLabel) == "" {
-			if lang == "ko" {
-				scopeLabel = "전체 스코프"
-			} else {
-				scopeLabel = "all scopes"
-			}
+		scopeLabel := strings.TrimSpace(calScope)
+		if scopeLabel == "" {
+			scopeLabel = langText(lang, "all scopes", "전체 스코프")
 		}
-		toast := fmt.Sprintf("Recalibrated %d active memories (%s)", updated, scopeLabel)
-		if lang == "ko" {
-			toast = fmt.Sprintf("[%s] 활성 기억 %d건 개별 확신도 재산정 완료", scopeLabel, updated)
-		}
+		toast := langText(lang,
+			fmt.Sprintf("Recalibrated %d active memories (%s)", updated, scopeLabel),
+			fmt.Sprintf("[%s] 활성 기억 %d건 개별 확신도 재산정 완료", scopeLabel, updated),
+		)
 		view := buildConfHistSectionData(ctx, d, lang, calScope, nil)
 		body, err := renderSSRTemplate("conf_hist_section", view)
 		if err != nil {

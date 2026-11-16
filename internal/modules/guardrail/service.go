@@ -16,11 +16,18 @@ import (
 	"memorize/internal/modules/progress"
 )
 
+// RulePack provides read-only declarative Team Rule Pack loading and sub-ms hook sync for guardrails.
+type RulePack interface {
+	LoadExtraFacts(ctx context.Context, scopeA, scopeB, category string) ([]domain.Fact, error)
+	SyncTurnNotice(ctx context.Context, rawScope, repoDir string) (string, error)
+}
+
 // Service owns PreToolUse/pre-commit guardrails, explicit plan verification,
 // audit logging, cold-start onboarding prompts, and guardrail log retention.
 type Service struct {
 	mem                *memory.Service
 	prog               *progress.Service
+	rp                 RulePack
 	db                 *sql.DB
 	dbPath             string
 	router             *router.Router
@@ -65,6 +72,13 @@ func (s *Service) Progress() *progress.Service {
 	return s.prog
 }
 
+// AttachRulePack wires declarative Team Rule Pack enforcement and hook sync into the guardrail service.
+func (s *Service) AttachRulePack(rp RulePack) {
+	if s != nil {
+		s.rp = rp
+	}
+}
+
 // CheckEngineReadiness reports whether the active inference engine is ready to serve verification and hook calls.
 func (s *Service) CheckEngineReadiness(ctx context.Context) (bool, string) {
 	if s == nil || s.router == nil {
@@ -107,15 +121,38 @@ func filterAndSortViolations(violations []domain.PlanViolation, minProb float64)
 	return filtered
 }
 
+func (s *Service) loadEnforceableFacts(ctx context.Context, scA, scB string) ([]domain.Fact, error) {
+	loaded, err := s.mem.LoadActiveFacts(ctx, scA, scB, "")
+	if err != nil {
+		return nil, err
+	}
+	if s.rp != nil {
+		extra, rerr := s.rp.LoadExtraFacts(ctx, scA, scB, "")
+		if rerr != nil {
+			return nil, rerr
+		}
+		if len(extra) > 0 {
+			loaded = append(loaded, extra...)
+		}
+	}
+	return filterEnforceableRules(loaded), nil
+}
+
+func formatViolationRef(f domain.Fact) string {
+	if f.IsTeam() {
+		return "TEAM"
+	}
+	return fmt.Sprintf("#%d", f.ID)
+}
+
 // EvaluatePlanViolations loads all active enforceable rules (excluding soft unpinned preferences),
 // evaluates whether proposedPlan violates them, filters by minProb, and sorts descending by probability.
 func (s *Service) EvaluatePlanViolations(ctx context.Context, proposedPlan, rawScope string, minProb float64) (string, int, []domain.PlanViolation, error) {
 	scA, scB := memory.ScopesFor(rawScope, true)
-	loaded, err := s.mem.LoadActiveFacts(ctx, scA, scB, "")
+	rules, err := s.loadEnforceableFacts(ctx, scA, scB)
 	if err != nil {
 		return scA, 0, nil, err
 	}
-	rules := filterEnforceableRules(loaded)
 	if len(rules) == 0 {
 		return scA, 0, nil, nil
 	}
@@ -177,8 +214,8 @@ func (s *Service) VerifyPlan(ctx context.Context, proposedPlan string, scope ...
 	var sb strings.Builder
 	sb.WriteString("**Plan Memory Violations Detected:**\n")
 	for _, v := range violations {
-		fmt.Fprintf(&sb, "- **[%s / %s #%d]** %s *(violation prob: %.0f%%, conf: %.2f)*\n",
-			v.Scope, v.Category, v.ID, v.Content, v.Probability*100, v.Confidence)
+		fmt.Fprintf(&sb, "- **[%s / %s %s]** %s *(violation prob: %.0f%%, conf: %.2f)*\n",
+			v.Scope, v.Category, formatViolationRef(v.Fact), v.Content, v.Probability*100, v.Confidence)
 	}
 	return sb.String(), nil
 }

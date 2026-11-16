@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"memorize/internal/domain"
 	"memorize/internal/infra/config"
 	thttp "memorize/internal/transport/http"
 )
@@ -23,15 +24,7 @@ type RuntimeHooks struct {
 	RunDaemonServer     func(explicitAddr, dbPath, modelsDir string) int
 	ServeInlineStdio    func(dbPath, modelsDir string, withDashboard bool, dashAddr string) int
 	RunInlineHook       func(ctx context.Context, dbPath, modelsDir, mode string, rawStdin []byte) (string, int)
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if s := strings.TrimSpace(v); s != "" {
-			return s
-		}
-	}
-	return ""
+	ServeInlineSync     func(ctx context.Context, dbPath, modelsDir string, r io.Reader, w io.Writer) error
 }
 
 func readHookStdin() []byte {
@@ -143,6 +136,7 @@ func executeArgs(args []string, version string, hooks RuntimeHooks) int {
 	daemonCtl := fs.String("daemon-ctl", "", "control background daemon: status, start, stop, restart, logs, port")
 	dashAddr := fs.String("dashboard", "", "alias to run unified daemon/dashboard on explicit listen address (e.g. 127.0.0.1:18095)")
 	hookMode := fs.String("hook", "", "execute zero-touch lifecycle hook mode (claude-start, claude-turn, claude-pretool, claude-stop, claude-end, antigravity-start, antigravity-turn, antigravity-pretool, antigravity-stop, git-precommit)")
+	syncServe := fs.Bool("sync-serve", false, "run internal NDJSON SSH sync server over stdio (disabled in this release)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -163,11 +157,17 @@ func executeArgs(args []string, version string, hooks RuntimeHooks) int {
 	}
 
 	dbPath, modelsDir := resolveStoragePaths()
-	explicitAddr := firstNonEmpty(*daemonAddr, *dashAddr)
+	explicitAddr := domain.FirstNonEmpty(*daemonAddr, *dashAddr)
 	posArgs := fs.Args()
 
 	if ctlAction := parseDaemonCtlAction(*daemonCtl, posArgs); ctlAction != "" {
 		return runDaemonControlCLI(ctlAction, posArgs, explicitAddr, dbPath, modelsDir, hooks)
+	}
+	if *syncServe {
+		return runSyncServeCommand(explicitAddr, dbPath, modelsDir, hooks)
+	}
+	if len(posArgs) > 0 && strings.EqualFold(posArgs[0], "sync") {
+		return runSyncCLI(posArgs[1:], explicitAddr, dbPath, modelsDir, hooks)
 	}
 
 	if m := strings.TrimSpace(*hookMode); m != "" {

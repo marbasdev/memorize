@@ -66,6 +66,12 @@
       <button type="button" class="btn btn-sm" id="btnPurge"
         hx-post="/ui/memories/purge" hx-include="#memoryFilterForm" hx-target="#memoriesSection" hx-swap="innerHTML"
         hx-confirm="{{t .Lang "confirm_purge"}}">{{t .Lang "btn_purge"}}</button>
+      {{if .SyncEnabled}}
+      <button type="button" class="btn btn-sm" id="btnOpenSync"
+        hx-get="/ui/modal/sync" hx-target="#modalHost" hx-swap="innerHTML">
+        {{t .Lang "btn_sync"}}{{if gt .PendingSyncConflicts 0}} <span class="badge b-danger">{{.PendingSyncConflicts}}</span>{{end}}
+      </button>
+      {{end}}
     </div>
   </div>
 
@@ -191,6 +197,53 @@
     </div>
   </div>
 
+  {{if and .SyncEnabled (gt (len .SyncConflicts) 0)}}
+    <div class="team-conflict-wrap" id="syncConflictsBanner" style="margin:0 0 0.75rem 0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.45rem;">
+        <strong style="font-size:0.84rem;color:var(--danger);">⚠️ {{t .Lang "sync_conflicts_title"}} ({{len .SyncConflicts}})</strong>
+        <button type="button" class="btn btn-sm" hx-get="/ui/modal/sync" hx-target="#modalHost" hx-swap="innerHTML">{{t .Lang "btn_sync"}}</button>
+      </div>
+      {{range .SyncConflicts}}
+        <div class="team-conflict-card">
+          <div style="display:flex;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;font-size:0.73rem;color:var(--muted);margin-bottom:0.35rem;">
+            <span style="font-family:var(--mono);">{{.Scope}} · {{.SyncID}}</span>
+            <span>{{.Reason}}</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0.5rem;margin-bottom:0.45rem;">
+            <div class="sub-panel" style="padding:0.45rem 0.55rem;font-size:0.77rem;">
+              <div style="font-size:0.7rem;color:var(--muted);font-weight:600;margin-bottom:0.15rem;">{{t $.Lang "sync_local_ver"}} (#{{.LocalMemoryID}})</div>
+              <div>{{.LocalSnapshot.Content}}</div>
+            </div>
+            <div class="sub-panel" style="padding:0.45rem 0.55rem;font-size:0.77rem;">
+              <div style="font-size:0.7rem;color:var(--muted);font-weight:600;margin-bottom:0.15rem;">{{t $.Lang "sync_remote_ver"}} ({{.RemoteOriginDevice}})</div>
+              {{if eq .RemoteOp "purge"}}
+                <div style="color:var(--danger);">{{t $.Lang "sync_remote_purged"}}</div>
+              {{else}}
+                <div>{{.RemoteSnapshot.Content}}</div>
+              {{end}}
+            </div>
+          </div>
+          <div style="display:flex;gap:0.35rem;flex-wrap:wrap;">
+            <button type="button" class="btn btn-sm"
+              hx-post="/ui/sync/conflict/resolve" hx-include="#memoryFilterForm"
+              hx-vals="{{jsonObj "sync_id" .SyncID "decision" "keep_local"}}"
+              hx-target="#memoriesSection" hx-swap="innerHTML">{{t $.Lang "sync_btn_keep_local"}}</button>
+            <button type="button" class="btn btn-sm btn-primary"
+              hx-post="/ui/sync/conflict/resolve" hx-include="#memoryFilterForm"
+              hx-vals="{{jsonObj "sync_id" .SyncID "decision" "use_remote"}}"
+              hx-target="#memoriesSection" hx-swap="innerHTML">{{t $.Lang "sync_btn_use_remote"}}</button>
+            {{if ne .RemoteOp "purge"}}
+              <button type="button" class="btn btn-sm"
+                hx-post="/ui/sync/conflict/resolve" hx-include="#memoryFilterForm"
+                hx-vals="{{jsonObj "sync_id" .SyncID "decision" "keep_both"}}"
+                hx-target="#memoriesSection" hx-swap="innerHTML">{{t $.Lang "sync_btn_keep_both"}}</button>
+            {{end}}
+          </div>
+        </div>
+      {{end}}
+    </div>
+  {{end}}
+
   <div class="table-wrap" x-init="setPageActiveIDs({{jsonAttr .PageActiveIDs}})">
     <table>
       <thead>
@@ -256,7 +309,12 @@
                 </div>
               {{end}}
             </td>
-            <td style="text-align:right;">
+            <td style="text-align:right;white-space:nowrap;">
+              {{if and .Active (hasPrefix .Scope "project:")}}
+                <button type="button" class="btn btn-sm" title="{{t $.Lang "team_btn_promote"}}"
+                  hx-get="/ui/modal/team-promote?id={{.ID}}&team_scope={{.Scope | urlquery}}"
+                  hx-target="#modalHost" hx-swap="innerHTML">↑</button>
+              {{end}}
               <button type="button" class="btn btn-sm" hx-get="/ui/modal/detail?id={{.ID}}" hx-target="#modalHost" hx-swap="innerHTML">{{t $.Lang "btn_detail"}}</button>
             </td>
           </tr>

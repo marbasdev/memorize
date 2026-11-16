@@ -264,7 +264,7 @@ func (s *Service) QuerySessionMemory(ctx context.Context, sessionID, currentTask
 	if strings.HasPrefix(scA, "project:") && s.IncludePersonalInProject(ctx) {
 		extraScopes = append(extraScopes, "personal")
 	}
-	facts, err := s.LoadActiveFacts(ctx, scA, scB, category, extraScopes...)
+	facts, err := s.loadQueryFacts(ctx, scA, scB, category, extraScopes...)
 	if err != nil {
 		return "", err
 	}
@@ -306,14 +306,18 @@ func (s *Service) QuerySessionMemory(ctx context.Context, sessionID, currentTask
 	for _, f := range pendingUpdatedFacts {
 		prev := pendingUpd[f.ID]
 		suf := fmt.Sprintf(" *(Updated #%d — replaces earlier text: %s)*", f.ID, prev)
-		if f.Pinned {
-			suf = " *(Core Invariant)*" + suf
+		if f.Pinned && !f.IsTeam() {
+			suf = " *(Core Rule)*" + suf
 		}
 		matched = append(matched, matchedItem{fact: f, suffix: suf})
 		consumedUpdates = append(consumedUpdates, f.ID)
 	}
 	for _, f := range unsentPinned {
-		matched = append(matched, matchedItem{fact: f, suffix: " *(Core Invariant)*"})
+		suf := ""
+		if !f.IsTeam() {
+			suf = " *(Core Rule)*"
+		}
+		matched = append(matched, matchedItem{fact: f, suffix: suf})
 	}
 	hasTaskPrompt := strings.TrimSpace(currentTask) != ""
 	if len(unsentCandidates) > 0 && hasTaskPrompt {
@@ -325,24 +329,27 @@ func (s *Service) QuerySessionMemory(ctx context.Context, sessionID, currentTask
 		scored, err := ev.ScoreRelevance(ctx, currentTask, unsentCandidates)
 		s.router.RecordTelemetry(ctx, domain.TaskRelevance, ev, evalStart, len(unsentCandidates), err)
 		if err != nil {
-			return "", err
-		}
-		sort.Slice(scored, func(i, j int) bool {
-			if scored[i].Score != scored[j].Score {
-				return scored[i].Score > scored[j].Score
+			if sessionID == "" || (len(matched) == 0 && revokedNotice == "") {
+				return "", err
 			}
-			return scored[i].ID < scored[j].ID
-		})
-		for _, sf := range scored {
-			if sf.Score >= th.MinRelevance && sf.Confidence >= th.MinRelConfidence {
-				sfx := ""
-				if sessionID == "" {
-					sfx = fmt.Sprintf(" *(score: %.1f, conf: %.2f)*", sf.Score, sf.Confidence)
+		} else {
+			sort.Slice(scored, func(i, j int) bool {
+				if scored[i].Score != scored[j].Score {
+					return scored[i].Score > scored[j].Score
 				}
-				matched = append(matched, matchedItem{
-					fact:   sf.Fact,
-					suffix: sfx,
-				})
+				return scored[i].ID < scored[j].ID
+			})
+			for _, sf := range scored {
+				if sf.Score >= th.MinRelevance && sf.Confidence >= th.MinRelConfidence {
+					sfx := ""
+					if sessionID == "" {
+						sfx = fmt.Sprintf(" *(score: %.1f, conf: %.2f)*", sf.Score, sf.Confidence)
+					}
+					matched = append(matched, matchedItem{
+						fact:   sf.Fact,
+						suffix: sfx,
+					})
+				}
 			}
 		}
 	}
@@ -398,6 +405,23 @@ func (s *Service) RecordTurnState(ctx context.Context, sessionID, rawScope, user
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM turn_state WHERE updated_at < ?`, now-7200)
 }
 
+// TouchTurnSession registers or refreshes an active session in turn_state without clobbering existing last_input.
+func (s *Service) TouchTurnSession(ctx context.Context, sessionID, rawScope string) {
+	sid := strings.TrimSpace(sessionID)
+	if sid == "" {
+		return
+	}
+	sc := domain.NormalizeScope(rawScope)
+	now := time.Now().Unix()
+	_, _ = s.db.ExecContext(ctx, `
+		INSERT INTO turn_state (session_id, scope, last_input, mutated, gate_checked, updated_at)
+		VALUES (?, ?, '', 0, 0, ?)
+		ON CONFLICT(session_id, scope) DO UPDATE SET
+			updated_at = excluded.updated_at
+	`, sid, sc, now)
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM turn_state WHERE updated_at < ?`, now-7200)
+}
+
 // MarkTurnScopeMutated marks active turns in rawScope (and publishes a "memories" event) after a commit/mutation.
 func (s *Service) MarkTurnScopeMutated(rawScope string) {
 	sc := domain.NormalizeScope(rawScope)
@@ -424,7 +448,7 @@ func (s *Service) ConsumeTurnPreMutateCandidate(ctx context.Context, sessionID, 
 	err := s.db.QueryRowContext(ctx,
 		`SELECT last_input, mutated, gate_checked FROM turn_state WHERE session_id = ? AND scope = ? AND updated_at >= ?`,
 		sid, sc, cutoff).Scan(&lastInput, &mutated, &gateChecked)
-	if err != nil {
+	if err != nil || strings.TrimSpace(lastInput) == "" {
 		if fb := strings.TrimSpace(fallbackInput); fb != "" {
 			s.RecordTurnState(ctx, sid, sc, fb)
 			lastInput = fb
@@ -439,6 +463,16 @@ func (s *Service) ConsumeTurnPreMutateCandidate(ctx context.Context, sessionID, 
 	}
 	_, _ = s.db.ExecContext(ctx, `UPDATE turn_state SET gate_checked = 1 WHERE session_id = ? AND scope = ?`, sid, sc)
 	return strings.TrimSpace(lastInput)
+}
+
+// ResetTurnGateChecked clears gate_checked when pre-mutate evaluation fails transiently so the check can retry.
+func (s *Service) ResetTurnGateChecked(ctx context.Context, sessionID, rawScope string) {
+	sid := strings.TrimSpace(sessionID)
+	if sid == "" {
+		return
+	}
+	sc := domain.NormalizeScope(rawScope)
+	_, _ = s.db.ExecContext(ctx, `UPDATE turn_state SET gate_checked = 0 WHERE session_id = ? AND scope = ?`, sid, sc)
 }
 
 // IsTurnMutated reports whether commit_memory/manage_memory already mutated state in the current turn.

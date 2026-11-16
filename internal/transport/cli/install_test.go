@@ -136,9 +136,9 @@ func TestSingleBinaryInstallersAndEmbeddedMCPResource(t *testing.T) {
 	if !strings.Contains(initLine, memory.PlaybookURI) {
 		t.Fatalf("expected serverInstructions in initialize response to reference %s, got: %s", memory.PlaybookURI, initLine)
 	}
-	for _, wantToken := range []string{"planned", "blocked"} {
+	for _, wantToken := range []string{"project_progress", "record"} {
 		if !strings.Contains(initLine, wantToken) {
-			t.Fatalf("expected serverInstructions in initialize response to describe %q progress state, got: %s", wantToken, initLine)
+			t.Fatalf("expected serverInstructions in initialize response to describe %q progress activity recording, got: %s", wantToken, initLine)
 		}
 	}
 

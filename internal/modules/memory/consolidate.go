@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"sort"
 	"strings"
@@ -336,7 +337,7 @@ func (s *Service) ConsolidateMemories(ctx context.Context, rawScope, category st
 	if mergedConf <= 0 {
 		mergedConf = 0.90
 	}
-	mergedConf = clamp(mergedConf, 0.80, 1.00)
+	mergedConf = domain.Clamp(mergedConf, 0.80, 1.00)
 	if acc == "" {
 		acc = s.CurrentAccount(ctx)
 	}
@@ -346,25 +347,31 @@ func (s *Service) ConsolidateMemories(ctx context.Context, rawScope, category st
 	}
 	tagStr := strings.Join(domain.NormalizeTags(targetScope, rawTags), " ")
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-
-	res, err := tx.ExecContext(ctx,
-		`INSERT INTO memories (scope, account, category, sub_category, tags, content, confidence, pinned, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-		targetScope, acc, cat, subCat, tagStr, mergedContent, mergedConf, pin)
-	if err != nil {
-		return 0, err
-	}
-	newID, _ := res.LastInsertId()
-	for _, oldID := range sourceIDs {
-		if _, err := tx.ExecContext(ctx, `UPDATE memories SET active = 0, superseded_by = ? WHERE id = ?`, newID, oldID); err != nil {
-			return 0, err
+	var newID int64
+	if err := s.withTx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx,
+			`INSERT INTO memories (scope, account, category, sub_category, tags, content, confidence, pinned, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+			targetScope, acc, cat, subCat, tagStr, mergedContent, mergedConf, pin)
+		if err != nil {
+			return err
 		}
-	}
-	if err := tx.Commit(); err != nil {
+		newID, _ = res.LastInsertId()
+		if err := recordMemoryTxInTx(ctx, tx, "", newID, domain.SyncOpUpsert, "", 0); err != nil {
+			return err
+		}
+		for _, oldID := range sourceIDs {
+			resOld, err := tx.ExecContext(ctx, `UPDATE memories SET active = 0, superseded_by = ? WHERE id = ?`, newID, oldID)
+			if err != nil {
+				return err
+			}
+			if n, _ := resOld.RowsAffected(); n > 0 {
+				if err := recordMemoryTxInTx(ctx, tx, "", oldID, domain.SyncOpUpsert, "", 0); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}); err != nil {
 		return 0, err
 	}
 	for _, oldID := range sourceIDs {

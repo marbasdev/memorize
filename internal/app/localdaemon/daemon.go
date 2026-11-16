@@ -2,19 +2,14 @@ package localdaemon
 
 import (
 	"context"
-	"errors"
-	"fmt"
+	"io"
 	"log"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/mark3labs/mcp-go/server"
@@ -26,6 +21,7 @@ import (
 	"memorize/internal/modules/guardrail"
 	"memorize/internal/modules/memory"
 	"memorize/internal/modules/progress"
+	"memorize/internal/modules/rulepack"
 	"memorize/internal/transport/cli"
 	"memorize/internal/transport/dashboard"
 	thttp "memorize/internal/transport/http"
@@ -37,6 +33,7 @@ type runtimeBundle struct {
 	mem  *memory.Service
 	prog *progress.Service
 	gr   *guardrail.Service
+	rp   *rulepack.Service
 }
 
 func (b *runtimeBundle) close() {
@@ -54,11 +51,14 @@ func openRuntime(dbPath, modelsDir string, autoBootstrap bool) (*runtimeBundle, 
 	mem.SetAutoGitSync(os.Getenv("MEMORY_AUTO_GIT_SYNC") == "1")
 	mem.Router().AttachLocalManager(mgr)
 	prog := progress.New(mem)
+	rp := rulepack.New(mem)
+	mem.AttachExtraFactsProvider(rp)
 	gr := guardrail.New(mem, prog)
+	gr.AttachRulePack(rp)
 	if autoBootstrap {
 		maybeAutoBootstrap(context.Background(), mem, mgr)
 	}
-	return &runtimeBundle{mgr: mgr, mem: mem, prog: prog, gr: gr}, nil
+	return &runtimeBundle{mgr: mgr, mem: mem, prog: prog, gr: gr, rp: rp}, nil
 }
 
 func maybeAutoBootstrap(ctx context.Context, mem *memory.Service, mgr *localmodel.Manager) {
@@ -90,6 +90,7 @@ func buildMCPServer(version string, b *runtimeBundle) *server.MCPServer {
 		Memory:    b.mem,
 		Progress:  b.prog,
 		Guardrail: b.gr,
+		RulePack:  b.rp,
 		Version:   version,
 	})
 }
@@ -282,319 +283,14 @@ func RunDaemonWithBundle(version, addr, dbPath, modelsDir string, b *runtimeBund
 		log.Printf("memorize daemon listen error on %s: %v", targetAddr, err)
 		return 1
 	}
-	boundAddr := ln.Addr().String()
-	boundHost, boundPort, _ := domain.ParseHostPort(boundAddr)
-	b.mgr.SetExcludePortFunc(func() int { return boundPort })
-	b.mgr.SetDashboardURLFunc(func() string { return "http://" + boundAddr })
-	_ = config.WriteDaemonState(dbPath, domain.DaemonRuntimeState{
-		PID:        os.Getpid(),
-		ListenAddr: boundAddr,
-		DBPath:     dbPath,
-		ModelsDir:  modelsDir,
-		GGUFPort:   portCfg.GGUFPort,
-		StartedAt:  time.Now().UTC().Format(time.RFC3339),
-	})
 
-	var skipStateRemove atomic.Bool
-	defer func() {
-		if !skipStateRemove.Load() {
-			config.RemoveDaemonStateIfPID(dbPath, os.Getpid())
-		}
-	}()
+	lc := newDaemonLifecycle(version, dbPath, modelsDir, ln.Addr().String(), b)
+	b.mgr.SetExcludePortFunc(func() int { return lc.boundPort })
+	b.mgr.SetDashboardURLFunc(func() string { return "http://" + lc.boundAddr })
+	lc.writeRuntimeState(portCfg.GGUFPort, "")
+	defer lc.cleanupState()
 
-	startedAt := time.Now()
-	logPath := config.DaemonLogPath(dbPath)
-	absDB, _ := filepath.Abs(dbPath)
-	if absDB == "" {
-		absDB = dbPath
-	}
-	absModels, _ := filepath.Abs(modelsDir)
-	if absModels == "" {
-		absModels = modelsDir
-	}
-
-	type reexecSpec struct {
-		bin  string
-		addr string
-	}
-
-	var srv *http.Server
-	var closeOnce sync.Once
-	var portMu sync.Mutex
-	stopWatch := make(chan struct{})
-	reexecCh := make(chan reexecSpec, 1)
-	stopRequested := make(chan struct{}, 1)
-
-	closeFn := func() error {
-		var cerr error
-		closeOnce.Do(func() {
-			close(stopWatch)
-			if srv != nil {
-				cerr = srv.Close()
-			}
-		})
-		return cerr
-	}
-	defer func() { _ = closeFn() }()
-
-	buildStatus := func() thttp.DaemonStatus {
-		_, binT := NewestWatchedBinary(0)
-		cfg := config.LoadPortConfig(dbPath)
-		lm := b.mgr.Status(cfg.GGUFPort)
-		return thttp.DaemonStatus{
-			Running:              true,
-			PID:                  os.Getpid(),
-			Version:              version,
-			StartedAt:            startedAt.Format(time.RFC3339),
-			UptimeSec:            int64(time.Since(startedAt).Seconds()),
-			ListenAddr:           boundAddr,
-			DBPath:               absDB,
-			ModelsDir:            absModels,
-			Provider:             b.mem.ProviderName(),
-			LogPath:              logPath,
-			BinMtime:             binT,
-			ConfiguredDaemonPort: cfg.DaemonPort,
-			ActiveDaemonPort:     boundPort,
-			DaemonFallback:       boundPort != cfg.DaemonPort,
-			ConfiguredGGUFPort:   cfg.GGUFPort,
-			ActiveGGUFPort:       lm.Port,
-			GGUFEndpoint:         lm.Endpoint,
-			GGUFFallback:         lm.PortFallback,
-			GGUFRunning:          lm.ServerRunning,
-		}
-	}
-
-	applyPorts := func(ctx context.Context, reqDaemonPort, reqGGUFPort int) (thttp.PortApplyResponse, error) {
-		portMu.Lock()
-		defer portMu.Unlock()
-
-		curCfg := config.LoadPortConfig(dbPath)
-		dp := reqDaemonPort
-		if dp <= 0 {
-			dp = curCfg.DaemonPort
-		}
-		gp := reqGGUFPort
-		if gp <= 0 {
-			gp = curCfg.GGUFPort
-		}
-		if err := domain.ValidatePortConfig(dp, gp); err != nil {
-			return thttp.PortApplyResponse{}, err
-		}
-		if err := config.SavePortConfig(dbPath, domain.PortConfig{DaemonPort: dp, GGUFPort: gp}); err != nil {
-			return thttp.PortApplyResponse{}, err
-		}
-
-		lm := b.mgr.Status(gp)
-		effGGUFPort := gp
-		effGGUFEP := fmt.Sprintf("http://127.0.0.1:%d", gp)
-		ggufFallback := false
-		ggufRunning := lm.ServerRunning
-		if lm.ServerRunning {
-			if lm.Port > 0 && lm.Port != gp && lm.Supported && lm.ActiveModel != "" {
-				bgCtx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
-				ep, err := b.mgr.StartServer(bgCtx, lm.ActiveModel, gp)
-				cancel()
-				if err != nil {
-					return thttp.PortApplyResponse{}, err
-				}
-				if ep != "" {
-					effGGUFEP = ep
-					if _, p, okp := domain.ParseHostPort(ep); okp && p > 0 {
-						effGGUFPort = p
-						ggufFallback = p != gp
-					}
-				}
-			} else if lm.Port > 0 {
-				effGGUFPort = lm.Port
-				effGGUFEP = lm.Endpoint
-				ggufFallback = lm.PortFallback
-			}
-		}
-		_ = config.SyncManagedGGUFEndpoint(context.Background(), b.mem.DB(), dbPath, effGGUFEP)
-
-		res := thttp.PortApplyResponse{
-			OK:               true,
-			ConfiguredDaemon: dp,
-			ActiveDaemon:     boundPort,
-			ListenAddr:       boundAddr,
-			DaemonFallback:   boundPort != dp,
-			Restarting:       false,
-			NewURL:           "http://" + boundAddr,
-			ConfiguredGGUF:   gp,
-			ActiveGGUF:       effGGUFPort,
-			GGUFEndpoint:     effGGUFEP,
-			GGUFFallback:     ggufFallback,
-			GGUFRunning:      ggufRunning,
-		}
-
-		if dp == boundPort {
-			_ = config.WriteDaemonState(dbPath, domain.DaemonRuntimeState{
-				PID:        os.Getpid(),
-				ListenAddr: boundAddr,
-				DBPath:     dbPath,
-				ModelsDir:  modelsDir,
-				GGUFPort:   effGGUFPort,
-				GGUFURL:    effGGUFEP,
-				StartedAt:  startedAt.UTC().Format(time.RFC3339),
-			})
-			return res, nil
-		}
-
-		nextAddr, nextPort, nextFB, perr := pickNextDaemonAddrForRestart(boundHost, dp, effGGUFPort)
-		if perr != nil {
-			return thttp.PortApplyResponse{}, perr
-		}
-		res.ActiveDaemon = nextPort
-		res.ListenAddr = nextAddr
-		res.DaemonFallback = nextFB
-		res.Restarting = true
-		res.NewURL = "http://" + nextAddr
-
-		go func() {
-			time.Sleep(80 * time.Millisecond)
-			skipStateRemove.Store(true)
-			nextBin, _ := os.Executable()
-			select {
-			case reexecCh <- reexecSpec{bin: nextBin, addr: nextAddr}:
-			default:
-			}
-			_ = closeFn()
-		}()
-		return res, nil
-	}
-
-	dashHandler := dashboard.NewHandler(dashboard.Deps{
-		Memory:     b.mem,
-		Progress:   b.prog,
-		Guardrail:  b.gr,
-		LocalModel: b.mgr,
-		Hooks: thttp.DashboardHooks{
-			YieldFn:    closeFn,
-			BinMtimeFn: currentBinaryModTime,
-			DaemonStatusFn: func() thttp.DaemonPortState {
-				st := buildStatus()
-				return thttp.DaemonPortState{
-					PID:            st.PID,
-					ListenAddr:     st.ListenAddr,
-					UptimeSec:      st.UptimeSec,
-					ConfiguredPort: st.ConfiguredDaemonPort,
-					ActivePort:     st.ActiveDaemonPort,
-					Fallback:       st.DaemonFallback,
-				}
-			},
-			ApplyDaemonPortFn: func(ctx context.Context, dp, gp int) (thttp.DaemonPortApplyResult, error) {
-				res, err := applyPorts(ctx, dp, gp)
-				if err != nil {
-					return thttp.DaemonPortApplyResult{}, err
-				}
-				return thttp.DaemonPortApplyResult{
-					ListenAddr:       res.ListenAddr,
-					ActiveDaemonPort: res.ActiveDaemon,
-					DaemonFallback:   res.DaemonFallback,
-					Restarting:       res.Restarting,
-					NewURL:           res.NewURL,
-					ActiveGGUFPort:   res.ActiveGGUF,
-					GGUFEndpoint:     res.GGUFEndpoint,
-					GGUFFallback:     res.GGUFFallback,
-					GGUFRunning:      res.GGUFRunning,
-				}, nil
-			},
-		},
-	})
-
-	mcpSrv := buildMCPServer(version, b)
-	rootHandler := thttp.NewDaemonMux(thttp.DaemonDeps{
-		Guardrail:     b.gr,
-		MCPServer:     mcpSrv,
-		Dashboard:     dashHandler,
-		BuildStatusFn: buildStatus,
-		ApplyPortsFn:  applyPorts,
-		RestartFn: func() (string, error) {
-			nextBin, _ := NewestWatchedBinary(0)
-			if nextBin == "" {
-				nextBin, _ = os.Executable()
-			}
-			go func() {
-				time.Sleep(35 * time.Millisecond)
-				skipStateRemove.Store(true)
-				select {
-				case reexecCh <- reexecSpec{bin: nextBin, addr: boundAddr}:
-				default:
-				}
-				_ = closeFn()
-			}()
-			return nextBin, nil
-		},
-		StopFn: func() {
-			go func() {
-				time.Sleep(35 * time.Millisecond)
-				select {
-				case stopRequested <- struct{}{}:
-				default:
-				}
-				_ = b.mgr.StopServer()
-				_ = closeFn()
-			}()
-		},
-	})
-
-	_, startMtime := NewestWatchedBinary(0)
-	srv = &http.Server{
-		Handler:           rootHandler,
-		ReadHeaderTimeout: 5 * time.Second,
-		IdleTimeout:       60 * time.Second,
-		MaxHeaderBytes:    64 << 10,
-	}
-
-	if runtime.GOOS != "windows" {
-		go func() {
-			ticker := time.NewTicker(1 * time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-stopWatch:
-					return
-				case <-ticker.C:
-					if path, t1 := NewestWatchedBinary(startMtime); path != "" {
-						time.Sleep(150 * time.Millisecond)
-						if path2, t2 := NewestWatchedBinary(startMtime); path2 == path && t2 == t1 {
-							skipStateRemove.Store(true)
-							select {
-							case reexecCh <- reexecSpec{bin: path, addr: boundAddr}:
-							default:
-							}
-							_ = closeFn()
-							return
-						}
-					}
-				}
-			}
-		}()
-	}
-
-	log.Printf("memorize daemon v%s listening on http://%s (pid=%d, db=%s, provider=%s)",
-		version, boundAddr, os.Getpid(), absDB, b.mem.ProviderName())
-
-	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Printf("memorize daemon serve error: %v", err)
-		return 1
-	}
-
-	select {
-	case <-stopRequested:
-		log.Printf("memorize daemon (pid=%d) stopped cleanly.", os.Getpid())
-		return 0
-	case spec := <-reexecCh:
-		log.Printf("memorize daemon restarting into %s (%s)...", spec.bin, spec.addr)
-		b.close()
-		reexecArgs := []string{spec.bin, "-daemon", "-addr", spec.addr}
-		if err := execInPlace(spec.bin, reexecArgs, filterDaemonEnv(os.Environ(), absDB, absModels, "")); err != nil {
-			log.Printf("memorize daemon re-exec error: %v", err)
-			return 1
-		}
-	default:
-	}
-	return 0
+	return lc.serve(ln)
 }
 
 // RunServer initializes runtime dependencies and runs the unified daemon until stop or re-exec.
@@ -648,6 +344,19 @@ func ServeInlineStdio(version, dbPath, modelsDir string, withDashboard bool, das
 	return 0
 }
 
+// ServeInlineSync executes the passive NDJSON SSH sync stream directly against SQLite when daemon delegation is disabled.
+func ServeInlineSync(ctx context.Context, dbPath, modelsDir string, r io.Reader, w io.Writer) error {
+	if !domain.IsMemorySyncEnabled() {
+		return domain.ErrMemorySyncDisabled
+	}
+	b, err := openRuntime(dbPath, modelsDir, false)
+	if err != nil {
+		return err
+	}
+	defer b.close()
+	return memory.ServeSyncStream(domain.WithAdminBypass(ctx), b.mem, r, w)
+}
+
 // Hooks returns the cli.RuntimeHooks implementation backed by localdaemon.
 func Hooks(version string) cli.RuntimeHooks {
 	return cli.RuntimeHooks{
@@ -658,6 +367,7 @@ func Hooks(version string) cli.RuntimeHooks {
 		ServeInlineStdio: func(dbPath, modelsDir string, withDashboard bool, dashAddr string) int {
 			return ServeInlineStdio(version, dbPath, modelsDir, withDashboard, dashAddr)
 		},
-		RunInlineHook: RunInlineHook,
+		RunInlineHook:   RunInlineHook,
+		ServeInlineSync: ServeInlineSync,
 	}
 }

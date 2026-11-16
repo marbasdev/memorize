@@ -10,7 +10,7 @@ import (
 )
 
 var jsonSyntaxOrSchemaKeys = map[string]bool{
-	"items": true, "id": true, "score": true, "confidence": true, "category": true, "sub_category": true, "tags": true,
+	"items": true, "index": true, "id": true, "score": true, "confidence": true, "category": true, "sub_category": true, "tags": true,
 	"is_permanent": true, "is_global_invariant": true, "action": true,
 	"conflict_fact_ids": true, "a_verdict": true, "violations": true, "probability": true,
 	"groups": true, "source_ids": true, "merged_content": true, "reason": true, "sha": true, "summary": true,
@@ -103,7 +103,7 @@ func (e *schemaEvaluator) ScoreRelevance(ctx context.Context, currentTask string
 	sb.WriteString(`Evaluate each fact individually against the Current Task and return per-item "score" and "confidence":
 - score (0.0 to 5.0): 4.5-5.0 critical constraint directly governing the task; 3.5-4.4 directly applicable rule/context; 2.0-3.4 indirect background; 0.0-1.9 unrelated.
 - confidence (0.00 to 1.00, 5-band certainty scale per item):
-  * 0.95-1.00: unambiguous, explicit non-negotiable invariant or exact task match/non-match.
+  * 0.95-1.00: unambiguous, explicit core architecture/safety rule or exact task match/non-match.
   * 0.90-0.94: clear, concrete architectural/domain applicability.
   * 0.85-0.89: standard convention or clear contextual match.
   * 0.80-0.84: soft preference or situational match.
@@ -161,7 +161,7 @@ Evaluate Candidate Fact against Existing Facts using semantic reasoning:
 - sub_category: concise lowercase sub-category slug. Reuse an existing sub-category under that category when applicable, or introduce a concise new sub-category slug when a clear sub-topic exists ("" only if genuinely broad).
 - tags: 1 to 3 concise lowercase sub-topic keywords.
 - tier:
-  * 'invariant': strict non-negotiable prohibition/safety constraint that must never be violated (is_global_invariant >= 0.88).
+  * 'invariant': strict core architecture or safety rule (is_global_invariant >= 0.88).
   * 'rule': standard architectural decision, convention, or current factual state (is_permanent >= 0.80).
   * 'preference': soft preference, favored option, or personal taste — non-binding hint (category='preference', is_global_invariant <= 0.20).
   * 'transient': temporary debug log, scratch note, or ephemeral chatter (is_permanent <= 0.30).
@@ -173,7 +173,7 @@ Evaluate Candidate Fact against Existing Facts using semantic reasoning:
   * 'OVERWRITE' with conflict_fact_ids ONLY when cardinality is 'exclusive' and Candidate contradicts or supersedes those Existing fact(s).
   * 'INSERT' with [] when Candidate is new OR when cardinality is 'additive' (coexisting items).
 - confidence (0.00 to 1.00): individual certainty and explicitness of this Candidate and action:
-  * 0.95-1.00: explicit non-negotiable invariant, hard prohibition, or strict security/safety mandate.
+  * 0.95-1.00: explicit core architecture/safety rule, hard prohibition, or strict security boundary.
   * 0.90-0.94: unambiguous architectural, schema, API, or workflow decision, or clear exclusive replacement.
   * 0.85-0.89: standard coding/UI convention or agreed implementation guideline.
   * 0.80-0.84: soft preference, stylistic taste, or narrow situational preference.
@@ -206,12 +206,17 @@ Existing:
 	if err != nil {
 		return domain.MutationDecision{}, err
 	}
+	finalizeSchemaMutationDecision(&dec, conf, validIDs)
+	return dec, nil
+}
+
+func finalizeSchemaMutationDecision(dec *domain.MutationDecision, fallbackConf float64, validIDs map[int64]bool) {
 	if dec.Confidence > 0 {
 		dec.Confidence = clampProb(dec.Confidence)
 	} else {
-		dec.Confidence = conf
+		dec.Confidence = fallbackConf
 	}
-	domain.ApplyDecisionSemantics(&dec)
+	domain.ApplyDecisionSemantics(dec)
 
 	var cleanIDs []int64
 	seen := make(map[int64]bool)
@@ -227,7 +232,98 @@ Existing:
 	} else if dec.Action == "OVERWRITE" || (dec.Action == "IGNORE" && dec.IsPermanent >= 0.75) {
 		dec.Action = "INSERT"
 	}
-	return dec, nil
+}
+
+func (e *schemaEvaluator) EvaluateMutations(ctx context.Context, scope string, candidates []string, existing []domain.Fact) ([]domain.MutationDecision, error) {
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	if len(candidates) == 1 {
+		dec, err := e.EvaluateMutation(ctx, scope, candidates[0], existing)
+		if err != nil {
+			return nil, err
+		}
+		return []domain.MutationDecision{dec}, nil
+	}
+
+	presets := domain.PresetCategoriesFromContext(ctx)
+	var sb strings.Builder
+	fmt.Fprintf(&sb, `Scope: %s
+Preset Taxonomy (category -> sub_categories): %s
+Evaluate each Candidate Fact (by its 0-based "index") against Existing Facts using semantic reasoning:
+- category: concise lowercase domain slug. Reuse an existing Preset Taxonomy category when applicable; if none fits, introduce a concise new category slug.
+- sub_category: concise lowercase sub-category slug. Reuse an existing sub-category under that category when applicable, or introduce a concise new sub-category slug when a clear sub-topic exists ("" only if genuinely broad).
+- tags: 1 to 3 concise lowercase sub-topic keywords.
+- tier: 'invariant' | 'rule' | 'preference' | 'transient'.
+- cardinality: 'exclusive' | 'additive'.
+- action:
+  * 'IGNORE' with matching conflict_fact_ids ONLY if an Existing fact already states the exact same meaning as that Candidate.
+  * 'OVERWRITE' with conflict_fact_ids ONLY when cardinality is 'exclusive' and that Candidate contradicts or supersedes those Existing fact(s).
+  * 'INSERT' with [] when that Candidate is new OR when cardinality is 'additive' (coexisting items).
+- confidence (0.00 to 1.00): individual certainty and explicitness of that Candidate and action.
+Existing:
+`, scope, presets)
+
+	validIDs := make(map[int64]bool, len(existing))
+	for _, f := range existing {
+		validIDs[f.ID] = true
+		fmt.Fprintf(&sb, "[#%d] (%s) %s\n", f.ID, f.Category, f.Content)
+	}
+	sb.WriteString("\nCandidates:\n")
+	for i, c := range candidates {
+		fmt.Fprintf(&sb, "[%d] %q\n", i, c)
+	}
+
+	d := e.tr.Dialect()
+	itemSchema := d.obj(map[string]any{
+		"index":               map[string]any{"type": d.t("integer")},
+		"category":            map[string]any{"type": d.t("string")},
+		"sub_category":        map[string]any{"type": d.t("string")},
+		"tags":                map[string]any{"type": d.t("array"), "items": map[string]any{"type": d.t("string")}},
+		"tier":                map[string]any{"type": d.t("string"), "enum": []string{"invariant", "rule", "preference", "transient"}},
+		"cardinality":         map[string]any{"type": d.t("string"), "enum": []string{"exclusive", "additive"}},
+		"is_permanent":        map[string]any{"type": d.t("number")},
+		"is_global_invariant": map[string]any{"type": d.t("number")},
+		"action":              map[string]any{"type": d.t("string"), "enum": []string{"INSERT", "OVERWRITE", "IGNORE"}},
+		"conflict_fact_ids":   map[string]any{"type": d.t("array"), "items": map[string]any{"type": d.t("integer")}},
+		"confidence":          map[string]any{"type": d.t("number")},
+	}, []string{"index", "category", "sub_category", "tags", "tier", "cardinality", "is_permanent", "is_global_invariant", "action", "conflict_fact_ids", "confidence"})
+	schema := d.obj(map[string]any{
+		"items": map[string]any{"type": d.t("array"), "items": itemSchema},
+	}, []string{"items"})
+
+	var parsed struct {
+		Items []struct {
+			Index int `json:"index"`
+			domain.MutationDecision
+		} `json:"items"`
+	}
+	conf, err := e.tr.CallJSON(ctx, sb.String(), schema, &parsed)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]domain.MutationDecision, len(candidates))
+	filled := make([]bool, len(candidates))
+	for _, it := range parsed.Items {
+		if it.Index < 0 || it.Index >= len(candidates) || filled[it.Index] {
+			continue
+		}
+		dec := it.MutationDecision
+		finalizeSchemaMutationDecision(&dec, conf, validIDs)
+		out[it.Index] = dec
+		filled[it.Index] = true
+	}
+	for i := range candidates {
+		if !filled[i] {
+			dec, err := e.EvaluateMutation(ctx, scope, candidates[i], existing)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = dec
+		}
+	}
+	return out, nil
 }
 
 func (e *schemaEvaluator) VerifyPlan(ctx context.Context, proposedPlan string, rules []domain.Fact) ([]domain.PlanViolation, error) {
@@ -235,11 +331,9 @@ func (e *schemaEvaluator) VerifyPlan(ctx context.Context, proposedPlan string, r
 		return nil, nil
 	}
 	var sb strings.Builder
-	sb.WriteString(`Check whether the Proposed Plan directly and explicitly violates any of the Rules below.
-- First set "a_verdict" to one concise sentence stating "COMPLIES: ..." or "VIOLATES #<id>: ...".
-- Return an EMPTY array ("violations": []) whenever the Proposed Plan complies with the rules, implements a valid part/slice of a rule (e.g. backend code while UI lives in another file, or vice versa), is unrelated to the rules, or is a normal read/test/query/build command.
-- NEVER flag a rule as a violation merely because the Proposed Plan touches the same file or topic while following or implementing part of the rule.
-- Only include a rule in "violations" if the Proposed Plan actively introduces behavior or values that directly contradict what that rule requires or forbids: set "probability" (0.80-1.00 violation likelihood) and "confidence" (0.00-1.00 5-band certainty of that violation).
+	sb.WriteString(`Verify whether the concrete Proposed Action/Diff directly executes behavior forbidden by any Rule below (never infer violations from keyword similarity or unrelated Turn Context prose).
+- First write "a_verdict": inspect the specific command/diff against the Rules and state "COMPLIES: <why allowed/unrelated>" unless an unambiguous direct contradiction exists ("VIOLATES #<id>: <exact conflict>").
+- If "a_verdict" starts with "COMPLIES", or if the action is compatible, unrelated, partial/preparatory, uncertain, or authorized by Turn Context overrides, return an EMPTY "violations" array; otherwise include only directly violated rules with honest "probability" (0.00-1.00; >= 0.80 only for clear direct contradiction) and "confidence" (0.00-1.00).
 Rules:
 `)
 	ruleMap := make(map[int64]domain.Fact, len(rules))
@@ -291,7 +385,7 @@ func (e *schemaEvaluator) CalibrateConfidence(ctx context.Context, scope string,
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `Scope: %s
 Assign an individual semantic confidence (0.00 to 1.00) to EACH stored memory below using this exact rubric (differentiate each item accurately according to its specificity and binding strength):
-- 0.95-1.00: strict non-negotiable invariant, hard prohibition, security/safety boundary, or core system contract.
+- 0.95-1.00: strict core architecture/safety rule, hard prohibition, security/safety boundary, or core system contract.
 - 0.90-0.94: explicit, concrete architectural, database, API, or operational rule with unambiguous conditions.
 - 0.85-0.89: standard coding, UI layout, or workflow convention.
 - 0.80-0.84: soft preference, stylistic taste, or situational hint.
@@ -377,7 +471,7 @@ func (e *schemaEvaluator) SuggestConsolidations(ctx context.Context, scope strin
 Analyze the active memories below and recommend groups of 2 to 4 overlapping, duplicate, or closely related memories (covering the same feature, UI tab, workflow, or subsystem constraint) that can be consolidated into ONE tight rule.
 Rules:
 1. Group memories that address the same narrow feature/subsystem or partially repeat each other (e.g., multiple rules about the same UI modal, tab behavior, onboarding step, or category feature). Do NOT merge completely unrelated domains. If truly no pair is related, return {"groups": []}.
-2. Keep [pinned] core invariants separate from [general] unpinned items unless they state the same invariant.
+2. Keep [pinned] core rules separate from [general] unpinned items unless they state the same rule.
 3. Each memory #ID may appear in AT MOST ONE group.
 4. merged_content MUST be compact and dense: target 90-145 characters (strictly <= 165 characters max), written in the EXACT SAME LANGUAGE as the source memories (e.g., Korean input -> Korean output; never translate to English).
 5. reason MUST be a short phrase (<= 40 characters, same language) naming the shared topic being consolidated.

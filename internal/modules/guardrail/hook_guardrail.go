@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"memorize/internal/domain"
@@ -15,102 +13,6 @@ import (
 	"memorize/internal/infra/sqlite"
 	"memorize/internal/modules/memory"
 )
-
-func extractMatchTokens(text string, ignored map[string]bool) map[string]bool {
-	out := make(map[string]bool)
-	var cur []rune
-	flush := func() {
-		if len(cur) == 0 {
-			return
-		}
-		raw := string(cur)
-		tok := strings.ToLower(raw)
-		cur = cur[:0]
-		if ignored[tok] {
-			return
-		}
-		runes := []rune(tok)
-		hasCJK := false
-		hasDigit := false
-		for _, r := range runes {
-			if domain.IsCJKRune(r) {
-				hasCJK = true
-			}
-			if unicode.IsDigit(r) {
-				hasDigit = true
-			}
-		}
-		hasUpper := raw != tok
-		if !hasCJK && !hasDigit && !hasUpper && len(runes) < 4 {
-			return
-		}
-		if len(runes) < 2 {
-			return
-		}
-		out[tok] = true
-		if hasCJK && len(runes) >= 2 {
-			for i := 0; i <= len(runes)-2; i++ {
-				bg := string(runes[i : i+2])
-				if !ignored[bg] {
-					out[bg] = true
-				}
-			}
-		}
-	}
-	for _, r := range text {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			cur = append(cur, r)
-		} else {
-			flush()
-		}
-	}
-	flush()
-	return out
-}
-
-// FilterOverlappingRules selects only rules that share significant technical tokens or CJK 2-grams
-// with plan, avoiding unnecessary LLM VerifyPlan inference when a tool call is unrelated to stored rules.
-func FilterOverlappingRules(plan string, rules []domain.Fact, ignoreTokens ...string) []domain.Fact {
-	if len(rules) == 0 || strings.TrimSpace(plan) == "" {
-		return nil
-	}
-	ignored := make(map[string]bool, len(ignoreTokens))
-	for _, t := range ignoreTokens {
-		t = strings.ToLower(strings.TrimSpace(t))
-		if t != "" {
-			ignored[t] = true
-		}
-	}
-	planTokens := extractMatchTokens(plan, ignored)
-	if len(planTokens) == 0 {
-		return nil
-	}
-	var matched []domain.Fact
-	for _, r := range rules {
-		rTokens := extractMatchTokens(r.Content, ignored)
-		if len(rTokens) == 0 {
-			continue
-		}
-		overlap := 0
-		asciiHit := false
-		for tk := range rTokens {
-			if planTokens[tk] {
-				overlap++
-				if !domain.ContainsCJKRune(tk) {
-					asciiHit = true
-				}
-			}
-		}
-		minReq := 2
-		if len(rTokens) <= 4 || (asciiHit && domain.ContainsCJKRune(r.Content)) {
-			minReq = 1
-		}
-		if overlap >= minReq {
-			matched = append(matched, r)
-		}
-	}
-	return matched
-}
 
 func formatDiffLines(prefix string, lines []string) string {
 	var sb strings.Builder
@@ -135,7 +37,7 @@ func truncateUTF8Bytes(s string, maxBytes int) string {
 	return s[:b] + "..."
 }
 
-func diffEditSnippet(oldRaw, newRaw string) string {
+func trimChangedLineEdges(oldRaw, newRaw string) (oldMid, newMid []string) {
 	oldLines := strings.Split(oldRaw, "\n")
 	newLines := strings.Split(newRaw, "\n")
 	p := 0
@@ -148,73 +50,90 @@ func diffEditSnippet(oldRaw, newRaw string) string {
 	for s < len(oldRem) && s < len(newRem) && oldRem[len(oldRem)-1-s] == newRem[len(newRem)-1-s] {
 		s++
 	}
-	oldMid := oldRem[:len(oldRem)-s]
-	newMid := newRem[:len(newRem)-s]
+	return oldRem[:len(oldRem)-s], newRem[:len(newRem)-s]
+}
+
+func formatEdgeDiff(oldMid, newMid []string, addPrefix string, maxBytes int) string {
+	if len(oldMid) == 0 && len(newMid) == 0 {
+		return ""
+	}
 	if len(oldMid) > 0 && len(newMid) > 0 {
 		removed := formatDiffLines("- ", oldMid)
 		added := formatDiffLines("+ ", newMid)
 		combined := removed + "\n" + added
-		if len(combined) > 950 {
-			combined = truncateUTF8Bytes(removed, 450) + "\n" + truncateUTF8Bytes(added, 450)
+		if maxBytes > 0 && len(combined) > maxBytes {
+			half := max(64, (maxBytes-50)/2)
+			combined = truncateUTF8Bytes(removed, half) + "\n" + truncateUTF8Bytes(added, half)
 		}
 		return combined
 	}
 	if len(newMid) > 0 {
-		return strings.Join(newMid, "\n")
+		return truncateUTF8Bytes(formatDiffLines(addPrefix, newMid), maxBytes)
 	}
-	if len(oldMid) > 0 {
-		return "Removed:\n" + strings.Join(oldMid, "\n")
-	}
-	return ""
+	return truncateUTF8Bytes("Removed:\n"+strings.Join(oldMid, "\n"), maxBytes)
 }
 
-func (s *Service) evaluateGuardrailViolations(ctx context.Context, plan string, p hookPayload, scope, repoDir string, minProb float64) (int, []domain.PlanViolation, error) {
+func diffEditSnippet(oldRaw, newRaw string) string {
+	oldMid, newMid := trimChangedLineEdges(oldRaw, newRaw)
+	return formatEdgeDiff(oldMid, newMid, "", 950)
+}
+
+func (s *Service) activeOverrideTurnInput(ctx context.Context, ev NormalizedHookEvent, scopeKey string) string {
+	if ev.SessionID == "" || s.mem.IsTurnMutated(ctx, ev.SessionID, scopeKey) {
+		return ""
+	}
+	turnInp := strings.TrimSpace(domain.FirstNonEmpty(s.mem.ActiveTurnInput(ctx, ev.SessionID, scopeKey), ev.TurnPrompt))
+	if turnInp == "" || len(turnInp) > 1200 {
+		return ""
+	}
+	return turnInp
+}
+
+func (s *Service) evaluateGuardrailViolations(ctx context.Context, plan string, ev NormalizedHookEvent, scope string, minProb float64) (int, []domain.PlanViolation, error) {
 	scA, scB := memory.ScopesFor(scope, true)
-	loaded, err := s.mem.LoadActiveFacts(ctx, scA, scB, "")
-	if err != nil || len(loaded) == 0 {
+	rules, err := s.loadEnforceableFacts(ctx, scA, scB)
+	if err != nil || len(rules) == 0 {
 		return 0, nil, err
 	}
-	rules := filterEnforceableRules(loaded)
-	if len(rules) == 0 {
-		return 0, nil, nil
-	}
 
-	// Strip workspace root path and ignore project name token so every file inside the project doesn't match by path alone.
-	planForMatch := plan
-	if repoDir != "" {
-		planForMatch = strings.ReplaceAll(planForMatch, repoDir, "")
+	eval := s.router.EvalForTask(ctx, domain.TaskVerify)
+	if eval == nil {
+		return len(rules), nil, fmt.Errorf("no active evaluation engine configured")
 	}
-	for _, wp := range p.WorkspacePaths {
-		if wp != "" {
-			planForMatch = strings.ReplaceAll(planForMatch, wp, "")
-		}
-	}
-	projName := strings.TrimPrefix(scA, "project:")
-	candidates := FilterOverlappingRules(planForMatch, rules,
-		projName, "tool", "path", "file", "content", "replacement", "commandline", "command", "input", "description")
-	if len(candidates) == 0 {
-		return 0, nil, nil
-	}
-
-	verifyInput := plan
-	if explicitSID := explicitHookSessionID(p); explicitSID != "" {
-		turnInp := firstNonEmpty(s.mem.ActiveTurnInput(ctx, explicitSID, scA), p.Prompt, p.UserPrompt, p.LastUserInput)
-		if turnInp != "" && len(turnInp) <= 1200 {
-			verifyInput = plan + "\nCurrent turn user instruction (authoritative if overriding an older rule): " + turnInp
-		}
-	}
-
-	ev := s.router.EvalForTask(ctx, domain.TaskVerify)
-	if ev == nil {
-		return len(candidates), nil, fmt.Errorf("no active evaluation engine configured")
-	}
+	// Phase 1: evaluate strictly on concrete action/diff without user turn prose so benign
+	// commands cannot trigger rules from chat wording while prefix caches stay stable.
 	evalStart := time.Now()
-	violations, err := ev.VerifyPlan(ctx, verifyInput, candidates)
-	s.router.RecordTelemetry(ctx, domain.TaskVerify, ev, evalStart, len(candidates), err)
+	violations, err := eval.VerifyPlan(ctx, plan, rules)
+	s.router.RecordTelemetry(ctx, domain.TaskVerify, eval, evalStart, len(rules), err)
 	if err != nil {
-		return len(candidates), nil, err
+		return len(rules), nil, err
 	}
-	return len(candidates), filterAndSortViolations(violations, minProb), nil
+	blocking := filterAndSortViolations(violations, minProb)
+	if len(blocking) == 0 {
+		return len(rules), nil, nil
+	}
+
+	// Phase 2 (lazy override): only re-check flagged rules with Turn Context when Phase 1
+	// hits and sufficient hook deadline budget remains.
+	turnInp := s.activeOverrideTurnInput(ctx, ev, scA)
+	if turnInp == "" {
+		return len(rules), blocking, nil
+	}
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < 1200*time.Millisecond {
+		return len(rules), blocking, nil
+	}
+	flagged := make([]domain.Fact, 0, len(blocking))
+	for _, b := range blocking {
+		flagged = append(flagged, b.Fact)
+	}
+	overridePlan := plan + "\nTurn Context (User Prompt - check ONLY whether this instruction explicitly overrides the flagged rules): " + turnInp
+	ovStart := time.Now()
+	ovViolations, ovErr := eval.VerifyPlan(ctx, overridePlan, flagged)
+	s.router.RecordTelemetry(ctx, domain.TaskVerify, eval, ovStart, len(flagged), ovErr)
+	if ovErr != nil {
+		return len(rules), blocking, nil
+	}
+	return len(rules), filterAndSortViolations(ovViolations, minProb), nil
 }
 
 func (s *Service) rememberRepo(ctx context.Context, scope, repoDir string) {
@@ -228,15 +147,16 @@ func (s *Service) rememberRepo(ctx context.Context, scope, repoDir string) {
 	sqlite.RememberRepoPath(ctx, s.db, scope, repoDir)
 }
 
-func (s *Service) runGuardrailHook(ctx context.Context, mode string, p hookPayload, scope, repoDir string) (string, int, error) {
+func (s *Service) runGuardrailHook(ctx context.Context, ev NormalizedHookEvent, codec AgentCodec, scope, repoDir, sid string) (string, int, error) {
 	s.rememberRepo(ctx, scope, repoDir)
-	plan := extractPlanFromPayload(p)
-	if mode == "claude-pretool" || mode == "antigravity-pretool" {
-		if explicitSID := explicitHookSessionID(p); explicitSID != "" && s.prog != nil {
-			s.prog.TouchLiveSession(scope, explicitSID, extractHookToolName(p, mode), extractToolTargetPath(p))
-		}
+	if s.rp != nil && strings.HasPrefix(scope, "project:") {
+		_, _ = s.rp.SyncTurnNotice(ctx, scope, repoDir)
 	}
-	if plan == "" && mode == "git-precommit" && repoDir != "" {
+	plan := extractPlanFromEvent(ev)
+	if ev.Phase == domain.HookPhasePreTool && ev.SessionID != "" {
+		s.mem.TouchTurnSession(ctx, ev.SessionID, scope)
+	}
+	if plan == "" && ev.Phase == domain.HookPhasePreCommit && repoDir != "" {
 		if diffOut, err := git.Run(ctx, repoDir, "diff", "--cached", "--unified=0"); err == nil && diffOut != "" {
 			if len(diffOut) > 2000 {
 				diffOut = diffOut[:2000] + "..."
@@ -245,87 +165,95 @@ func (s *Service) runGuardrailHook(ctx context.Context, mode string, p hookPaylo
 		}
 	}
 	if plan == "" {
-		return allowGuardrailResult(mode)
+		return codec.FormatAllowPreTool()
 	}
 	hookStart := time.Now()
+	toolName := ev.ToolName
 
-	var (
-		wg             sync.WaitGroup
-		gateReason     string
-		gateIDs        []int64
-		candidateCount int
-		blocking       []domain.PlanViolation
-		verifyErr      error
-	)
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		gateReason, gateIDs = s.checkTurnPreMutateGate(ctx, mode, p, scope)
-	}()
-	go func() {
-		defer wg.Done()
-		candidateCount, blocking, verifyErr = s.evaluateGuardrailViolations(ctx, plan, p, scope, repoDir, 0.80)
-	}()
-	wg.Wait()
-	elapsedMs := domain.ElapsedMsSince(hookStart)
-
-	toolName := extractHookToolName(p, mode)
-	if gateReason != "" {
+	// Enforce the turn pre-mutate gate first so durable decisions in the current chat are
+	// persisted before evaluating the tool call against active personal and team rules.
+	if gateReason, gateIDs := s.checkTurnPreMutateGate(ctx, ev, scope); gateReason != "" {
 		_, _ = s.RecordGuardrailLog(ctx, domain.GuardrailLogInput{
 			Scope:       scope,
-			Source:      mode,
+			Source:      ev.Mode,
 			ToolName:    toolName,
 			Verdict:     domain.GuardrailVerdictPreMutateGate,
 			Blocked:     true,
-			RuleCount:   candidateCount,
 			ViolatedIDs: gateIDs,
 			PlanSnippet: plan,
 			Details:     gateReason,
-			ElapsedMs:   elapsedMs,
+			ElapsedMs:   domain.ElapsedMsSince(hookStart),
 		})
-		return denyGuardrailResult(mode, gateReason)
-	}
-	if verifyErr != nil {
-		if os.Getenv("MEMORY_GUARDRAIL_FAIL_CLOSED") == "1" {
-			return denyGuardrailResult(mode, "guardrail verification failed under fail-closed policy")
-		}
-		return allowGuardrailResult(mode)
-	}
-	if len(blocking) == 0 {
-		if candidateCount > 0 {
-			_, _ = s.RecordGuardrailLog(ctx, domain.GuardrailLogInput{
-				Scope:       scope,
-				Source:      mode,
-				ToolName:    toolName,
-				Verdict:     domain.GuardrailVerdictPass,
-				Blocked:     false,
-				RuleCount:   candidateCount,
-				PlanSnippet: plan,
-				ElapsedMs:   elapsedMs,
-			})
-		}
-		return allowGuardrailResult(mode)
+		return codec.FormatDenyPreTool(gateReason)
 	}
 
-	vIDs, vDetails := formatViolationDetails(blocking)
-	_, _ = s.RecordGuardrailLog(ctx, domain.GuardrailLogInput{
-		Scope:       scope,
-		Source:      mode,
-		ToolName:    toolName,
-		Verdict:     domain.GuardrailVerdictRuleViolation,
-		Blocked:     true,
-		RuleCount:   candidateCount,
-		ViolatedIDs: vIDs,
-		PlanSnippet: plan,
-		Details:     vDetails,
-		ElapsedMs:   elapsedMs,
-	})
+	// File edits pass PreToolUse after the pre-mutate gate and collect their pre-turn baseline
+	// so the Stop hook evaluates the net turn diff once and triggers self-correction on violations.
+	if ev.Phase == domain.HookPhasePreTool && strings.TrimSpace(ev.Raw.ProposedPlan) == "" && isFileEditTool(toolName) {
+		s.recordPendingTurnEdit(ctx, sid, scope, repoDir, toolName, ev, plan)
+		return codec.FormatAllowPreTool()
+	}
+
+	candidateCount, blocking, verifyErr := s.evaluateGuardrailViolations(ctx, plan, ev, scope, 0.80)
+	if blocked := s.recordVerifyOutcomeLog(ctx, scope, ev.Mode, toolName, candidateCount, plan, blocking, verifyErr, domain.ElapsedMsSince(hookStart)); !blocked {
+		return codec.FormatAllowPreTool()
+	}
+	if verifyErr != nil {
+		return codec.FormatDenyPreTool("guardrail verification failed under fail-closed policy")
+	}
 
 	var sb strings.Builder
 	sb.WriteString("[MEMORIZE GUARDRAIL BLOCKED] Proposed action violates active project rules:\n")
 	for _, v := range blocking {
-		fmt.Fprintf(&sb, "- [%s / %s #%d] %s (violation prob: %.0f%%)\n",
-			v.Scope, v.Category, v.ID, v.Content, v.Probability*100)
+		fmt.Fprintf(&sb, "- [%s / %s %s] %s (violation prob: %.0f%%)\n",
+			v.Scope, v.Category, formatViolationRef(v.Fact), v.Content, v.Probability*100)
 	}
-	return denyGuardrailResult(mode, strings.TrimSpace(sb.String()))
+	return codec.FormatDenyPreTool(strings.TrimSpace(sb.String()))
+}
+
+func (s *Service) recordVerifyOutcomeLog(ctx context.Context, scope, source, toolName string, ruleCount int, planSnippet string, blocking []domain.PlanViolation, verifyErr error, elapsedMs float64) bool {
+	if verifyErr != nil {
+		failClosed := os.Getenv("MEMORY_GUARDRAIL_FAIL_CLOSED") == "1"
+		_, _ = s.RecordGuardrailLog(ctx, domain.GuardrailLogInput{
+			Scope:       scope,
+			Source:      source,
+			ToolName:    toolName,
+			Verdict:     domain.GuardrailVerdictError,
+			Blocked:     failClosed,
+			RuleCount:   ruleCount,
+			PlanSnippet: planSnippet,
+			Details:     verifyErr.Error(),
+			ElapsedMs:   elapsedMs,
+		})
+		return failClosed
+	}
+	if len(blocking) == 0 {
+		if ruleCount > 0 {
+			_, _ = s.RecordGuardrailLog(ctx, domain.GuardrailLogInput{
+				Scope:       scope,
+				Source:      source,
+				ToolName:    toolName,
+				Verdict:     domain.GuardrailVerdictPass,
+				Blocked:     false,
+				RuleCount:   ruleCount,
+				PlanSnippet: planSnippet,
+				ElapsedMs:   elapsedMs,
+			})
+		}
+		return false
+	}
+	vIDs, vDetails := formatViolationDetails(blocking)
+	_, _ = s.RecordGuardrailLog(ctx, domain.GuardrailLogInput{
+		Scope:       scope,
+		Source:      source,
+		ToolName:    toolName,
+		Verdict:     domain.GuardrailVerdictRuleViolation,
+		Blocked:     true,
+		RuleCount:   ruleCount,
+		ViolatedIDs: vIDs,
+		PlanSnippet: planSnippet,
+		Details:     vDetails,
+		ElapsedMs:   elapsedMs,
+	})
+	return true
 }

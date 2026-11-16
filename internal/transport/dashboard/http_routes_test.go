@@ -200,18 +200,16 @@ func TestProgressAndGuardrailCleanupJSONCSRF(t *testing.T) {
 
 	if _, err := deps.Progress.RecordProgress(ctx, domain.ProgressInput{
 		Scope:   "project:csrf",
-		Track:   "Active Track",
-		Status:  domain.ProgressStatusInProgress,
-		Summary: "Should not be deleted by completed cleanup",
+		Track:   "Track Alpha",
+		Summary: "First activity entry for older_than_days=0 cleanup",
 		Source:  "agent",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := deps.Progress.RecordProgress(ctx, domain.ProgressInput{
 		Scope:   "project:csrf",
-		Track:   "Done Track",
-		Status:  domain.ProgressStatusDone,
-		Summary: "Eligible for older_than_days=0 cleanup",
+		Track:   "Track Beta",
+		Summary: "Second activity entry for older_than_days=0 cleanup",
 		Source:  "agent",
 	}); err != nil {
 		t.Fatal(err)
@@ -260,15 +258,15 @@ func TestProgressAndGuardrailCleanupJSONCSRF(t *testing.T) {
 	if err := json.NewDecoder(okRec.Body).Decode(&res); err != nil {
 		t.Fatalf("decode cleanup response: %v", err)
 	}
-	if res.Deleted != 1 {
-		t.Fatalf("expected 1 deleted completed entry, got %d", res.Deleted)
+	if res.Deleted != 2 {
+		t.Fatalf("expected 2 deleted entries, got %d", res.Deleted)
 	}
 
 	ov, err := deps.Progress.GetProgressOverviewWithQuery(ctx, domain.ProgressQuery{Scope: "project:csrf"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ov.ActiveTracks) != 1 || ov.StatusCounts[domain.ProgressStatusDone] != 0 {
-		t.Fatalf("expected active track preserved and done count 0, got %+v", ov)
+	if ov.TotalCount != 0 || len(ov.RecentHistory) != 0 {
+		t.Fatalf("expected empty activity history after older_than_days=0 cleanup, got %+v", ov)
 	}
 }

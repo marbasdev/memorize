@@ -3,7 +3,6 @@ package domain
 import (
 	"context"
 	"fmt"
-	"os"
 	"runtime"
 	"strings"
 	"time"
@@ -31,39 +30,17 @@ func DefaultProvider() string {
 	return "gguf"
 }
 
-// ResolveExplicitEnvProvider returns an active provider when MEMORY_PROVIDER is set
-// OR when exactly one provider-specific environment variable is explicitly configured.
-func ResolveExplicitEnvProvider() string {
-	if explicit := NormalizeProviderID(os.Getenv("MEMORY_PROVIDER")); explicit != "" {
-		return explicit
-	}
-	var matched []string
-	if strings.TrimSpace(os.Getenv("GEMINI_API_KEY")) != "" {
-		matched = append(matched, "gemini")
-	}
-	if strings.TrimSpace(os.Getenv("TYPESAFE_API_KEY")) != "" ||
-		strings.TrimSpace(os.Getenv("FLIDE_API_KEY")) != "" ||
-		strings.TrimSpace(os.Getenv("JEV_API_URL")) != "" {
-		matched = append(matched, "jev")
-	}
-	if strings.TrimSpace(os.Getenv("LOCAL_MODEL_URL")) != "" {
-		matched = append(matched, "local")
-	}
-	if strings.TrimSpace(os.Getenv("LOCAL_GGUF_URL")) != "" {
-		matched = append(matched, "gguf")
-	}
-	if len(matched) == 1 {
-		return matched[0]
-	}
-	return ""
-}
-
 // Evaluator is the core inference contract for relevance scoring, mutation gatekeeping, and plan verification.
 type Evaluator interface {
 	Name() string
 	ScoreRelevance(ctx context.Context, currentTask string, facts []Fact) ([]ScoredFact, error)
 	EvaluateMutation(ctx context.Context, scope, candidate string, existing []Fact) (MutationDecision, error)
 	VerifyPlan(ctx context.Context, proposedPlan string, rules []Fact) ([]PlanViolation, error)
+}
+
+// BatchMutationEvaluator evaluates multiple candidate facts against existing memories in a single pass.
+type BatchMutationEvaluator interface {
+	EvaluateMutations(ctx context.Context, scope string, candidates []string, existing []Fact) ([]MutationDecision, error)
 }
 
 // Consolidator synthesizes multiple fragmented memories into one dense rule statement.
@@ -89,6 +66,13 @@ type ProgressCommitCategorizer interface {
 // TaxonomyPlanner proposes non-destructive category/sub_category reorganizations.
 type TaxonomyPlanner interface {
 	SuggestTaxonomyRebalance(ctx context.Context, scope string, facts []Fact) ([]TaxonomyRebalanceItem, error)
+}
+
+// RulePackPlanner drafts concise single-line Team Rule Pack entries with surgical placement
+// ordering and identifies local memories that duplicate or partially overlap active Team Rules.
+type RulePackPlanner interface {
+	DraftRulePackProposal(ctx context.Context, scope, rawRuleText, sourceCat, sourceSub string, outline []RuleOutlineEntry) (RulePlacementProposal, error)
+	FindRedundantLocalMemories(ctx context.Context, scope string, teamRules []TeamRule, localFacts []Fact) ([]RuleDuplicateSuggestion, error)
 }
 
 // EvalTask identifies each discrete workload in memorize for specialized model routing.
@@ -139,20 +123,11 @@ func FindEvalTask(task EvalTask) (EvalTaskSpec, bool) {
 	return EvalTaskSpec{}, false
 }
 
-// NormalizeProviderID canonicalizes provider identifiers (e.g. flide -> jev).
-func NormalizeProviderID(provider string) string {
-	p := strings.ToLower(strings.TrimSpace(provider))
-	if p == "flide" {
-		return "jev"
-	}
-	return p
-}
-
 // IsDecisionOnlySpec reports whether (provider, model) is a non-generative decision engine.
 func IsDecisionOnlySpec(provider, model string) bool {
 	p := NormalizeProviderID(provider)
 	m := strings.ToLower(strings.TrimSpace(model))
-	if p == "jev" {
+	if spec, ok := FindProviderSpec(p); ok && spec.DecisionOnly {
 		return true
 	}
 	return (p == "" || p == "gemini") && strings.HasPrefix(m, "gemini-decision")
@@ -177,9 +152,7 @@ func ValidateTaskRoute(task EvalTask, provider, model string) error {
 	if p == "" {
 		return nil
 	}
-	switch p {
-	case "gguf", "gemini", "jev", "local":
-	default:
+	if _, ok := FindProviderSpec(p); !ok {
 		return fmt.Errorf("unknown provider %q for task %s", provider, task)
 	}
 	return nil
@@ -205,7 +178,8 @@ func EvaluatorSupportsTask(ev Evaluator, task EvalTask) bool {
 	case TaskConsolidate:
 		_, c1 := ev.(Consolidator)
 		_, c2 := ev.(ConsolidationPlanner)
-		return c1 || c2
+		_, c3 := ev.(RulePackPlanner)
+		return c1 || c2 || c3
 	case TaskProgress:
 		_, ok := ev.(ProgressCommitCategorizer)
 		return ok

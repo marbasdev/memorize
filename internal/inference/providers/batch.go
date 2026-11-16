@@ -156,6 +156,46 @@ func (b *BatchEvaluator) EvaluateMutation(ctx context.Context, scope, candidate 
 	return merged, nil
 }
 
+func (b *BatchEvaluator) EvaluateMutations(ctx context.Context, scope string, candidates []string, existing []domain.Fact) ([]domain.MutationDecision, error) {
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	if len(candidates) == 1 {
+		dec, err := b.EvaluateMutation(ctx, scope, candidates[0], existing)
+		if err != nil {
+			return nil, err
+		}
+		return []domain.MutationDecision{dec}, nil
+	}
+	if len(existing) <= b.batchSize {
+		if bm, ok := b.base.(domain.BatchMutationEvaluator); ok {
+			const maxCandBatch = 8
+			if len(candidates) <= maxCandBatch {
+				return bm.EvaluateMutations(ctx, scope, candidates, existing)
+			}
+			out := make([]domain.MutationDecision, 0, len(candidates))
+			for i := 0; i < len(candidates); i += maxCandBatch {
+				end := min(i+maxCandBatch, len(candidates))
+				part, err := bm.EvaluateMutations(ctx, scope, candidates[i:end], existing)
+				if err != nil {
+					return nil, err
+				}
+				out = append(out, part...)
+			}
+			return out, nil
+		}
+	}
+	out := make([]domain.MutationDecision, len(candidates))
+	for i, c := range candidates {
+		dec, err := b.EvaluateMutation(ctx, scope, c, existing)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = dec
+	}
+	return out, nil
+}
+
 func (b *BatchEvaluator) VerifyPlan(ctx context.Context, proposedPlan string, rules []domain.Fact) ([]domain.PlanViolation, error) {
 	if len(rules) == 0 {
 		return nil, nil
@@ -303,6 +343,35 @@ func (b *BatchEvaluator) SuggestTaxonomyRebalance(ctx context.Context, scope str
 	for i := 0; i < len(facts); i += maxTaxBatch {
 		end := min(len(facts), i+maxTaxBatch)
 		part, err := tp.SuggestTaxonomyRebalance(ctx, scope, facts[i:end])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, part...)
+	}
+	return out, nil
+}
+
+func (b *BatchEvaluator) DraftRulePackProposal(ctx context.Context, scope, rawRuleText, sourceCat, sourceSub string, outline []domain.RuleOutlineEntry) (domain.RulePlacementProposal, error) {
+	rp, ok := b.base.(domain.RulePackPlanner)
+	if !ok {
+		return domain.RulePlacementProposal{}, errors.New("active evaluator does not support rule pack drafting")
+	}
+	return rp.DraftRulePackProposal(ctx, scope, rawRuleText, sourceCat, sourceSub, outline)
+}
+
+func (b *BatchEvaluator) FindRedundantLocalMemories(ctx context.Context, scope string, teamRules []domain.TeamRule, localFacts []domain.Fact) ([]domain.RuleDuplicateSuggestion, error) {
+	rp, ok := b.base.(domain.RulePackPlanner)
+	if !ok || len(teamRules) == 0 || len(localFacts) == 0 {
+		return nil, nil
+	}
+	const maxLocalBatch = 40
+	if len(localFacts) <= maxLocalBatch {
+		return rp.FindRedundantLocalMemories(ctx, scope, teamRules, localFacts)
+	}
+	var out []domain.RuleDuplicateSuggestion
+	for i := 0; i < len(localFacts); i += maxLocalBatch {
+		end := min(len(localFacts), i+maxLocalBatch)
+		part, err := rp.FindRedundantLocalMemories(ctx, scope, teamRules, localFacts[i:end])
 		if err != nil {
 			return nil, err
 		}

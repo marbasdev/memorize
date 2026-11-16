@@ -67,7 +67,7 @@
   <rect class="s-panel" x="516" y="58" width="466" height="311" rx="8" />
   <text x="532" y="82" class="s-sans c-pri" font-size="12.5" font-weight="700">With memorize</text>
   <rect class="s-ok" x="844" y="66" width="122" height="22" rx="4" />
-  <text x="905" y="81" text-anchor="middle" class="s-sans c-ok" font-size="10.2" font-weight="700">PRE-RUN BLOCKED</text>
+  <text x="905" y="81" text-anchor="middle" class="s-sans c-ok" font-size="10.2" font-weight="700">HYBRID GUARDRAIL</text>
 
   <!-- Step 1 Right -->
   <rect class="s-card" x="532" y="98" width="434" height="58" rx="6" />
@@ -79,17 +79,17 @@
   <!-- Step 2 Right -->
   <rect class="s-info" x="532" y="164" width="434" height="52" rx="6" />
   <text x="544" y="182" class="s-mono c-acc" font-size="10.5">11:40 · /compact · Checkpoint Auto-Detected</text>
-  <text x="544" y="199" class="s-sans c-pri" font-size="10.8">Auto-restores [#9] &amp; invariants via <tspan class="c-ok" font-weight="700">[Post-Compact Restored]</tspan></text>
+  <text x="544" y="199" class="s-sans c-pri" font-size="10.8">Auto-restores [#9] &amp; core rules via <tspan class="c-ok" font-weight="700">[Post-Compact Restored]</tspan></text>
 
   <!-- Step 3 Right -->
   <rect class="s-term" x="532" y="224" width="434" height="74" rx="6" />
-  <text x="544" y="242" class="s-mono c-warn" font-size="10.3">14:20 · Turn 42  Agent calls write_file → PreToolUse Hook</text>
+  <text x="544" y="242" class="s-mono c-warn" font-size="10.3">14:20 · Turn 42  write_file("auth.ts") → Turn-End Stop Hook</text>
   <rect x="544" y="250" width="410" height="22" rx="3" fill="rgba(251,191,36,0.14)" />
-  <text x="552" y="265" class="s-mono c-warn" font-size="10.4">[BLOCKED] Violates #9: No JWT — use session cookies</text>
-  <text x="544" y="289" class="s-sans c-ok" font-size="10.3">↳ Stopped before disk write → Agent rewrites with sessionCookie</text>
+  <text x="552" y="265" class="s-mono c-warn" font-size="10.4">[AUTO-FIX] Violates #9: No JWT — use session cookies</text>
+  <text x="544" y="289" class="s-sans c-ok" font-size="10.3">↳ Self-corrects before turn ends → Rewrites with sessionCookie</text>
 
   <!-- Result Right -->
   <rect class="s-ok" x="532" y="306" width="434" height="48" rx="6" />
-  <text x="749" y="326" text-anchor="middle" class="s-sans c-ok" font-size="11.8" font-weight="700">Result: Violation stopped before touching disk</text>
+  <text x="749" y="326" text-anchor="middle" class="s-sans c-ok" font-size="11.5" font-weight="700">Result: Auto-fixed cleanly (+ PreToolUse blocks bad shell runs)</text>
   <text x="749" y="343" text-anchor="middle" class="s-sans c-sec" font-size="10.3">0 repeat-turn evals · KV-cached prefix · 0-token System 1</text>
 </svg>

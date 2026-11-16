@@ -1,6 +1,6 @@
 # memorize
 
-[한국어 (README.ko.md)](./README.ko.md) · [Architecture Reference](./ARCHITECTURE.md)
+[한국어 (README.ko.md)](./README.ko.md) · [Team Guide](./TEAM.md) · [Architecture Reference](./ARCHITECTURE.md)
 
 **Stateful memory plugin for AI coding agents — retire stale instructions immediately and enforce only your latest rules.**
 
@@ -18,11 +18,11 @@ You do not have to maintain rule files by hand or type "remember this" on every 
 
 1. **Refine & Overwrite**: When a new or changed rule is detected in chat and the agent tries to edit code before updating memory, a pre-edit hook **pauses execution until stale rules are retired and the latest decision is stored**.
 2. **Minimal Delta Injection**: Each turn receives only relevant rules not yet delivered to the active session, keeping your context window lean no matter how long the session runs.
-3. **Pre-Execution Blocking**: Tool edits, shell commands, and Git commits are verified against active rules and stopped before violations land.
+3. **Dual-Layer Guardrails (Instant Shell Block + Turn-End Auto-Fix)**: Irreversible shell commands are blocked *before* execution, while file edits proceed smoothly and are evaluated together once the turn finishes editing so the agent automatically self-corrects any rule violations *(plus a final Git `pre-commit` gate)*.
 
 | Integration Mode | Supported Clients | How It Works |
 | :--- | :--- | :--- |
-| **Agent Plugin** *(MCP + Hooks)* | **Claude Code** · **Antigravity** | Automatic zero-touch turn delta injection, pre-edit rule refresh gate, and PreToolUse / Git pre-commit guardrails |
+| **Agent Plugin** *(MCP + Hooks)* | **Claude Code** · **Antigravity** | Automatic zero-touch turn delta injection, pre-edit rule refresh gate, instant shell blocking, and turn-end batch auto-fix / Git pre-commit guardrails |
 | **Standalone MCP Server** | **Cursor** · **Windsurf** · **Claude Desktop** · any MCP client | Connects via `stdio` or Streamable HTTP (`/mcp`) using the same Web Console, System 1 evaluation, and MCP tool protocol |
 
 ![Old way vs memorize real-world timeline comparison](./assets/overview.svg)
@@ -37,7 +37,7 @@ You do not have to maintain rule files by hand or type "remember this" on every 
 While most AI agent memory tools stop at summarizing past conversations and logs for later **recall**, `memorize` combines three capabilities in a **single local Go binary** with **no external vector store, graph DB, or Node/Python runtime**:
 
 - **Up-to-Date Rule State**: **`1:N` atomic overwrites and `[REVOKED]` notices** prevent obsolete instructions from lingering or regressing, rather than piling up append-only summaries
-- **Execution-Time Enforcement**: Moves beyond passive guidance (`CLAUDE.md`, `MEMORY.md`, plain RAG) with **`PreToolUse` and `git pre-commit` guardrails** that stop violations before execution
+- **Execution-Time Enforcement**: Moves beyond passive guidance (`CLAUDE.md`, `MEMORY.md`, plain RAG) with **pre-command blocking, turn-end batch self-correction, and `git pre-commit` guardrails**
 - **Token, Cache & Compaction Efficiency**: **Session-delta injection** (`0`-eval repeat turns and static-prefix KV caching), **`0`-output-token `System 1` scoring**, and **automatic recovery after `/compact` or checkpoints**
 
 ### Architecture & Workflow Comparison
@@ -49,11 +49,11 @@ Comparing item by item against static instruction files, vector RAG, and append-
 | **State Integrity** | Old and new rules mix and cause regressions | **Atomic `1:N` overwrite & revocation** keep only the latest rule |
 | **Full Eval & Cache** | Full re-injection every turn or `TOP-K` misses | **0-call repeat turns** · **100% parallel eval** · **static prefix KV cache** |
 | **System 1 Speed** | Slow chain-of-thought latency & token overhead | Lightweight engine scores in one pass with **`0` output tokens** |
-| **Pre-Run Enforcement** | Agents drift under long-context pressure | **Pre-tool & pre-commit guardrails** block violations before execution |
-| **Compaction Recovery** | Long-chat summarization drops early rules | **Auto-detects compaction & checkpoints** to restore invariants, progress & relevant rules |
+| **Enforcement & Auto-Fix** | Agents drift under long-context pressure | **Pre-run shell block** · **turn-end diff batch check & auto-fix** · **`pre-commit` gate** |
+| **Compaction Recovery** | Long-chat summarization drops early rules | **Auto-detects compaction & checkpoints** to restore core rules, progress & relevant rules |
 | **Cross-Agent Portability** | Tool-specific rule files fragment across clients and break on switch | **Mix or switch across AI agents & models** (Claude Code · Antigravity · Cursor · MCP) while **keeping one shared set of live rules & decisions** |
-| **Orchestration & Multi-Agent** | Re-pasting rules per worker & parallel drift | **Per-worker delta injection** · **`PreToolUse` checks on smaller workers** · **live rule sync** |
-| **Daemon & Isolation** | Per-call cold starts & tangled notes/tasks | **Single WAL daemon** (`127.0.0.1:18095`) · **memories, `project_progress`, live sessions, audit & 3 scopes** |
+| **Orchestration & Multi-Agent** | Re-pasting rules per worker & parallel drift | **Per-worker delta injection** · **shell & turn-end guardrails on smaller workers** · **live rule sync** |
+| **Daemon & Isolation** | Per-call cold starts & tangled notes/tasks | **Single WAL daemon** (`127.0.0.1:18095`) · **memories, progress history, audit & 3 scopes** |
 
 *(Internal table schemas, MCP tool specs, and decision endpoints are documented in [Architecture Reference](./ARCHITECTURE.md).)*
 
@@ -109,9 +109,6 @@ The local daemon and Web Console (**`http://127.0.0.1:18095`**) start automatica
 - **macOS · Linux**: Download a recommended **Local GGUF** model in 1 click *(or connect `Gemini`, `System 1`, or `Custom Local URL`)*
 - **Windows**: Built-in GGUF is disabled → connect a **Custom Local URL** (`Ollama` · `LM Studio` · `vLLM`), `System 1`, or a `Gemini API key`
 
-> [!TIP]
-> **Developer Tip — Gemini's free tier works comfortably for personal use**: If you prefer not to run a local model or are on Windows, pairing **Gemini Flash** (including `Flash-Lite`) with **Gemini Decision (`gemini-decision-1`)** works quite smoothly on the **free tier** for everyday personal development. *(Session deltas skip repeat-turn calls and built-in `429` Flash fallback handles rate limits; free-tier quotas and model availability follow Google AI Studio policy.)*
-
 ### 3. Onboarding an Existing Project *(First Run on a Repo)*
 
 You do not need to write every rule by hand when dropping `memorize` into an **existing Git codebase**. Once an inference engine is ready and you start your first chat in a cold `project:<repo>` with `0` stored memories (**Claude Code** · **Antigravity** hooks), `memorize` **automatically offers initial rule onboarding**:
@@ -133,7 +130,7 @@ Preview the main **Memories** tab below and click any other tab to expand its UI
 </details>
 
 <details>
-<summary><strong>Progress</strong> — Read-only 3-lane work board · memory &amp; Git sync · Auto-TTL</summary>
+<summary><strong>Progress</strong> — Read-only project activity feed · memory &amp; Git sync · Auto-TTL</summary>
 
 ![Web Console Progress Tab Simulation](./assets/tab-progress.svg)
 
@@ -160,13 +157,15 @@ Preview the main **Memories** tab below and click any other tab to expand its UI
 
 </details>
 
+*(Shared repository rules stored in `.memorize/TEAM_RULES.md` are managed in the **Team Rules** tab — see [Team Collaboration Guide](./TEAM.md).)*
+
 ### Memory Organization & Lifecycle
 
 As sessions accumulate rules over time, the **Memories** tab provides safe curation controls without risking accidental data loss:
 
 - **2D Treemap Distribution & Non-Destructive Re-Categorization**: The **Category & Sub-Category Distribution** map surfaces `unclassified` entries and `Cross-category sub` overlaps at a glance. Manage preset taxonomies and autocomplete labels via **`Categories...`**, then run **`AI Categorize...`** to clean up category and sub-category tags **without rewriting or altering any memory wording**.
 - **AI Duplicate Merge & Manual Consolidation (`Consolidate...`)**: Merge overlapping memories across sessions using **AI Merge Recommendations** or manual multi-select, compressing redundant entries into one canonical rule while keeping `Replaces` lineage intact.
-- **Pinned Invariants & Reversible Lifecycle**: Promote critical rules to **`Pinned Invariant`** via inline edit so they stay injected regardless of scoring, and retire outdated entries safely with **`Forget`** -> **`Undo / Restore`** -> **`Purge Tombstones`** *(active `Replaces` lineage remains preserved after purging)*.
+- **Core Rules (Pinned) & Reversible Lifecycle**: Promote critical rules to **`Core Rule (Pinned)`** via inline edit so they stay injected regardless of scoring, and retire outdated entries safely with **`Forget`** -> **`Undo / Restore`** -> **`Purge Tombstones`** *(active `Replaces` lineage remains preserved after purging)*.
 - **Per-Project Isolation via Git Repositories (3 Scopes)**: Designed around **Git repository (`.git`) detection**, `memorize` automatically resolves the repository root into an isolated `project:<repo>` scope so rules and progress never bleed across repositories. Shared and personal preferences remain separated in `global` and `personal`, with an **`Include personal`** toolbar toggle when you want personal rules overlaid during project lookups.
 
 ---
@@ -174,9 +173,9 @@ As sessions accumulate rules over time, the **Memories** tab provides safe curat
 ## Scope, Limits & Trade-offs
 
 - **Git repository assumption (project isolation & Git integration)**: Automatic per-project memory separation (`project:<repo>`), Git-based rule/progress sync, and `pre-commit` guardrails assume you are working inside a **Git repository (`.git`)**. Non-Git directories fall back to the immediate working folder name (`cwd`), so using a Git repo is recommended for stable isolation across subdirectories.
-- **Past chat messages stay as printed**: Revocation notices and pre-tool blocking prevent stale rules from being reused, without retroactively editing earlier messages already in the chat history.
+- **Past chat messages stay as printed**: Revocation notices, pre-command blocking, and turn-end auto-fix prevent stale rules from persisting, without retroactively editing earlier messages already in the chat history.
 - **Manual refresh after compaction in hookless MCP clients**: **Claude Code** (`PostCompact` / `SessionStart`) and **Antigravity** (checkpoint detection) restore rules automatically after compaction, whereas hookless MCP clients (such as **Cursor** or **Windsurf**) require calling `query_project_memory(refresh=true)` once after manual compaction.
-- **Hooks vs. MCP-only automation**: **Claude Code** and **Antigravity** automate per-turn rule injection and pre-tool blocking via hooks; other MCP clients rely on the model calling memory tools as needed.
+- **Hooks vs. MCP-only automation**: **Claude Code** and **Antigravity** automate per-turn rule injection, pre-command blocking, and turn-end batch self-correction via hooks; other MCP clients rely on the model calling memory tools as needed.
 
 ---
 
@@ -242,8 +241,7 @@ rm -rf ~/.memorize                            # Or $MEMORY_DATA_DIR if overridde
 
 ## Roadmap, Feedback, & Docs
 
-- **Roadmap (Post-`v1.0`)**
-  - **Shared Team Server Mode**: Host a shared daemon so teams can sync live rules and guardrails across developers
-  - **Cross-Device Sync**: Keep project rules, lineage, and work progress synced across multiple machines without manually copying raw DB files
+- **Roadmap**
+  - [ ] **Cross-Device Sync *(Later)***: Keep one user's memories synced across multiple machines without manually copying DB files
 - **Feedback & Issues**: External code pull requests are not accepted at this time, but suggestions, bug reports, and questions are welcome via [GitHub Issues](https://github.com/marbasdev/memorize/issues)—any issue or report is reviewed and addressed immediately once seen *(do not post vulnerability exploit details publicly; see [SECURITY.md](./SECURITY.md))*.
-- **Docs & License**: [Architecture & Env Reference](./ARCHITECTURE.md) · [Feedback Policy](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [MIT License](./LICENSE)
+- **Docs & License**: [Team Collaboration](./TEAM.md) · [Architecture & Env Reference](./ARCHITECTURE.md) · [Feedback Policy](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [MIT License](./LICENSE)

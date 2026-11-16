@@ -3,11 +3,9 @@ package router
 import (
 	"context"
 	"database/sql"
-	"net/http"
 	"os"
 	"strings"
 	"sync"
-	"time"
 
 	"memorize/internal/domain"
 	"memorize/internal/inference/localmodel"
@@ -174,18 +172,7 @@ func (r *Router) CheckReadiness(ctx context.Context) (bool, string) {
 }
 
 func providerDefaultModel(prov string, cfg map[string]string) string {
-	switch domain.NormalizeProviderID(prov) {
-	case "gguf":
-		return strings.TrimSpace(cfg["gguf_model"])
-	case "gemini":
-		return strings.TrimSpace(cfg["gemini_model"])
-	case "jev":
-		return strings.TrimSpace(cfg["jev_model"])
-	case "local":
-		return strings.TrimSpace(cfg["local_model_name"])
-	default:
-		return ""
-	}
+	return domain.ProviderModelFromConfig(cfg, prov)
 }
 
 func safeGenerativeModel(prov, rawMod string, cfg map[string]string) string {
@@ -215,76 +202,29 @@ func NewTaskResolver(autoWake ...func(ctx context.Context, model string) error) 
 func NewTaskResolverWithEndpoint(wakeFn func(ctx context.Context, model string) (string, error)) func(map[string]string, domain.EvalTask) (domain.Evaluator, bool) {
 	var mu sync.Mutex
 	cache := make(map[string]domain.Evaluator)
+	tracker := newCooldownTracker()
 
 	getOrBuild := func(prov, modelOverride string, cfg map[string]string) domain.Evaluator {
-		prov = domain.NormalizeProviderID(prov)
-		if prov == "" {
+		drv, ok := providers.LookupDriver(prov)
+		if !ok {
 			return nil
 		}
-		ep := strings.TrimSpace(cfg["gguf_endpoint"])
-		mod := strings.TrimSpace(modelOverride)
-		if mod == "" {
-			mod = providerDefaultModel(prov, cfg)
+		in := providers.DriverBuildInput{
+			Config:        cfg,
+			ModelOverride: modelOverride,
+			RawActiveProv: cfg["active_provider"],
+			GGUFSupported: localmodel.IsSupportedPlatform(),
+			WakeGGUF:      wakeFn,
 		}
-		gemKey := strings.TrimSpace(cfg["gemini_api_key"])
-		jevURL := strings.TrimSpace(cfg["jev_api_url"])
-		tsKey := strings.TrimSpace(cfg["typesafe_api_key"])
-		locURL := strings.TrimSpace(cfg["local_model_url"])
-		locKey := strings.TrimSpace(cfg["local_api_key"])
-
-		var key string
-		switch prov {
-		case "gguf":
-			if !localmodel.IsSupportedPlatform() {
-				key = strings.Join([]string{"local", locURL, mod, locKey}, "|")
-			} else {
-				key = strings.Join([]string{"gguf", ep, mod}, "|")
-			}
-		case "gemini":
-			key = strings.Join([]string{"gemini", gemKey, mod}, "|")
-		case "local":
-			if locKey == "" {
-				locKey = tsKey
-			}
-			key = strings.Join([]string{"local", locURL, mod, locKey}, "|")
-		case "jev":
-			key = strings.Join([]string{strings.ToLower(strings.TrimSpace(cfg["active_provider"])), "jev", jevURL, mod, tsKey}, "|")
-		default:
-			return nil
-		}
+		key := drv.CacheKey(in)
 
 		mu.Lock()
 		defer mu.Unlock()
 		if ev, ok := cache[key]; ok && ev != nil {
 			return ev
 		}
-		var ev domain.Evaluator
-		switch prov {
-		case "gguf":
-			if !localmodel.IsSupportedPlatform() {
-				ev = providers.NewOpenAICompatibleAdapter(locURL, mod, locKey)
-				break
-			}
-			if wakeFn != nil {
-				targetMod := mod
-				ev = providers.NewGGUFAdapterWithEndpoint(ep, mod, func(ctx context.Context) (string, error) {
-					return wakeFn(ctx, targetMod)
-				})
-			} else {
-				ev = providers.NewGGUFAdapter(ep, mod)
-			}
-		case "gemini":
-			ev = providers.NewGeminiAdapterConfig(gemKey, mod)
-		case "local":
-			ev = providers.NewOpenAICompatibleAdapter(locURL, mod, locKey)
-		case "jev":
-			rawAct := strings.ToLower(strings.TrimSpace(cfg["active_provider"]))
-			if rawAct == "flide" && jevURL == "" {
-				ev = providers.NewFlideAdapter("", tsKey, mod)
-			} else {
-				ev = providers.NewJevAdapterConfig(jevURL, tsKey, mod)
-			}
-		default:
+		ev := drv.Build(in)
+		if ev == nil {
 			return nil
 		}
 		if len(cache) >= 64 {
@@ -292,6 +232,55 @@ func NewTaskResolverWithEndpoint(wakeFn func(ctx context.Context, model string) 
 		}
 		cache[key] = ev
 		return ev
+	}
+
+	resolveFallback := func(primary domain.Evaluator, primaryProv, primaryMod string, task domain.EvalTask, spec domain.EvalTaskSpec, hasSpec bool, cfg map[string]string) domain.Evaluator {
+		if primary == nil {
+			return nil
+		}
+		bulkProv := domain.NormalizeProviderID(cfg["active_provider"])
+		bulkMod := providerDefaultModel(bulkProv, cfg)
+		genProv := domain.NormalizeProviderID(cfg["gen_provider"])
+		genMod := strings.TrimSpace(cfg["gen_model"])
+
+		tryCandidate := func(p, m string) domain.Evaluator {
+			p = domain.NormalizeProviderID(p)
+			if p == "" {
+				return nil
+			}
+			if hasSpec && spec.RequiresGenerative && domain.IsDecisionOnlySpec(p, m) {
+				m = safeGenerativeModel(p, m, cfg)
+			}
+			if hasSpec && domain.ValidateTaskRoute(task, p, m) != nil {
+				return nil
+			}
+			ev := getOrBuild(p, m, cfg)
+			if ev == nil || ev.Name() == primary.Name() {
+				return nil
+			}
+			return ev
+		}
+
+		if bulkProv != "" {
+			candMod := bulkMod
+			if domain.IsDecisionOnlySpec(bulkProv, candMod) {
+				candMod = safeGenerativeModel(bulkProv, candMod, cfg)
+			}
+			if fb := tryCandidate(bulkProv, candMod); fb != nil {
+				return fb
+			}
+		}
+		if genProv != "" {
+			if fb := tryCandidate(genProv, safeGenerativeModel(genProv, genMod, cfg)); fb != nil {
+				return fb
+			}
+		}
+		if domain.NormalizeProviderID(primaryProv) == "gemini" && domain.IsDecisionOnlySpec("gemini", primaryMod) {
+			if fb := tryCandidate("gemini", safeGenerativeModel("gemini", primaryMod, cfg)); fb != nil {
+				return fb
+			}
+		}
+		return nil
 	}
 
 	return func(cfg map[string]string, task domain.EvalTask) (domain.Evaluator, bool) {
@@ -312,7 +301,8 @@ func NewTaskResolverWithEndpoint(wakeFn func(ctx context.Context, model string) 
 						effMod = safeGenerativeModel(ovProv, "", cfg)
 					}
 					if ev := getOrBuild(ovProv, effMod, cfg); ev != nil {
-						return ev, true
+						fb := resolveFallback(ev, ovProv, effMod, task, spec, hasSpec, cfg)
+						return newFallbackEvaluator(ev, fb, tracker), true
 					}
 				}
 			}
@@ -334,7 +324,11 @@ func NewTaskResolverWithEndpoint(wakeFn func(ctx context.Context, model string) 
 		}
 
 		ev := getOrBuild(bulkProv, bulkMod, cfg)
-		return ev, ev != nil
+		if ev == nil {
+			return nil, false
+		}
+		fb := resolveFallback(ev, bulkProv, bulkMod, task, spec, hasSpec, cfg)
+		return newFallbackEvaluator(ev, fb, tracker), true
 	}
 }
 
@@ -345,30 +339,6 @@ func NewDynamicResolver(autoWake ...func(ctx context.Context, model string) erro
 		ev, _ := taskRes(cfg, "")
 		return ev
 	}
-}
-
-var setupProbeClient = &http.Client{Timeout: 200 * time.Millisecond}
-
-func probeHTTPAlive(ctx context.Context, rawURL string) bool {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-	if err != nil {
-		return false
-	}
-	resp, err := setupProbeClient.Do(req)
-	if err != nil {
-		return false
-	}
-	_ = resp.Body.Close()
-	return resp.StatusCode < 500
-}
-
-func firstNonEmptyStr(vals ...string) string {
-	for _, v := range vals {
-		if t := strings.TrimSpace(v); t != "" {
-			return t
-		}
-	}
-	return ""
 }
 
 // CheckConfiguredEngineReadiness probes whether the effective inference provider is ready to serve calls.
@@ -383,63 +353,26 @@ func CheckConfiguredEngineReadiness(ctx context.Context, cfg map[string]string, 
 	if eff == "gguf" && !localmodel.IsSupportedPlatform() {
 		eff = "local"
 	}
-	switch eff {
-	case "gguf":
-		if envEP := strings.TrimSpace(os.Getenv("LOCAL_GGUF_URL")); envEP != "" {
-			if probeHTTPAlive(ctx, strings.TrimRight(envEP, "/")+"/health") {
-				return true, ""
-			}
-			return false, "LOCAL_GGUF_URL unreachable (" + envEP + ")"
-		}
-		if mgr != nil {
-			st := mgr.Status(0)
-			if st.ServerRunning || (len(st.Installed) > 0 && st.RuntimeInstalled) {
-				return true, ""
-			}
-			if st.Download.Active {
-				return false, "downloading local GGUF model (" + st.Download.Target + ")"
-			}
-			if len(st.Installed) > 0 && !st.RuntimeInstalled {
-				return false, "llama-server runtime not installed"
-			}
-		}
-		return false, "no local GGUF model installed"
-	case "gemini":
-		if firstNonEmptyStr(cfg["gemini_api_key"], os.Getenv("GEMINI_API_KEY")) == "" {
-			return false, "GEMINI_API_KEY not set"
-		}
-		return true, ""
-	case "jev":
-		jevURL := firstNonEmptyStr(cfg["jev_api_url"], os.Getenv("JEV_API_URL"), "https://api.typesafe.ai/v1/sys"+"temone")
-		if providers.IsTypesafeCloudURL(jevURL) {
-			if firstNonEmptyStr(cfg["typesafe_api_key"], os.Getenv("TYPESAFE_API_KEY"), os.Getenv("FLIDE_API_KEY")) == "" {
-				return false, "TYPESAFE_API_KEY not set"
-			}
-			return true, ""
-		}
-		base := providers.ResolveSystemOneBaseURL(jevURL)
-		if probeHTTPAlive(ctx, base+"/health") || probeHTTPAlive(ctx, base+"/v1/models") {
-			return true, ""
-		}
-		return false, "System 1 endpoint unreachable (" + jevURL + ")"
-	case "local":
-		locURL := firstNonEmptyStr(cfg["local_model_url"], os.Getenv("LOCAL_MODEL_URL"), "http://127.0.0.1:11434/v1")
-		locKey := firstNonEmptyStr(cfg["local_api_key"], os.Getenv("LOCAL_API_KEY"), os.Getenv("OPENAI_API_KEY"))
-		if locKey != "" && firstNonEmptyStr(cfg["local_model_url"], os.Getenv("LOCAL_MODEL_URL")) != "" {
-			return true, ""
-		}
-		modelsURL := strings.TrimRight(locURL, "/")
-		if !strings.HasSuffix(modelsURL, "/v1") {
-			modelsURL += "/v1"
-		}
-		modelsURL += "/models"
-		if probeHTTPAlive(ctx, modelsURL) {
-			return true, ""
-		}
-		return false, "local OpenAI-compatible server unreachable (" + locURL + ")"
-	default:
+	drv, ok := providers.LookupDriver(eff)
+	if !ok || drv.CheckReadiness == nil {
 		return true, ""
 	}
+	var probe providers.GGUFRuntimeProbe
+	if mgr != nil {
+		st := mgr.Status(0)
+		probe = providers.GGUFRuntimeProbe{
+			Supported:        localmodel.IsSupportedPlatform(),
+			ServerRunning:    st.ServerRunning,
+			RuntimeInstalled: st.RuntimeInstalled,
+			InstalledCount:   len(st.Installed),
+			DownloadActive:   st.Download.Active,
+			DownloadTarget:   st.Download.Target,
+		}
+	}
+	return drv.CheckReadiness(ctx, providers.DriverBuildInput{
+		Config:    cfg,
+		GGUFProbe: probe,
+	})
 }
 
 // SelectStartupEvaluator instantiates the initial default Evaluator from env flags and platform defaults.
@@ -448,26 +381,14 @@ func SelectStartupEvaluator(mgr *localmodel.Manager) domain.Evaluator {
 	if rawProv == "" {
 		rawProv = domain.ResolveExplicitEnvProvider()
 	}
-	switch rawProv {
-	case "gemini":
-		return providers.NewGeminiAdapter()
-	case "local":
-		return providers.NewOpenAICompatibleAdapter("", "", "")
-	case "jev":
-		return providers.NewJevAdapter()
-	case "flide":
-		return providers.NewFlideAdapter("", "", "")
-	case "gguf":
-	default:
-		if domain.DefaultProvider() == "local" || !localmodel.IsSupportedPlatform() {
-			return providers.NewOpenAICompatibleAdapter("", "", "")
-		}
-	}
-	var fn func(context.Context) error
+	var ensureFn func(context.Context) error
 	if mgr != nil {
-		fn = func(ctx context.Context) error {
+		ensureFn = func(ctx context.Context) error {
 			return mgr.EnsureRunning(ctx, "", 0)
 		}
 	}
-	return providers.NewGGUFAdapter("", "", fn)
+	return providers.StartupEvaluator(rawProv, providers.DriverBuildInput{
+		GGUFSupported: localmodel.IsSupportedPlatform(),
+		EnsureGGUF:    ensureFn,
+	})
 }

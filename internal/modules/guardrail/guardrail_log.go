@@ -69,7 +69,7 @@ func formatViolationDetails(violations []domain.PlanViolation) ([]int64, string)
 			sb.WriteByte('\n')
 		}
 		ids = append(ids, v.ID)
-		fmt.Fprintf(&sb, "[#%d %s/%s · %.0f%%] %s", v.ID, v.Scope, v.Category, v.Probability*100, v.Content)
+		fmt.Fprintf(&sb, "[%s %s/%s · %.0f%%] %s", formatViolationRef(v.Fact), v.Scope, v.Category, v.Probability*100, v.Content)
 	}
 	return ids, sb.String()
 }
@@ -133,17 +133,28 @@ func buildGuardrailWhereClause(q domain.GuardrailLogQuery) (string, []any) {
 	case "pass", "passed", "ok":
 		conds = append(conds, `blocked = 0`)
 	}
-	switch strings.ToLower(strings.TrimSpace(q.Source)) {
-	case "pretool":
-		conds = append(conds, `source IN ('antigravity-pretool', 'claude-pretool')`)
-	case "git-precommit", "git":
-		conds = append(conds, `source = 'git-precommit'`)
-	case "verify":
-		conds = append(conds, `source IN ('mcp:verify_plan', 'ui:verify')`)
-	default:
-		if s := strings.TrimSpace(q.Source); s != "" && s != "all" {
+	if s := strings.ToLower(strings.TrimSpace(q.Source)); s != "" && s != "all" {
+		switch s {
+		case "pretool", "stop":
+			phase := domain.HookPhasePreTool
+			if s == "stop" {
+				phase = domain.HookPhaseStop
+			}
+			modes := domain.ModesForPhase(phase)
+			ph := make([]string, len(modes))
+			for i, m := range modes {
+				ph[i] = "?"
+				args = append(args, m)
+			}
+			conds = append(conds, `source IN (`+strings.Join(ph, ", ")+`)`)
+		case "git-precommit", "git":
 			conds = append(conds, `source = ?`)
-			args = append(args, s)
+			args = append(args, domain.ModeForAgentPhase("git", domain.HookPhasePreCommit))
+		case "verify":
+			conds = append(conds, `source IN ('mcp:verify_plan', 'ui:verify')`)
+		default:
+			conds = append(conds, `source = ?`)
+			args = append(args, strings.TrimSpace(q.Source))
 		}
 	}
 

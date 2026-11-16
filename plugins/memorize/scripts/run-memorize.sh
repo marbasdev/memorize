@@ -36,7 +36,7 @@ if [ -z "$VERSION" ]; then
 fi
 VERSION="${VERSION#v}"
 if [ -z "$VERSION" ]; then
-  VERSION="1.0.1"
+  VERSION="1.1.0"
 fi
 case "$VERSION" in
   ''|*[!0-9A-Za-z._-]*|.*|*..*)

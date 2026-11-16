@@ -255,20 +255,33 @@ func buildJevCatalog(ctx context.Context, lang string, rawCfg, cfg map[string]st
 	}
 }
 
+func providerTabOptions(lang string) []ssrTabOption {
+	specs := domain.ProviderCatalog()
+	tabs := make([]ssrTabOption, 0, len(specs))
+	for _, spec := range specs {
+		tabs = append(tabs, ssrTabOption{ID: spec.ID, Label: uiText(lang, spec.LabelKey)})
+	}
+	return tabs
+}
+
+func providerSelectOptions(lang, firstID, firstLabel string, generativeOnly bool) []ssrTabOption {
+	specs := domain.ProviderCatalog()
+	opts := make([]ssrTabOption, 0, len(specs)+1)
+	if firstLabel != "" {
+		opts = append(opts, ssrTabOption{ID: firstID, Label: firstLabel})
+	}
+	for _, spec := range specs {
+		if generativeOnly && !spec.GenerativeCapable {
+			continue
+		}
+		opts = append(opts, ssrTabOption{ID: spec.ID, Label: uiText(lang, spec.LabelKey)})
+	}
+	return opts
+}
+
 func buildTaskRouteRows(ctx context.Context, d Deps, lang string, cfg map[string]string, windowHours int) ([]ssrTaskRouteRow, int, domain.EvalTelemetryReport) {
-	inheritGenOpts := []ssrTabOption{
-		{ID: "", Label: uiText(lang, "route_inherit")},
-		{ID: "gemini", Label: uiText(lang, "prov_gemini")},
-		{ID: "gguf", Label: uiText(lang, "prov_gguf")},
-		{ID: "local", Label: uiText(lang, "prov_local")},
-	}
-	inheritAllOpts := []ssrTabOption{
-		{ID: "", Label: uiText(lang, "route_inherit")},
-		{ID: "gemini", Label: uiText(lang, "prov_gemini")},
-		{ID: "gguf", Label: uiText(lang, "prov_gguf")},
-		{ID: "jev", Label: uiText(lang, "prov_jev")},
-		{ID: "local", Label: uiText(lang, "prov_local")},
-	}
+	inheritGenOpts := providerSelectOptions(lang, "", uiText(lang, "route_inherit"), true)
+	inheritAllOpts := providerSelectOptions(lang, "", uiText(lang, "route_inherit"), false)
 
 	telemetry, _ := d.Memory.Router().SummarizeTelemetry(ctx, windowHours)
 	customCount := 0
@@ -322,9 +335,7 @@ func buildEnginesView(ctx context.Context, d Deps, lang string, q url.Values, ov
 		}
 	}
 	viewedProv := strings.ToLower(strings.TrimSpace(q.Get("view")))
-	switch viewedProv {
-	case "gguf", "gemini", "jev", "local":
-	default:
+	if _, ok := domain.FindProviderSpec(viewedProv); !ok {
 		viewedProv = effProv
 	}
 
@@ -332,27 +343,14 @@ func buildEnginesView(ctx context.Context, d Deps, lang string, q url.Values, ov
 	gemTier, gemSource, gemAllCount, filteredGem, gemModels := buildGeminiCatalog(ctx, rawCfg, cfg, viewedProv, q, overrideKey)
 	jev := buildJevCatalog(ctx, lang, rawCfg, cfg, viewedProv, q, overrideKey, overrideURL)
 
-	bulkMod := cfg["gguf_model"]
-	switch effProv {
-	case "gemini":
-		bulkMod = cfg["gemini_model"]
-	case "jev":
-		bulkMod = cfg["jev_model"]
-	case "local":
-		bulkMod = cfg["local_model_name"]
-	}
+	bulkMod := domain.ProviderModelFromConfig(cfg, effProv)
 	bulkDecOnly := domain.IsDecisionOnlySpec(effProv, bulkMod)
 	bulkSummary := effProv
 	if bulkMod != "" {
 		bulkSummary += ":" + bulkMod
 	}
 
-	genOnlyOpts := []ssrTabOption{
-		{ID: "", Label: uiText(lang, "gen_none_heuristic")},
-		{ID: "gemini", Label: uiText(lang, "prov_gemini")},
-		{ID: "gguf", Label: uiText(lang, "prov_gguf")},
-		{ID: "local", Label: uiText(lang, "prov_local")},
-	}
+	genOnlyOpts := providerSelectOptions(lang, "", uiText(lang, "gen_none_heuristic"), true)
 	winID, winHours := parseTelemetryWindow(q.Get("tw"))
 	taskRows, customCount, evalTelemetry := buildTaskRouteRows(ctx, d, lang, cfg, winHours)
 
@@ -373,16 +371,11 @@ func buildEnginesView(ctx context.Context, d Deps, lang string, q url.Values, ov
 		ProviderName:         provName,
 		EffectiveProvider:    effProv,
 		ViewedProvider:       viewedProv,
-		ProviderTabs: []ssrTabOption{
-			{ID: "gguf", Label: uiText(lang, "prov_gguf")},
-			{ID: "gemini", Label: uiText(lang, "prov_gemini")},
-			{ID: "jev", Label: uiText(lang, "prov_jev")},
-			{ID: "local", Label: uiText(lang, "prov_local")},
-		},
-		Config:       cfg,
-		LocalModels:  lm,
-		InstalledSet: gguf.installedSet,
-		GGUFTier:     gguf.tier,
+		ProviderTabs:         providerTabOptions(lang),
+		Config:               cfg,
+		LocalModels:          lm,
+		InstalledSet:         gguf.installedSet,
+		GGUFTier:             gguf.tier,
 		GGUFTierTabs: []ssrTabOption{
 			{ID: "balanced", Label: uiText(lang, "tier_balanced")},
 			{ID: "speed", Label: uiText(lang, "tier_speed")},
@@ -471,20 +464,13 @@ func buildEngineSetupWarning(lang string, rawCfg, cfg map[string]string, provNam
 		eff = domain.ResolveExplicitEnvProvider()
 	}
 	if eff == "" {
-		switch {
-		case low == "none":
+		if low == "none" {
 			eff = "none"
-		case strings.HasPrefix(low, "gguf:"):
-			eff = "gguf"
-		case strings.HasPrefix(low, "gemini:"):
-			eff = "gemini"
-		case strings.HasPrefix(low, "local:"):
-			eff = "local"
-		case strings.HasPrefix(low, "jev:") || strings.HasPrefix(low, "flide:"):
-			eff = "jev"
-		case low != "":
+		} else if parsed := domain.ProviderIDFromEvaluatorName(provName); parsed != "" {
+			eff = parsed
+		} else if low != "" {
 			return ""
-		default:
+		} else {
 			eff = domain.DefaultProvider()
 		}
 	}

@@ -24,9 +24,9 @@ description: >-
 ## 4. Consolidation
 - On demand, group semantically similar or overlapping memories in the same scope/category and merge 2+ items via `manage_memory(action="consolidate", ids=[...], content="...")` only when the merged rule stays concise (`<= 180` characters); keep items separate if merging would exceed `180` chars or bundle unrelated behaviors.
 
-## 5. Progress Tracking
-- Keep `project_progress` accurate across all 4 lifecycle states:
-  - `planned`: agreed or backlog work that has not started yet (set `next_step` to the planned first action).
-  - `in_progress`: work actively executing in the current session.
-  - `blocked`: work halted waiting on user input, credentials, approvals, or an external blocker (record the exact blocker in `next_step`).
-  - `done`: verified and completed work.
+## 5. Project Activity History
+- Optionally call `project_progress(action="record", track="...", summary="...")` after completing notable work milestones or non-commit tasks to record them in the chronological project activity timeline alongside automatic memory and Git commit sync entries.
+
+## 6. Team Rule Pack (`.memorize/TEAM_RULES.md`)
+- Use the `team_rules` MCP tool (`list`, `sync`, `add`, `promote`, `update`, `remove`, `resolve_conflict`, `duplicates`, `clean_duplicates`, `set_config`) to manage shared Git-backed Team Rules; NEVER hand-edit `.memorize/TEAM_RULES.md` or mix uncommitted feature code into Team Rule commits (`memorize` commits and pushes strictly via an isolated `git worktree`).
+- If `[TEAM RULE CONFLICT DETECTED]` appears or `add`/`promote` pauses with `conflict_pending`, stop and ask the user whether to adopt the Team Rule (`adopt_team`) or keep their local override (`local_override`).

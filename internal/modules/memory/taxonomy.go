@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -280,26 +281,38 @@ func (s *Service) ApplyTaxonomyRebalance(ctx context.Context, rawScope string, i
 	}
 	targetScope := domain.NormalizeScope(rawScope)
 	updated := 0
-	for _, it := range items {
-		if it.ID <= 0 {
-			continue
+	var taxPairs [][2]string
+	if err := s.withTx(ctx, func(tx *sql.Tx) error {
+		for _, it := range items {
+			if it.ID <= 0 {
+				continue
+			}
+			newCat, newSub := domain.SplitCategoryAndSub(targetScope, it.NewCategory, it.NewSubCategory)
+			if !isValidTaxonomySlug(newCat) {
+				continue
+			}
+			res, err := tx.ExecContext(ctx, `
+				UPDATE memories
+				SET category = ?, sub_category = ?
+				WHERE id = ? AND scope = ? AND active = 1
+			`, newCat, newSub, it.ID, targetScope)
+			if err != nil {
+				return err
+			}
+			if n, _ := res.RowsAffected(); n > 0 {
+				if err := recordMemoryTxInTx(ctx, tx, "", it.ID, domain.SyncOpUpsert, "", 0); err != nil {
+					return err
+				}
+				updated++
+				taxPairs = append(taxPairs, [2]string{newCat, newSub})
+			}
 		}
-		newCat, newSub := domain.SplitCategoryAndSub(targetScope, it.NewCategory, it.NewSubCategory)
-		if !isValidTaxonomySlug(newCat) {
-			continue
-		}
-		res, err := s.db.ExecContext(ctx, `
-			UPDATE memories
-			SET category = ?, sub_category = ?
-			WHERE id = ? AND scope = ? AND active = 1
-		`, newCat, newSub, it.ID, targetScope)
-		if err != nil {
-			return updated, err
-		}
-		if n, _ := res.RowsAffected(); n > 0 {
-			updated++
-			s.RegisterTaxonomyAppendOnly(ctx, targetScope, newCat, newSub)
-		}
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+	for _, pair := range taxPairs {
+		s.RegisterTaxonomyAppendOnly(ctx, targetScope, pair[0], pair[1])
 	}
 	if updated > 0 {
 		s.MarkTurnScopeMutated(targetScope)
