@@ -290,3 +290,152 @@ func TestStopBatchSeparatesDisjointHunksAndOmitsUnchangedMiddle(t *testing.T) {
 		t.Fatalf("expected unchanged middle lines to be omitted from multi-hunk diff, got:\n%s", plan)
 	}
 }
+
+func TestStopReverifiesContinuationAndCatchesNewViolations(t *testing.T) {
+	ctx := context.Background()
+	eval := &contextAwareVerifyEval{
+		violateSubstr: "BAD_CALL",
+		stubEval: stubEval{
+			dec: domain.MutationDecision{
+				Category:    "architecture",
+				Tier:        "rule",
+				IsPermanent: 0.95,
+				Action:      "INSERT",
+				Confidence:  0.95,
+			},
+		},
+	}
+	st := newTestStack(t, ":memory:", eval)
+
+	repo := t.TempDir()
+	scope := "project:" + strings.ToLower(filepath.Base(repo))
+	if _, err := st.mem.CommitMemory(ctx, "Never invoke BAD_CALL in handlers", "architecture", scope); err != nil {
+		t.Fatal(err)
+	}
+	eval.dec = domain.MutationDecision{Action: "IGNORE"}
+
+	fileA := filepath.Join(repo, "a.go")
+	fileB := filepath.Join(repo, "b.go")
+	_ = os.WriteFile(fileA, []byte("package app\nfunc a() {}\n"), 0o600)
+	_ = os.WriteFile(fileB, []byte("package app\nfunc b() {}\n"), 0o600)
+
+	turnStart, _ := json.Marshal(map[string]any{"session_id": "sess-reverify", "cwd": repo, "prompt": "update a and b"})
+	_, _, _ = st.gr.ExecuteHook(ctx, "claude-turn", turnStart, repo)
+
+	for _, f := range []string{fileA, fileB} {
+		pre, _ := json.Marshal(map[string]any{
+			"session_id": "sess-reverify",
+			"cwd":        repo,
+			"tool_name":  "Edit",
+			"tool_input": map[string]any{"file_path": f},
+		})
+		_, _, _ = st.gr.ExecuteHook(ctx, "claude-pretool", pre, repo)
+	}
+	_ = os.WriteFile(fileA, []byte("package app\nfunc a() { BAD_CALL() }\n"), 0o600)
+	_ = os.WriteFile(fileB, []byte("package app\nfunc b() { ok() }\n"), 0o600)
+
+	// Stop #1: catches BAD_CALL in a.go and keeps baselines for re-verification.
+	stop1, _ := json.Marshal(map[string]any{"session_id": "sess-reverify", "cwd": repo, "stop_hook_active": false})
+	out1, _, _ := st.gr.ExecuteHook(ctx, "claude-stop", stop1, repo)
+	if !strings.Contains(out1, `"decision":"block"`) {
+		t.Fatalf("expected Stop #1 to block BAD_CALL in a.go, got %q", out1)
+	}
+
+	// Continuation fix: fixes a.go, but introduces BAD_CALL in b.go.
+	for _, f := range []string{fileA, fileB} {
+		pre, _ := json.Marshal(map[string]any{
+			"session_id": "sess-reverify",
+			"cwd":        repo,
+			"tool_name":  "Edit",
+			"tool_input": map[string]any{"file_path": f},
+		})
+		_, _, _ = st.gr.ExecuteHook(ctx, "claude-pretool", pre, repo)
+	}
+	_ = os.WriteFile(fileA, []byte("package app\nfunc a() { fixed() }\n"), 0o600)
+	_ = os.WriteFile(fileB, []byte("package app\nfunc b() { BAD_CALL() }\n"), 0o600)
+
+	// Stop #2 (stop_hook_active=true): must re-verify and catch BAD_CALL in b.go.
+	stopCont, _ := json.Marshal(map[string]any{"session_id": "sess-reverify", "cwd": repo, "stop_hook_active": true})
+	out2, _, _ := st.gr.ExecuteHook(ctx, "claude-stop", stopCont, repo)
+	if !strings.Contains(out2, `"decision":"block"`) {
+		t.Fatalf("expected Stop #2 continuation to re-verify and catch new BAD_CALL in b.go, got %q", out2)
+	}
+
+	// Second fix resolves b.go cleanly -> Stop #3 passes.
+	_ = os.WriteFile(fileB, []byte("package app\nfunc b() { ok() }\n"), 0o600)
+	out3, _, _ := st.gr.ExecuteHook(ctx, "claude-stop", stopCont, repo)
+	if out3 != "" {
+		t.Fatalf("expected Stop #3 after full fix to pass cleanly, got %q", out3)
+	}
+	page, err := st.gr.QueryGuardrailLogsPage(ctx, domain.GuardrailLogQuery{Scope: scope, Source: "stop", Page: 1, PageSize: 10})
+	if err != nil || page.TotalCount != 3 || page.BlockedCount != 2 || page.PassCount != 1 {
+		t.Fatalf("expected 3 Stop log entries (2 blocks + 1 pass), got err=%v page=%+v", err, page)
+	}
+	if len(eval.capturedPlans) != 5 {
+		t.Fatalf("expected 5 VerifyPlan calls (2x Phase1+2 on blocks + 1x clean Phase1), got %d", len(eval.capturedPlans))
+	}
+}
+
+func TestStopReverifyCapYieldsAndWarnsNextTurn(t *testing.T) {
+	ctx := context.Background()
+	eval := &contextAwareVerifyEval{
+		violateSubstr: "PERSISTENT_VIOLATION",
+		stubEval: stubEval{
+			dec: domain.MutationDecision{
+				Category:    "architecture",
+				Tier:        "rule",
+				IsPermanent: 0.95,
+				Action:      "INSERT",
+				Confidence:  0.95,
+			},
+		},
+	}
+	st := newTestStack(t, ":memory:", eval)
+
+	repo := t.TempDir()
+	scope := "project:" + strings.ToLower(filepath.Base(repo))
+	if _, err := st.mem.CommitMemory(ctx, "Never use PERSISTENT_VIOLATION", "architecture", scope); err != nil {
+		t.Fatal(err)
+	}
+	eval.dec = domain.MutationDecision{Action: "IGNORE"}
+
+	target := filepath.Join(repo, "loop.go")
+	_ = os.WriteFile(target, []byte("package app\nfunc f() {}\n"), 0o600)
+	pre, _ := json.Marshal(map[string]any{
+		"session_id": "sess-cap",
+		"cwd":        repo,
+		"tool_name":  "Edit",
+		"tool_input": map[string]any{"file_path": target},
+	})
+	_, _, _ = st.gr.ExecuteHook(ctx, "claude-pretool", pre, repo)
+	_ = os.WriteFile(target, []byte("package app\nfunc f() { PERSISTENT_VIOLATION() }\n"), 0o600)
+
+	stopInit, _ := json.Marshal(map[string]any{"session_id": "sess-cap", "cwd": repo, "stop_hook_active": false})
+	stopCont, _ := json.Marshal(map[string]any{"session_id": "sess-cap", "cwd": repo, "stop_hook_active": true})
+
+	// Stop #1 and #2 block (up to maxStopReverifyAttempts=2).
+	if out1, _, _ := st.gr.ExecuteHook(ctx, "claude-stop", stopInit, repo); !strings.Contains(out1, `"decision":"block"`) {
+		t.Fatalf("expected Stop #1 block, got %q", out1)
+	}
+	if out2, _, _ := st.gr.ExecuteHook(ctx, "claude-stop", stopCont, repo); !strings.Contains(out2, `"decision":"block"`) {
+		t.Fatalf("expected Stop #2 block, got %q", out2)
+	}
+	// Stop #3 hits retry cap -> final check still fails, yields "" without infinite loop, and warns next turn.
+	if out3, _, _ := st.gr.ExecuteHook(ctx, "claude-stop", stopCont, repo); out3 != "" {
+		t.Fatalf("expected Stop #3 at retry cap to yield cleanly, got %q", out3)
+	}
+
+	page, err := st.gr.QueryGuardrailLogsPage(ctx, domain.GuardrailLogQuery{Scope: scope, Source: "stop", Page: 1, PageSize: 10})
+	if err != nil || page.TotalCount != 3 || page.Records[0].Blocked {
+		t.Fatalf("expected 3 stop logs with final cap-yield record Blocked=false, got err=%v page=%+v", err, page)
+	}
+	if !strings.Contains(page.Records[0].Details, "retry cap reached") {
+		t.Fatalf("expected retry cap note in final log details, got %q", page.Records[0].Details)
+	}
+
+	nextTurn, _ := json.Marshal(map[string]any{"session_id": "sess-cap", "cwd": repo, "prompt": "next task"})
+	turnOut, _, _ := st.gr.ExecuteHook(ctx, "claude-turn", nextTurn, repo)
+	if !strings.Contains(turnOut, "[MEMORIZE GUARDRAIL NOTICE]") || !strings.Contains(turnOut, "PERSISTENT_VIOLATION") {
+		t.Fatalf("expected next turn to receive unresolved Stop retry cap warning, got %q", turnOut)
+	}
+}

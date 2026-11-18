@@ -121,6 +121,8 @@ func InitSchema(db *sql.DB) error {
 			last_input TEXT NOT NULL DEFAULT '',
 			mutated INTEGER NOT NULL DEFAULT 0,
 			gate_checked INTEGER NOT NULL DEFAULT 0,
+			partial_notice TEXT NOT NULL DEFAULT '',
+			stop_retry INTEGER NOT NULL DEFAULT 0,
 			updated_at INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (session_id, scope)
 		);
@@ -240,6 +242,8 @@ func InitSchema(db *sql.DB) error {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_progress_scope_cat ON project_progress(scope, category, id DESC)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_progress_scope_track ON project_progress(scope, track, id DESC)`)
 	_, _ = db.Exec(`ALTER TABLE repo_sync ADD COLUMN repo_path TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE turn_state ADD COLUMN partial_notice TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE turn_state ADD COLUMN stop_retry INTEGER NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(`ALTER TABLE session_sent ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`)
 	_, _ = db.Exec(`DELETE FROM session_sent WHERE updated_at < datetime('now', '-2 days')`)
 	_, _ = db.Exec(`DELETE FROM session_sent_rules WHERE updated_at < datetime('now', '-2 days')`)

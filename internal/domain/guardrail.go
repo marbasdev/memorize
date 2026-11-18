@@ -5,6 +5,7 @@ const (
 	GuardrailVerdictRuleViolation = "rule_violation"
 	GuardrailVerdictPreMutateGate = "pre_mutate_gate"
 	GuardrailVerdictPlanViolation = "plan_violation"
+	GuardrailVerdictPartial       = "partial"
 	GuardrailVerdictError         = "error"
 )
 

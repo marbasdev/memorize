@@ -15,7 +15,10 @@ import (
 	"memorize/internal/infra/config"
 )
 
-var ggufClient = &http.Client{Timeout: 30 * time.Second}
+var (
+	ggufClient      = &http.Client{Timeout: 30 * time.Second}
+	ggufProbeClient = &http.Client{Timeout: 300 * time.Millisecond}
+)
 
 type GGUFAdapter struct {
 	prefix        string
@@ -26,6 +29,9 @@ type GGUFAdapter struct {
 	ensureFn      func(context.Context) error
 	ensureEPFn    func(context.Context) (string, error)
 	minimalOpenAI atomic.Bool
+	ctxMu         sync.Mutex
+	ctxLimit      atomic.Int64
+	ctxProbed     atomic.Bool
 }
 
 func NewGGUFAdapter(endpoint, model string, ensureFn ...func(context.Context) error) *BatchEvaluator {
@@ -177,8 +183,147 @@ func (g *GGUFAdapter) setEndpoint(ep string) {
 		return
 	}
 	g.epMu.Lock()
+	changed := g.endpoint != trimmed
 	g.endpoint = trimmed
 	g.epMu.Unlock()
+	if changed {
+		g.ctxLimit.Store(0)
+		g.ctxProbed.Store(false)
+	}
+}
+
+func resolveServerRootURL(rawEndpoint string) string {
+	u := strings.TrimRight(strings.TrimSpace(rawEndpoint), "/")
+	u = strings.TrimSuffix(u, "/chat/completions")
+	u = strings.TrimSuffix(u, "/v1")
+	return strings.TrimRight(u, "/")
+}
+
+func resolveModelsURL(rawEndpoint string) string {
+	u := strings.TrimRight(strings.TrimSpace(rawEndpoint), "/")
+	u = strings.TrimSuffix(u, "/chat/completions")
+	if !strings.HasSuffix(u, "/v1") {
+		u += "/v1"
+	}
+	return u + "/models"
+}
+
+func (g *GGUFAdapter) probeEndpointContextTokens(ctx context.Context, ep string) (int, bool) {
+	pctx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
+	defer cancel()
+
+	get := func(targetURL string) ([]byte, bool) {
+		req, err := http.NewRequestWithContext(pctx, http.MethodGet, targetURL, nil)
+		if err != nil {
+			return nil, false
+		}
+		if auth := bearerAuth(g.apiKey); auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+		resp, err := ggufProbeClient.Do(req)
+		if err != nil {
+			return nil, false
+		}
+		body, rerr := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		_ = resp.Body.Close()
+		if rerr != nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, false
+		}
+		return body, true
+	}
+
+	if root := resolveServerRootURL(ep); root != "" {
+		if body, ok := get(root + "/props"); ok {
+			var props struct {
+				DefaultGenerationSettings struct {
+					NCtx int `json:"n_ctx"`
+				} `json:"default_generation_settings"`
+			}
+			if json.Unmarshal(body, &props) == nil && props.DefaultGenerationSettings.NCtx > 0 {
+				return props.DefaultGenerationSettings.NCtx, true
+			}
+		}
+	}
+
+	if g.prefix == "local:" {
+		if body, ok := get(resolveModelsURL(ep)); ok {
+			var modelsResp struct {
+				Data []struct {
+					ID                  string `json:"id"`
+					MaxModelLen         int    `json:"max_model_len"`
+					LoadedContextLength int    `json:"loaded_context_length"`
+					MaxContextLength    int    `json:"max_context_length"`
+				} `json:"data"`
+			}
+			if json.Unmarshal(body, &modelsResp) == nil {
+				for _, m := range modelsResp.Data {
+					if m.ID != "" && !strings.EqualFold(m.ID, g.model) && len(modelsResp.Data) > 1 {
+						continue
+					}
+					for _, lim := range []int{m.MaxModelLen, m.LoadedContextLength, m.MaxContextLength} {
+						if lim > 0 {
+							return lim, true
+						}
+					}
+				}
+			}
+		}
+	}
+	return 0, false
+}
+
+// InputTokenLimit returns the verified active server context limit (e.g. llama-server /props n_ctx
+// or vLLM max_model_len), or 0 when the endpoint does not expose a runtime context cap.
+func (g *GGUFAdapter) InputTokenLimit(ctx context.Context) int {
+	if g == nil {
+		return 0
+	}
+	if n := int(g.ctxLimit.Load()); n > 0 {
+		return n
+	}
+	if g.ctxProbed.Load() {
+		return 0
+	}
+	g.ctxMu.Lock()
+	defer g.ctxMu.Unlock()
+	if n := int(g.ctxLimit.Load()); n > 0 {
+		return n
+	}
+	if g.ctxProbed.Load() {
+		return 0
+	}
+	ep := g.currentEndpoint()
+	if lim, ok := g.probeEndpointContextTokens(ctx, ep); ok && lim > 0 {
+		g.ctxLimit.Store(int64(lim))
+		g.ctxProbed.Store(true)
+		return lim
+	}
+	if g.prefix == "gguf:" && (g.ensureEPFn != nil || g.ensureFn != nil) {
+		if dl, hasDL := ctx.Deadline(); !hasDL || time.Until(dl) > time.Second {
+			var werr error
+			if g.ensureEPFn != nil {
+				var wep string
+				wep, werr = g.ensureEPFn(ctx)
+				if werr == nil && wep != "" {
+					g.epMu.Lock()
+					g.endpoint = strings.TrimSpace(wep)
+					g.epMu.Unlock()
+					ep = g.currentEndpoint()
+				}
+			} else {
+				werr = g.ensureFn(ctx)
+			}
+			if werr == nil {
+				if lim, ok := g.probeEndpointContextTokens(ctx, ep); ok && lim > 0 {
+					g.ctxLimit.Store(int64(lim))
+					g.ctxProbed.Store(true)
+					return lim
+				}
+			}
+		}
+	}
+	g.ctxProbed.Store(true)
+	return 0
 }
 
 func (g *GGUFAdapter) CallJSON(ctx context.Context, prompt string, schema map[string]any, target any) (float64, error) {

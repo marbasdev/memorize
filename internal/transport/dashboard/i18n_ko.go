@@ -208,6 +208,7 @@ var koTranslations = map[string]string{
 	"gr_verdict_rule_violation":  "규칙 위반 차단",
 	"gr_verdict_pre_mutate_gate": "선반영 게이트 차단",
 	"gr_verdict_plan_violation":  "계획 위반 감지",
+	"gr_verdict_partial":         "부분 검증 (시간 예산)",
 	"gr_verdict_error":           "평가 오류 (통과)",
 	"gr_verdict_pass":            "검증 통과",
 	"gr_rules_checked":           "건 규칙 대조",

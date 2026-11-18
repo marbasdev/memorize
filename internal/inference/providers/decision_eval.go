@@ -69,6 +69,14 @@ type decisionEvaluator struct {
 
 func (d *decisionEvaluator) Name() string { return d.tr.Name() }
 
+// InputTokenLimit forwards the underlying decision transport's verified context limit when available.
+func (d *decisionEvaluator) InputTokenLimit(ctx context.Context) int {
+	if p, ok := d.tr.(domain.ContextWindowProvider); ok {
+		return p.InputTokenLimit(ctx)
+	}
+	return 0
+}
+
 func (d *decisionEvaluator) ScoreRelevance(ctx context.Context, currentTask string, facts []domain.Fact) ([]domain.ScoredFact, error) {
 	if len(facts) == 0 {
 		return nil, nil

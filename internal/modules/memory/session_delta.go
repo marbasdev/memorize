@@ -394,14 +394,16 @@ func (s *Service) RecordTurnState(ctx context.Context, sessionID, rawScope, user
 	sc := domain.NormalizeScope(rawScope)
 	now := time.Now().Unix()
 	_, _ = s.db.ExecContext(ctx, `
-		INSERT INTO turn_state (session_id, scope, last_input, mutated, gate_checked, updated_at)
-		VALUES (?, ?, ?, 0, 0, ?)
+		INSERT INTO turn_state (session_id, scope, last_input, mutated, gate_checked, stop_retry, updated_at)
+		VALUES (?, ?, ?, 0, 0, 0, ?)
 		ON CONFLICT(session_id, scope) DO UPDATE SET
 			mutated = CASE WHEN turn_state.last_input = excluded.last_input THEN turn_state.mutated ELSE 0 END,
 			gate_checked = CASE WHEN turn_state.last_input = excluded.last_input THEN turn_state.gate_checked ELSE 0 END,
+			stop_retry = CASE WHEN turn_state.last_input = excluded.last_input THEN turn_state.stop_retry ELSE 0 END,
 			last_input = excluded.last_input,
 			updated_at = excluded.updated_at
 	`, sid, sc, inp, now)
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM turn_pending_edits WHERE session_id = ? AND scope = ? AND turn_input != '' AND turn_input != ?`, sid, sc, inp)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM turn_state WHERE updated_at < ?`, now-7200)
 }
 
@@ -504,4 +506,105 @@ func (s *Service) ActiveTurnInput(ctx context.Context, sessionID, rawScope strin
 		return ""
 	}
 	return strings.TrimSpace(lastInput)
+}
+
+// SetTurnPartialNotice records a one-shot Stop-hook partial verification notice for sessionID/rawScope.
+func (s *Service) SetTurnPartialNotice(ctx context.Context, sessionID, rawScope, notice string) {
+	if s == nil || s.db == nil {
+		return
+	}
+	sid := strings.TrimSpace(sessionID)
+	msg := strings.TrimSpace(notice)
+	if sid == "" || msg == "" {
+		return
+	}
+	sc := domain.NormalizeScope(rawScope)
+	now := time.Now().Unix()
+	_, _ = s.db.ExecContext(ctx, `
+		INSERT INTO turn_state (session_id, scope, last_input, mutated, gate_checked, partial_notice, updated_at)
+		VALUES (?, ?, '', 0, 0, ?, ?)
+		ON CONFLICT(session_id, scope) DO UPDATE SET
+			partial_notice = excluded.partial_notice,
+			updated_at = excluded.updated_at
+	`, sid, sc, msg, now)
+}
+
+// ConsumeTurnPartialNotice reads and clears any pending partial-verification notice for sessionID/rawScope.
+func (s *Service) ConsumeTurnPartialNotice(ctx context.Context, sessionID, rawScope string) string {
+	if s == nil || s.db == nil {
+		return ""
+	}
+	sid := strings.TrimSpace(sessionID)
+	if sid == "" {
+		return ""
+	}
+	sc := domain.NormalizeScope(rawScope)
+	cutoff := time.Now().Add(-2 * time.Hour).Unix()
+	var notice string
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(partial_notice, '') FROM turn_state WHERE session_id = ? AND scope = ? AND updated_at >= ?`,
+		sid, sc, cutoff).Scan(&notice); err != nil {
+		return ""
+	}
+	notice = strings.TrimSpace(notice)
+	if notice != "" {
+		_, _ = s.db.ExecContext(ctx,
+			`UPDATE turn_state SET partial_notice = '' WHERE session_id = ? AND scope = ?`,
+			sid, sc)
+	}
+	return notice
+}
+
+// MaxTurnStopRetry returns the highest active Stop re-verification retry count for sessionID.
+func (s *Service) MaxTurnStopRetry(ctx context.Context, sessionID string) int {
+	if s == nil || s.db == nil {
+		return 0
+	}
+	sid := strings.TrimSpace(sessionID)
+	if sid == "" {
+		return 0
+	}
+	cutoff := time.Now().Add(-2 * time.Hour).Unix()
+	var retry int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(stop_retry), 0) FROM turn_state WHERE session_id = ? AND updated_at >= ?`,
+		sid, cutoff).Scan(&retry); err != nil {
+		return 0
+	}
+	return retry
+}
+
+// SetTurnStopRetry records the current Stop re-verification retry counter for sessionID/rawScope.
+func (s *Service) SetTurnStopRetry(ctx context.Context, sessionID, rawScope string, retry int) {
+	if s == nil || s.db == nil {
+		return
+	}
+	sid := strings.TrimSpace(sessionID)
+	if sid == "" {
+		return
+	}
+	if retry < 0 {
+		retry = 0
+	}
+	sc := domain.NormalizeScope(rawScope)
+	now := time.Now().Unix()
+	_, _ = s.db.ExecContext(ctx, `
+		INSERT INTO turn_state (session_id, scope, last_input, mutated, gate_checked, stop_retry, updated_at)
+		VALUES (?, ?, '', 0, 0, ?, ?)
+		ON CONFLICT(session_id, scope) DO UPDATE SET
+			stop_retry = excluded.stop_retry,
+			updated_at = excluded.updated_at
+	`, sid, sc, retry, now)
+}
+
+// ClearTurnStopRetries resets Stop re-verification counters across all scopes for sessionID.
+func (s *Service) ClearTurnStopRetries(ctx context.Context, sessionID string) {
+	if s == nil || s.db == nil {
+		return
+	}
+	sid := strings.TrimSpace(sessionID)
+	if sid == "" {
+		return
+	}
+	_, _ = s.db.ExecContext(ctx, `UPDATE turn_state SET stop_retry = 0 WHERE session_id = ?`, sid)
 }

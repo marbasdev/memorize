@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -23,13 +24,76 @@ var geminiQuotaFallbacks = []string{
 	"gemini-3.8-flash",
 }
 
+var knownGeminiInputTokenLimits = map[string]int{
+	"gemini-decision-1":      262144,
+	"gemini-3.5-flash-lite":  1048576,
+	"gemini-3.1-flash-lite":  1048576,
+	"gemini-3.5-flash":       1048576,
+	"gemini-3.6-flash":       1048576,
+	"gemini-3.8-flash":       1048576,
+	"gemini-3.1-pro-preview": 1048576,
+}
+
+var geminiMetaClient = &http.Client{Timeout: 500 * time.Millisecond}
+
+func lookupGeminiInputTokenLimit(ctx context.Context, apiKey, model string, cached *atomic.Int64, probed *atomic.Bool) int {
+	if n := int(cached.Load()); n > 0 {
+		return n
+	}
+	key := strings.ToLower(strings.TrimSpace(model))
+	if os.Getenv("GEMINI_API_BASE") == "" {
+		if n, ok := knownGeminiInputTokenLimits[key]; ok {
+			cached.Store(int64(n))
+			return n
+		}
+	}
+	if !probed.Swap(true) && strings.TrimSpace(apiKey) != "" && key != "" {
+		pctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		endpoint := fmt.Sprintf("%s/v1beta/models/%s", geminiBaseURL(), url.PathEscape(strings.TrimSpace(model)))
+		req, err := http.NewRequestWithContext(pctx, http.MethodGet, endpoint, nil)
+		if err == nil {
+			req.Header.Set("x-goog-api-key", apiKey)
+			if resp, rerr := geminiMetaClient.Do(req); rerr == nil {
+				body, berr := io.ReadAll(io.LimitReader(resp.Body, 32*1024))
+				_ = resp.Body.Close()
+				if berr == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+					var meta struct {
+						InputTokenLimit int `json:"inputTokenLimit"`
+					}
+					if json.Unmarshal(body, &meta) == nil && meta.InputTokenLimit > 0 {
+						cancel()
+						cached.Store(int64(meta.InputTokenLimit))
+						return meta.InputTokenLimit
+					}
+				}
+			}
+		}
+		cancel()
+	}
+	if n, ok := knownGeminiInputTokenLimits[key]; ok {
+		cached.Store(int64(n))
+		return n
+	}
+	return 0
+}
+
 type GeminiAdapter struct {
 	apiKey        string
 	model         string
 	noLogprobs    atomic.Bool
 	noThinking    atomic.Bool
+	ctxLimit      atomic.Int64
+	ctxProbed     atomic.Bool
 	cooldownMu    sync.Mutex
 	cooldownUntil map[string]time.Time
+}
+
+// InputTokenLimit returns the model's verified inputTokenLimit from Gemini metadata or known catalog specs.
+func (g *GeminiAdapter) InputTokenLimit(ctx context.Context) int {
+	if g == nil {
+		return 0
+	}
+	return lookupGeminiInputTokenLimit(ctx, g.apiKey, g.model, &g.ctxLimit, &g.ctxProbed)
 }
 
 func supportsThinkingBudget(model string) bool {

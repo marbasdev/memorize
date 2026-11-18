@@ -63,6 +63,12 @@ type ProgressCommitCategorizer interface {
 	SummarizeCommitProgress(ctx context.Context, scope, lang string, commits []GitCommitBrief) ([]CommitProgressItem, error)
 }
 
+// ProgressMilestoneSummarizer synthesizes multiple pending Git commits into high-level work milestones
+// instead of producing 1-to-1 per-commit log lines.
+type ProgressMilestoneSummarizer interface {
+	SummarizeCommitMilestones(ctx context.Context, scope, lang string, commits []GitCommitBrief) ([]GitMilestoneSummary, error)
+}
+
 // TaxonomyPlanner proposes non-destructive category/sub_category reorganizations.
 type TaxonomyPlanner interface {
 	SuggestTaxonomyRebalance(ctx context.Context, scope string, facts []Fact) ([]TaxonomyRebalanceItem, error)
@@ -163,6 +169,33 @@ type TaskCapableEvaluator interface {
 	SupportsTask(task EvalTask) bool
 }
 
+// ContextWindowProvider exposes an evaluator's verified runtime input token limit when known.
+// A non-positive return value indicates the runtime limit is unknown so callers use a conservative budget.
+type ContextWindowProvider interface {
+	InputTokenLimit(ctx context.Context) int
+}
+
+// RuleBatchSizeProvider exposes the maximum number of rules sent in a single verification call.
+type RuleBatchSizeProvider interface {
+	RuleBatchSize() int
+}
+
+// EvaluatorInputTokenLimit returns ev's verified runtime input token limit, or 0 if unknown.
+func EvaluatorInputTokenLimit(ctx context.Context, ev Evaluator) int {
+	if p, ok := ev.(ContextWindowProvider); ok && ev != nil {
+		return p.InputTokenLimit(ctx)
+	}
+	return 0
+}
+
+// EvaluatorRuleBatchSize returns ev's per-call rule chunk size, or 0 if unspecified.
+func EvaluatorRuleBatchSize(ev Evaluator) int {
+	if p, ok := ev.(RuleBatchSizeProvider); ok && ev != nil {
+		return p.RuleBatchSize()
+	}
+	return 0
+}
+
 // EvaluatorSupportsTask reports whether ev can genuinely execute the given EvalTask.
 func EvaluatorSupportsTask(ev Evaluator, task EvalTask) bool {
 	if ev == nil {
@@ -181,8 +214,9 @@ func EvaluatorSupportsTask(ev Evaluator, task EvalTask) bool {
 		_, c3 := ev.(RulePackPlanner)
 		return c1 || c2 || c3
 	case TaskProgress:
-		_, ok := ev.(ProgressCommitCategorizer)
-		return ok
+		_, c1 := ev.(ProgressCommitCategorizer)
+		_, c2 := ev.(ProgressMilestoneSummarizer)
+		return c1 || c2
 	case TaskTaxonomy:
 		_, ok := ev.(TaxonomyPlanner)
 		return ok

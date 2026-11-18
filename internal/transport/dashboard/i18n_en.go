@@ -267,6 +267,7 @@ var enTranslations = map[string]string{
 	"gr_verdict_rule_violation":  "Rule Violation Blocked",
 	"gr_verdict_pre_mutate_gate": "Pre-Mutate Gate Blocked",
 	"gr_verdict_plan_violation":  "Plan Violation Detected",
+	"gr_verdict_partial":         "Partial (Time Budget)",
 	"gr_verdict_error":           "Eval Error (Fail-Open)",
 	"gr_verdict_pass":            "Passed",
 	"gr_rules_checked":           "rules checked",

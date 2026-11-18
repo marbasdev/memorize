@@ -139,7 +139,7 @@ func CollectPendingCommits(ctx context.Context, repoRoot, lastCommit string, max
 			return head, nil
 		}
 		if _, err := Run(ctx, repoRoot, "merge-base", "--is-ancestor", lastCommit, "HEAD"); err == nil {
-			args = []string{"log", "--reverse", "-n", "15", "--format=COMMIT\t%h\t%cs\t%s", "--name-only", lastCommit + "..HEAD"}
+			args = []string{"log", "--reverse", "-n", "40", "--format=COMMIT\t%h\t%cs\t%s", "--name-only", lastCommit + "..HEAD"}
 		} else {
 			args = []string{"log", "--reverse", "-n", strconv.Itoa(maxInitial), "--format=COMMIT\t%h\t%cs\t%s", "--name-only"}
 		}
@@ -198,13 +198,125 @@ func DiffFile(ctx context.Context, repoDir, filePath string) string {
 			target = rel
 		}
 	}
-	if out, err := Run(ctx, repoDir, "diff", "HEAD", "--unified=0", "--", target); err == nil {
+	if out, err := Run(ctx, repoDir, "-c", "core.quotePath=false", "diff", "HEAD", "--unified=0", "--no-color", "--no-ext-diff", "--", target); err == nil {
 		return out
 	}
-	if out, err := Run(ctx, repoDir, "diff", "--unified=0", "--", target); err == nil {
+	if out, err := Run(ctx, repoDir, "-c", "core.quotePath=false", "diff", "--unified=0", "--no-color", "--no-ext-diff", "--", target); err == nil {
 		return out
 	}
 	return ""
+}
+
+// StagedFileDiff captures one staged file's compacted diff section from git diff --cached.
+type StagedFileDiff struct {
+	Path   string
+	Body   string
+	Binary bool
+}
+
+func runWithTimeout(parent context.Context, timeout time.Duration, dir string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func extractDiffSectionPath(section string) string {
+	var headerLine, plusPath, minusPath, renameTo string
+	for _, raw := range strings.Split(strings.ReplaceAll(section, "\r\n", "\n"), "\n") {
+		switch {
+		case headerLine == "" && strings.HasPrefix(raw, "diff --git "):
+			headerLine = raw
+		case strings.HasPrefix(raw, "+++ b/"):
+			plusPath = strings.TrimSpace(strings.TrimPrefix(raw, "+++ b/"))
+		case strings.HasPrefix(raw, "--- a/"):
+			minusPath = strings.TrimSpace(strings.TrimPrefix(raw, "--- a/"))
+		case strings.HasPrefix(raw, "rename to "):
+			renameTo = strings.TrimSpace(strings.TrimPrefix(raw, "rename to "))
+		case strings.HasPrefix(raw, "@@ "):
+			goto done
+		}
+	}
+done:
+	if plusPath != "" {
+		return plusPath
+	}
+	if renameTo != "" {
+		return renameTo
+	}
+	if minusPath != "" {
+		return minusPath
+	}
+	if idx := strings.LastIndex(headerLine, " b/"); idx >= 0 {
+		return strings.TrimSpace(headerLine[idx+3:])
+	}
+	return ""
+}
+
+// StagedDiffFiles parses git diff --cached into per-file compacted sections without byte-cutting later files.
+func StagedDiffFiles(ctx context.Context, repoDir string) ([]StagedFileDiff, error) {
+	if strings.TrimSpace(repoDir) == "" {
+		return nil, nil
+	}
+	raw, err := runWithTimeout(ctx, 5*time.Second, repoDir,
+		"-c", "core.quotePath=false", "diff", "--cached", "--unified=0", "--no-color", "--no-ext-diff")
+	if err != nil || strings.TrimSpace(raw) == "" {
+		return nil, err
+	}
+	return ParseUnifiedDiffFiles(raw), nil
+}
+
+// ParseUnifiedDiffFiles splits a multi-file git unified diff into per-file compacted StagedFileDiff entries.
+func ParseUnifiedDiffFiles(raw string) []StagedFileDiff {
+	norm := strings.ReplaceAll(raw, "\r\n", "\n")
+	lines := strings.Split(norm, "\n")
+	var sections []string
+	var cur []string
+	for _, l := range lines {
+		if strings.HasPrefix(l, "diff --git ") {
+			if len(cur) > 0 {
+				sections = append(sections, strings.Join(cur, "\n"))
+			}
+			cur = []string{l}
+			continue
+		}
+		if len(cur) > 0 {
+			cur = append(cur, l)
+		}
+	}
+	if len(cur) > 0 {
+		sections = append(sections, strings.Join(cur, "\n"))
+	}
+
+	out := make([]StagedFileDiff, 0, len(sections))
+	for _, sec := range sections {
+		path := extractDiffSectionPath(sec)
+		if path == "" {
+			continue
+		}
+		isBin := strings.Contains(sec, "\nBinary files ") || strings.Contains(sec, "\nGIT binary patch\n") || strings.HasSuffix(sec, "\nGIT binary patch")
+		if isBin {
+			out = append(out, StagedFileDiff{
+				Path:   path,
+				Body:   "(binary file staged)",
+				Binary: true,
+			})
+			continue
+		}
+		body, _ := domain.CompactUnifiedDiffBody(sec)
+		if body == "" {
+			continue
+		}
+		out = append(out, StagedFileDiff{
+			Path: path,
+			Body: body,
+		})
+	}
+	return out
 }
 
 // CleanCommitSubject strips conventional-commit prefixes (e.g. "feat(scope): ") when a meaningful body follows.

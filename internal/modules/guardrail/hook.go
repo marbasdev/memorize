@@ -253,19 +253,29 @@ func (s *Service) collectTargetContext(
 
 	qRefresh := refreshSession && targetIdx == 0
 	qOut, err := s.mem.QuerySessionMemory(ctx, sid, qTask, "", t.Scope, qRefresh)
+	partialMsg := ""
+	if !isStart {
+		partialMsg = strings.TrimSpace(s.mem.ConsumeTurnPartialNotice(ctx, sid, t.Scope))
+	}
 	if engineReady {
 		onboardMsg = s.ConsumeOnboardingOffer(ctx, sid, t.Scope)
 	}
 	if err != nil {
-		if rpConflictMsg != "" {
-			return []string{rpConflictMsg}, false, true
+		var fallbackParts []string
+		for _, m := range []string{rpConflictMsg, partialMsg} {
+			if m != "" {
+				fallbackParts = append(fallbackParts, m)
+			}
+		}
+		if len(fallbackParts) > 0 {
+			return fallbackParts, false, true
 		}
 		return nil, false, false
 	}
 
 	qOut = strings.TrimSpace(qOut)
 	hasNew := hasInjectedMemoryPayload(qOut)
-	hasSync := syncMsg != "" || rpConflictMsg != "" || onboardMsg != ""
+	hasSync := syncMsg != "" || rpConflictMsg != "" || onboardMsg != "" || partialMsg != ""
 
 	var parts []string
 	if hasNew || (isStart && totalTargets == 1) {
@@ -273,7 +283,7 @@ func (s *Service) collectTargetContext(
 	} else if isStart && totalTargets > 1 && !strings.HasPrefix(qOut, "No active memories") {
 		parts = append(parts, fmt.Sprintf("### Scope `%s`\n%s", t.Scope, qOut))
 	}
-	for _, msg := range []string{rpConflictMsg, syncMsg, onboardMsg} {
+	for _, msg := range []string{rpConflictMsg, syncMsg, onboardMsg, partialMsg} {
 		if msg != "" {
 			parts = append(parts, msg)
 		}

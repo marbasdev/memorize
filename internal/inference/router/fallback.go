@@ -111,6 +111,47 @@ func (f *fallbackEvaluator) SupportsTask(task domain.EvalTask) bool {
 	return domain.EvaluatorSupportsTask(f.primary, task)
 }
 
+// InputTokenLimit returns the safe verified context token ceiling across active primary and fallback evaluators.
+func (f *fallbackEvaluator) InputTokenLimit(ctx context.Context) int {
+	if f == nil {
+		return 0
+	}
+	if f.primary != nil && f.fallback != nil && f.tracker.isCoolingDown(f.primary.Name()) {
+		return domain.EvaluatorInputTokenLimit(ctx, f.fallback)
+	}
+	pLim := domain.EvaluatorInputTokenLimit(ctx, f.primary)
+	if f.fallback == nil || f.fallback.Name() == f.primary.Name() {
+		return pLim
+	}
+	fLim := domain.EvaluatorInputTokenLimit(ctx, f.fallback)
+	if pLim <= 0 || fLim <= 0 {
+		return 0
+	}
+	return min(pLim, fLim)
+}
+
+// RuleBatchSize returns the conservative per-call rule chunk limit across primary and fallback evaluators.
+func (f *fallbackEvaluator) RuleBatchSize() int {
+	if f == nil {
+		return 0
+	}
+	if f.primary != nil && f.fallback != nil && f.tracker.isCoolingDown(f.primary.Name()) {
+		return domain.EvaluatorRuleBatchSize(f.fallback)
+	}
+	pBatch := domain.EvaluatorRuleBatchSize(f.primary)
+	if f.fallback == nil || f.fallback.Name() == f.primary.Name() {
+		return pBatch
+	}
+	fBatch := domain.EvaluatorRuleBatchSize(f.fallback)
+	if pBatch <= 0 {
+		return fBatch
+	}
+	if fBatch > 0 && fBatch > pBatch {
+		return fBatch
+	}
+	return pBatch
+}
+
 func runWithFallback[T any](
 	ctx context.Context,
 	f *fallbackEvaluator,
@@ -217,6 +258,18 @@ func (f *fallbackEvaluator) SummarizeCommitProgress(ctx context.Context, scope, 
 			return nil, fmt.Errorf("evaluator %s does not support progress categorization", ev.Name())
 		}
 		return p.SummarizeCommitProgress(ctx, scope, lang, commits)
+	})
+}
+
+func (f *fallbackEvaluator) SummarizeCommitMilestones(ctx context.Context, scope, lang string, commits []domain.GitCommitBrief) ([]domain.GitMilestoneSummary, error) {
+	return runWithFallback(ctx, f, domain.TaskProgress, func(ev domain.Evaluator) ([]domain.GitMilestoneSummary, error) {
+		if p, ok := ev.(domain.ProgressMilestoneSummarizer); ok {
+			return p.SummarizeCommitMilestones(ctx, scope, lang, commits)
+		}
+		if _, ok := ev.(domain.ProgressCommitCategorizer); ok {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("evaluator %s does not support progress milestones", ev.Name())
 	})
 }
 

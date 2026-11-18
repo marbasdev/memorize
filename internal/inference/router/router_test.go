@@ -174,3 +174,39 @@ func TestRouterCircuitBreakerCooldownAndFallback(t *testing.T) {
 		t.Fatalf("expected cooldown to skip decisions endpoint (decHits=1, flashHits=2), got dec=%d flash=%d", decHits.Load(), flashHits.Load())
 	}
 }
+
+func TestFallbackEvaluatorInputTokenLimitPropagation(t *testing.T) {
+	t.Setenv("GEMINI_API_BASE", "")
+	res := NewTaskResolver()
+
+	// Gemini primary (262144) + Gemini fallback (1048576) -> min = 262144
+	cfgBoth := map[string]string{
+		"active_provider":      "gemini",
+		"gemini_model":         "gemini-3.5-flash-lite",
+		"gemini_api_key":       "k-gem",
+		"task_relevance_model": "gemini-decision-1",
+	}
+	evBoth, ok := res(cfgBoth, domain.TaskRelevance)
+	if !ok || evBoth == nil {
+		t.Fatal("expected resolved evaluator for TaskRelevance")
+	}
+	if got := domain.EvaluatorInputTokenLimit(context.Background(), evBoth); got != 262144 {
+		t.Fatalf("expected min known limit=262144 across primary+fallback, got %d", got)
+	}
+
+	// Gemini primary (262144) + unknown local fallback (0) -> 0 (safe conservative ceiling)
+	srv := httptest.NewServer(http.NotFoundHandler())
+	defer srv.Close()
+	cfgUnknownFB := map[string]string{
+		"active_provider":      "local",
+		"local_model_url":      srv.URL + "/v1",
+		"local_model_name":     "ollama-unknown",
+		"gemini_api_key":       "k-gem",
+		"task_verify_provider": "gemini",
+		"task_verify_model":    "gemini-decision-1",
+	}
+	evUnknown, _ := res(cfgUnknownFB, domain.TaskVerify)
+	if got := domain.EvaluatorInputTokenLimit(context.Background(), evUnknown); got != 0 {
+		t.Fatalf("expected conservative 0 when fallback context limit is unknown, got %d", got)
+	}
+}

@@ -2,6 +2,9 @@ package progress
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -176,5 +179,185 @@ func TestProgressRetentionCleanupAndWatermarks(t *testing.T) {
 	// Calling CleanupProgressHistory with invalid days rejects cleanly.
 	if _, err := svc.CleanupProgressHistory(ctx, "project:alpha", -1); err == nil {
 		t.Fatalf("expected error on negative retention days")
+	}
+}
+
+type milestoneTestEval struct {
+	noopEval
+	milestoneCalls int
+}
+
+func (m *milestoneTestEval) SummarizeCommitProgress(_ context.Context, _ string, _ string, commits []domain.GitCommitBrief) ([]domain.CommitProgressItem, error) {
+	out := make([]domain.CommitProgressItem, 0, len(commits))
+	for _, c := range commits {
+		out = append(out, domain.CommitProgressItem{
+			SHA:      c.SHA,
+			Track:    "fallback",
+			Category: "architecture",
+			Summary:  "보완 정리: " + c.Subject,
+		})
+	}
+	return out, nil
+}
+
+func (m *milestoneTestEval) SummarizeCommitMilestones(_ context.Context, _ string, _ string, commits []domain.GitCommitBrief) ([]domain.GitMilestoneSummary, error) {
+	m.milestoneCalls++
+	if len(commits) < 2 {
+		return nil, nil
+	}
+	var grouped []string
+	for _, c := range commits[:len(commits)-1] {
+		grouped = append(grouped, c.SHA)
+	}
+	return []domain.GitMilestoneSummary{
+		{
+			Track:       "핵심 기능 통합",
+			Category:    "architecture",
+			SubCategory: "engine",
+			Date:        commits[len(commits)-2].Date,
+			Summary:     "인증·스토리지·대시보드 전반 기능 통합 정리",
+			CommitSHAs:  grouped,
+		},
+	}, nil
+}
+
+func initProgressGitRepo(t *testing.T) (string, func(args ...string) string) {
+	t.Helper()
+	repo := t.TempDir()
+	runGit := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, string(out))
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGit("init")
+	runGit("config", "user.name", "Test")
+	runGit("config", "user.email", "test@example.com")
+	_ = os.WriteFile(filepath.Join(repo, "README.md"), []byte("init\n"), 0o600)
+	runGit("add", "README.md")
+	runGit("commit", "-m", "chore: initial baseline")
+	return repo, runGit
+}
+
+func TestAutoSyncProgressCommitsRollsUpManyCommitsIntoMilestones(t *testing.T) {
+	mem, svc := openTestProgressService(t)
+	ctx := domain.WithAdminBypass(context.Background())
+
+	repo, runGit := initProgressGitRepo(t)
+	baseHead := runGit("rev-parse", "--short=12", "HEAD")
+	scope := "project:manycommits"
+	svc.RememberRepoPath(ctx, scope, repo)
+	if err := mem.SetSyncedCommit(ctx, scope, baseHead); err != nil {
+		t.Fatal(err)
+	}
+
+	commits := []struct {
+		file string
+		msg  string
+	}{
+		{"auth.go", "feat(auth): add jwt parser"},
+		{"auth2.go", "feat(auth): add session refresh"},
+		{"ui.html", "feat(dashboard): improve mobile grid"},
+		{"db.go", "fix(database): handle busy timeout"},
+		{"auth_test.go", "test(unit): cover jwt expiry"},
+		{"ci.yml", "chore(ci): cache go modules"},
+		{"docs.md", "docs(api): document endpoints"},
+	}
+	for i, c := range commits {
+		_ = os.WriteFile(filepath.Join(repo, c.file), []byte(fmt.Sprintf("v%d\n", i)), 0o600)
+		runGit("add", c.file)
+		runGit("commit", "-m", c.msg)
+	}
+
+	if got := svc.AutoSyncProgressCommits(ctx, scope, repo); got != len(commits) {
+		t.Fatalf("expected AutoSyncProgressCommits to sync %d commits, got %d", len(commits), got)
+	}
+	ov, err := svc.GetProgressOverviewWithQuery(ctx, domain.ProgressQuery{
+		Scope:      scope,
+		Kind:       domain.ProgressKindGit,
+		DoneWindow: "all",
+		Page:       1,
+		PageSize:   20,
+	})
+	if err != nil {
+		t.Fatalf("GetProgressOverviewWithQuery: %v", err)
+	}
+	// Rolled up across categories instead of 6+ tiny per-track cards or raw git-log concatenation.
+	if len(ov.Records) == 0 || len(ov.Records) > 4 {
+		t.Fatalf("expected 7 multi-area commits to roll up into <=4 milestone entries, got %d", len(ov.Records))
+	}
+	detailSHACount := 0
+	for _, r := range ov.Records {
+		if strings.Count(r.Summary, " · ") >= 2 {
+			t.Fatalf("expected rolled-up milestone summary instead of raw git-log chain, got %q", r.Summary)
+		}
+		detailSHACount += strings.Count(r.Details, "[git:")
+	}
+	if detailSHACount != len(commits) {
+		t.Fatalf("expected all %d [git:] detail lines preserved inside expandable details, got %d", len(commits), detailSHACount)
+	}
+	if again := svc.AutoSyncProgressCommits(ctx, scope, repo); again != 0 {
+		t.Fatalf("expected repeat AutoSyncProgressCommits to sync 0 commits, got %d", again)
+	}
+}
+
+func TestSyncProjectProgressSynthesizesMilestonesWithAIAndCoversRemainder(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "milestone.db")
+	eval := &milestoneTestEval{}
+	mem, err := memory.Open(dbPath, eval)
+	if err != nil {
+		t.Fatalf("memory.Open: %v", err)
+	}
+	defer mem.Close()
+	svc := New(mem)
+	ctx := domain.WithAdminBypass(context.Background())
+
+	repo, runGit := initProgressGitRepo(t)
+	baseHead := runGit("rev-parse", "--short=12", "HEAD")
+	scope := "project:aimilestone"
+	svc.RememberRepoPath(ctx, scope, repo)
+	if err := mem.SetSyncedCommit(ctx, scope, baseHead); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 1; i <= 5; i++ {
+		f := fmt.Sprintf("f%d.go", i)
+		_ = os.WriteFile(filepath.Join(repo, f), []byte(fmt.Sprintf("package app\n// %d\n", i)), 0o600)
+		runGit("add", f)
+		runGit("commit", "-m", fmt.Sprintf("feat(core): step %d", i))
+	}
+
+	res, err := svc.SyncProjectProgress(ctx, scope, repo, "ko")
+	if err != nil {
+		t.Fatalf("SyncProjectProgress: %v", err)
+	}
+	if eval.milestoneCalls != 1 || res.SyncedCommits != 5 {
+		t.Fatalf("expected 1 AI milestone synthesis call and 5 synced commits, got calls=%d res=%+v", eval.milestoneCalls, res)
+	}
+	st := svc.InspectProgressSync(ctx, scope, repo)
+	if !st.InSync || len(st.PendingCommits) != 0 {
+		t.Fatalf("expected InSync=true with 0 pending commits after milestone + remainder sync, got %+v", st)
+	}
+	ov, err := svc.GetProgressOverviewWithQuery(ctx, domain.ProgressQuery{
+		Scope:      scope,
+		Kind:       domain.ProgressKindGit,
+		DoneWindow: "all",
+		Page:       1,
+		PageSize:   20,
+	})
+	if err != nil || len(ov.Records) != 2 {
+		t.Fatalf("expected 2 milestone entries (1 AI group of 4 + 1 remainder), got err=%v len=%d", err, len(ov.Records))
+	}
+	foundAI := false
+	for _, r := range ov.Records {
+		if strings.Contains(r.Summary, "인증·스토리지·대시보드 전반 기능 통합 정리") && strings.Count(r.Details, "[git:") == 4 {
+			foundAI = true
+		}
+	}
+	if !foundAI {
+		t.Fatalf("expected synthesized AI milestone with 4 linked commits in details, got %+v", ov.Records)
 	}
 }

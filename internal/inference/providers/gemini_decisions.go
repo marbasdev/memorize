@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -18,8 +19,18 @@ const defaultGeminiDecisionModel = "gemini-decision-1"
 // GeminiDecisionsAdapter implements non-generative closed-set decision evaluation
 // via Google's Gemini Decisions API (/v1beta/decisions, 0 output tokens).
 type GeminiDecisionsAdapter struct {
-	apiKey string
-	model  string
+	apiKey    string
+	model     string
+	ctxLimit  atomic.Int64
+	ctxProbed atomic.Bool
+}
+
+// InputTokenLimit returns the decision model's verified inputTokenLimit when known.
+func (g *GeminiDecisionsAdapter) InputTokenLimit(ctx context.Context) int {
+	if g == nil {
+		return 0
+	}
+	return lookupGeminiInputTokenLimit(ctx, g.apiKey, g.model, &g.ctxLimit, &g.ctxProbed)
 }
 
 // NewGeminiDecisionsAdapter returns a BatchEvaluator backed by gemini-decision-1.

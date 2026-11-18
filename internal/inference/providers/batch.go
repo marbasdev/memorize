@@ -44,6 +44,16 @@ func (b *BatchEvaluator) SupportsTask(task domain.EvalTask) bool {
 	return domain.EvaluatorSupportsTask(b.base, task)
 }
 
+// InputTokenLimit exposes the wrapped evaluator's verified runtime context limit when known.
+func (b *BatchEvaluator) InputTokenLimit(ctx context.Context) int {
+	return domain.EvaluatorInputTokenLimit(ctx, b.base)
+}
+
+// RuleBatchSize returns the maximum number of rules sent in one evaluation request.
+func (b *BatchEvaluator) RuleBatchSize() int {
+	return b.batchSize
+}
+
 func (b *BatchEvaluator) chunkFacts(facts []domain.Fact) [][]domain.Fact {
 	var batches [][]domain.Fact
 	for i := 0; i < len(facts); i += b.batchSize {
@@ -328,6 +338,27 @@ func (b *BatchEvaluator) SummarizeCommitProgress(ctx context.Context, scope, lan
 		return catz.SummarizeCommitProgress(ctx, scope, lang, commits)
 	}
 	return nil, nil
+}
+
+func (b *BatchEvaluator) SummarizeCommitMilestones(ctx context.Context, scope, lang string, commits []domain.GitCommitBrief) ([]domain.GitMilestoneSummary, error) {
+	ms, ok := b.base.(domain.ProgressMilestoneSummarizer)
+	if !ok || len(commits) == 0 {
+		return nil, nil
+	}
+	const maxMilestoneBatch = 30
+	if len(commits) <= maxMilestoneBatch {
+		return ms.SummarizeCommitMilestones(ctx, scope, lang, commits)
+	}
+	var out []domain.GitMilestoneSummary
+	for i := 0; i < len(commits); i += maxMilestoneBatch {
+		end := min(len(commits), i+maxMilestoneBatch)
+		part, err := ms.SummarizeCommitMilestones(ctx, scope, lang, commits[i:end])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, part...)
+	}
+	return out, nil
 }
 
 func (b *BatchEvaluator) SuggestTaxonomyRebalance(ctx context.Context, scope string, facts []domain.Fact) ([]domain.TaxonomyRebalanceItem, error) {

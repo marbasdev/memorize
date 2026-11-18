@@ -8,7 +8,172 @@ import (
 	"time"
 
 	"memorize/internal/domain"
+	"memorize/internal/infra/git"
 )
+
+type commitMilestone struct {
+	date    string
+	track   string
+	cat     string
+	sub     string
+	headSHA string
+	sums    []string
+	details []string
+	count   int
+}
+
+func truncateRunes(s string, maxRunes int) string {
+	r := []rune(strings.TrimSpace(s))
+	if maxRunes <= 0 || len(r) <= maxRunes {
+		return string(r)
+	}
+	if maxRunes <= 3 {
+		return string(r[:maxRunes])
+	}
+	return strings.TrimSpace(string(r[:maxRunes-3])) + "..."
+}
+
+func formatCommitGroupSummary(date, track, lang string, sums []string) string {
+	if len(sums) == 0 {
+		return ""
+	}
+	isKO := strings.EqualFold(strings.TrimSpace(lang), "ko") || domain.ContainsCJKRune(track)
+	if !isKO {
+		for _, s := range sums {
+			if domain.ContainsCJKRune(s) {
+				isKO = true
+				break
+			}
+		}
+	}
+
+	var body string
+	switch len(sums) {
+	case 1:
+		body = strings.TrimSpace(sums[0])
+	case 2:
+		s0, s1 := strings.TrimSpace(sums[0]), strings.TrimSpace(sums[1])
+		if len([]rune(s0))+len([]rune(s1))+3 <= 140 {
+			body = s0 + " · " + s1
+		} else if isKO {
+			body = fmt.Sprintf("%s 외 1건 (2개 커밋)", truncateRunes(s1, 100))
+		} else {
+			body = fmt.Sprintf("%s (+1 more, 2 commits)", truncateRunes(s1, 100))
+		}
+	default:
+		latest := truncateRunes(sums[len(sums)-1], 80)
+		if isKO {
+			body = fmt.Sprintf("[%s] %s 외 %d건 요약 (%d개 커밋)", track, latest, len(sums)-1, len(sums))
+		} else {
+			body = fmt.Sprintf("[%s] %s (+%d more, %d commits)", track, latest, len(sums)-1, len(sums))
+		}
+	}
+
+	if d := strings.TrimSpace(date); d != "" {
+		return fmt.Sprintf("(%s) %s", d, body)
+	}
+	return body
+}
+
+func formatCommitDetailLine(c domain.GitCommitBrief, sum string) string {
+	line := fmt.Sprintf("[git:%s] %s", c.SHA, sum)
+	if len(c.Files) > 0 {
+		line += fmt.Sprintf(" (%s)", strings.Join(c.Files, ", "))
+	}
+	return line
+}
+
+func (s *Service) coalesceAndRecordCommitMilestones(
+	ctx context.Context,
+	sc, lang string,
+	commits []domain.GitCommitBrief,
+	aiMapped map[string]domain.CommitProgressItem,
+) int {
+	if len(commits) == 0 {
+		return 0
+	}
+	type resolvedCommit struct {
+		commit domain.GitCommitBrief
+		track  string
+		cat    string
+		sub    string
+		sum    string
+	}
+	resolved := make([]resolvedCommit, 0, len(commits))
+	type msKey struct{ date, bucket string }
+	trackBuckets := make(map[msKey]bool)
+
+	for _, c := range commits {
+		track, cat, sub, sum := inferCommitCategoryFallback(sc, c)
+		if it, ok := aiMapped[c.SHA]; ok && strings.TrimSpace(it.Summary) != "" {
+			cat, sub = domain.SplitCategoryAndSub(sc, it.Category, it.SubCategory)
+			sum = strings.TrimSpace(it.Summary)
+			if strings.TrimSpace(it.Track) != "" {
+				track = strings.TrimSpace(it.Track)
+			} else {
+				track = domain.EffectiveProgressTrack("", cat, sub)
+			}
+		}
+		resolved = append(resolved, resolvedCommit{
+			commit: c,
+			track:  track,
+			cat:    cat,
+			sub:    sub,
+			sum:    sum,
+		})
+		trackBuckets[msKey{date: c.Date, bucket: strings.ToLower(track)}] = true
+	}
+
+	// When syncing many commits scattered across >4 micro-tracks, roll up by (date, category)
+	// so the activity timeline summarizes milestones rather than exploding into per-commit cards.
+	rollByCategory := len(commits) >= 5 && len(trackBuckets) > 4
+
+	msMap := make(map[msKey]*commitMilestone)
+	var msOrder []msKey
+	for _, rc := range resolved {
+		bucketTrack := rc.track
+		bucketSub := rc.sub
+		if rollByCategory {
+			bucketTrack = rc.cat
+			bucketSub = ""
+		}
+		key := msKey{date: rc.commit.Date, bucket: strings.ToLower(bucketTrack)}
+		ms := msMap[key]
+		if ms == nil {
+			ms = &commitMilestone{
+				date:  rc.commit.Date,
+				track: bucketTrack,
+				cat:   rc.cat,
+				sub:   bucketSub,
+			}
+			msMap[key] = ms
+			msOrder = append(msOrder, key)
+		}
+		ms.headSHA = rc.commit.SHA
+		ms.sums = append(ms.sums, rc.sum)
+		ms.details = append(ms.details, formatCommitDetailLine(rc.commit, rc.sum))
+		ms.count++
+	}
+
+	synced := 0
+	for _, key := range msOrder {
+		ms := msMap[key]
+		combinedSum := formatCommitGroupSummary(ms.date, ms.track, lang, ms.sums)
+		if _, err := s.RecordProgress(ctx, domain.ProgressInput{
+			Scope:       sc,
+			Track:       ms.track,
+			Category:    ms.cat,
+			SubCategory: ms.sub,
+			Summary:     combinedSum,
+			Details:     strings.Join(ms.details, "\n"),
+			CommitSHA:   ms.headSHA,
+			Source:      "git_sync",
+		}); err == nil {
+			synced += ms.count
+		}
+	}
+	return synced
+}
 
 // AutoSyncProgressCommits performs fast, deterministic (<5ms, zero-LLM) incremental Git commit sync
 // into project_progress on SessionStart/PreInvocation turns.
@@ -27,63 +192,36 @@ func (s *Service) AutoSyncProgressCommits(ctx context.Context, rawScope, repoDir
 		return 0
 	}
 
-	type commitMilestone struct {
-		date    string
-		track   string
-		cat     string
-		sub     string
-		headSHA string
-		sums    []string
-		details []string
-		count   int
-	}
-	type msKey struct{ date, track string }
-	msMap := make(map[msKey]*commitMilestone)
-	var msOrder []msKey
-
-	for _, c := range pending {
-		track, cat, sub, sum := inferCommitCategoryFallback(sc, c)
-		key := msKey{date: c.Date, track: strings.ToLower(track)}
-		ms := msMap[key]
-		if ms == nil {
-			ms = &commitMilestone{date: c.Date, track: track, cat: cat, sub: sub}
-			msMap[key] = ms
-			msOrder = append(msOrder, key)
-		}
-		ms.headSHA = c.SHA
-		ms.sums = append(ms.sums, sum)
-		detLine := fmt.Sprintf("[git:%s] %s", c.SHA, sum)
-		if len(c.Files) > 0 {
-			detLine += fmt.Sprintf(" (%s)", strings.Join(c.Files, ", "))
-		}
-		ms.details = append(ms.details, detLine)
-		ms.count++
-	}
-
-	synced := 0
-	for _, key := range msOrder {
-		ms := msMap[key]
-		combinedSum := strings.Join(ms.sums, " · ")
-		if ms.date != "" {
-			combinedSum = fmt.Sprintf("(%s) %s", ms.date, combinedSum)
-		}
-		if _, err := s.RecordProgress(ctx, domain.ProgressInput{
-			Scope:       sc,
-			Track:       ms.track,
-			Category:    ms.cat,
-			SubCategory: ms.sub,
-			Summary:     combinedSum,
-			Details:     strings.Join(ms.details, "\n"),
-			CommitSHA:   ms.headSHA,
-			Source:      "git_sync",
-		}); err == nil {
-			synced += ms.count
-		}
-	}
+	synced := s.coalesceAndRecordCommitMilestones(ctx, sc, "", pending, nil)
 	if synced > 0 {
 		_ = s.mem.SetSyncedCommit(ctx, sc, head)
 	}
 	return synced
+}
+
+func isValidYYYYMMDD(s string) bool {
+	if len(s) != 10 || s[4] != '-' || s[7] != '-' {
+		return false
+	}
+	_, err := time.Parse("2006-01-02", s)
+	return err == nil
+}
+
+func matchPendingCommitSHA(rawSHA string, pending []domain.GitCommitBrief, used map[string]bool) (domain.GitCommitBrief, bool) {
+	q := strings.ToLower(strings.TrimSpace(rawSHA))
+	if q == "" {
+		return domain.GitCommitBrief{}, false
+	}
+	for _, c := range pending {
+		if used[c.SHA] {
+			continue
+		}
+		cl := strings.ToLower(c.SHA)
+		if cl == q || (len(q) >= 7 && (strings.HasPrefix(cl, q) || strings.HasPrefix(q, cl))) {
+			return c, true
+		}
+	}
+	return domain.GitCommitBrief{}, false
 }
 
 // SyncProjectProgress synchronizes unlinked active memories and unsynced Git commits (last_commit..HEAD)
@@ -133,84 +271,89 @@ func (s *Service) SyncProjectProgress(ctx context.Context, rawScope, explicitRep
 		}
 	}
 
-	// 2. Sync pending Git commits, coalescing same-date same-track commits into clean milestones
+	// 2. Sync pending Git commits, synthesizing cohesive milestones when multiple commits accumulate.
 	if len(state.PendingCommits) > 0 {
-		var aiMapped map[string]domain.CommitProgressItem
-		if ev := s.router.EvalForTask(ctx, domain.TaskProgress); domain.EvaluatorSupportsTask(ev, domain.TaskProgress) {
-			if catz, ok := ev.(domain.ProgressCommitCategorizer); ok {
-				pctx := domain.WithPresetCategories(ctx, s.mem.EffectiveTaxonomyJSON(ctx))
+		ev := s.router.EvalForTask(ctx, domain.TaskProgress)
+		pctx := domain.WithPresetCategories(ctx, s.mem.EffectiveTaxonomyJSON(ctx))
+		covered := make(map[string]bool, len(state.PendingCommits))
+
+		if len(state.PendingCommits) >= 3 && domain.EvaluatorSupportsTask(ev, domain.TaskProgress) {
+			if ms, ok := ev.(domain.ProgressMilestoneSummarizer); ok {
 				evalStart := time.Now()
-				items, aerr := catz.SummarizeCommitProgress(pctx, sc, lang, state.PendingCommits)
-				s.router.RecordTelemetry(pctx, domain.TaskProgress, ev, evalStart, len(state.PendingCommits), aerr)
-				if aerr == nil {
-					aiMapped = make(map[string]domain.CommitProgressItem, len(items))
-					for _, it := range items {
-						aiMapped[strings.TrimSpace(it.SHA)] = it
+				milestones, merr := ms.SummarizeCommitMilestones(pctx, sc, lang, state.PendingCommits)
+				s.router.RecordTelemetry(pctx, domain.TaskProgress, ev, evalStart, len(state.PendingCommits), merr)
+				if merr == nil && len(milestones) > 0 {
+					for _, m := range milestones {
+						sumText := strings.TrimSpace(m.Summary)
+						if sumText == "" {
+							continue
+						}
+						var matched []domain.GitCommitBrief
+						var detLines []string
+						latestDate := ""
+						headSHA := ""
+						for _, rawSHA := range m.CommitSHAs {
+							if c, found := matchPendingCommitSHA(rawSHA, state.PendingCommits, covered); found {
+								covered[c.SHA] = true
+								matched = append(matched, c)
+								detLines = append(detLines, formatCommitDetailLine(c, git.CleanCommitSubject(c.Subject)))
+								headSHA = c.SHA
+								if c.Date > latestDate {
+									latestDate = c.Date
+								}
+							}
+						}
+						if len(matched) == 0 {
+							continue
+						}
+						cat, sub := domain.SplitCategoryAndSub(sc, m.Category, m.SubCategory)
+						track := domain.EffectiveProgressTrack(m.Track, cat, sub)
+						date := strings.TrimSpace(m.Date)
+						if !isValidYYYYMMDD(date) {
+							date = latestDate
+						}
+						if date != "" && !(len(sumText) >= 12 && sumText[0] == '(' && sumText[11] == ')' && isValidYYYYMMDD(sumText[1:11])) {
+							sumText = fmt.Sprintf("(%s) %s", date, sumText)
+						}
+						if _, rerr := s.RecordProgress(ctx, domain.ProgressInput{
+							Scope:       sc,
+							Track:       track,
+							Category:    cat,
+							SubCategory: sub,
+							Summary:     sumText,
+							Details:     strings.Join(detLines, "\n"),
+							CommitSHA:   headSHA,
+							Source:      "git_sync",
+						}); rerr == nil {
+							res.SyncedCommits += len(matched)
+						}
 					}
 				}
 			}
 		}
 
-		type commitMilestone struct {
-			date    string
-			track   string
-			cat     string
-			sub     string
-			headSHA string
-			sums    []string
-			details []string
-			count   int
-		}
-		type msKey struct{ date, track string }
-		msMap := make(map[msKey]*commitMilestone)
-		var msOrder []msKey
-
+		var remaining []domain.GitCommitBrief
 		for _, c := range state.PendingCommits {
-			track, cat, sub, sum := inferCommitCategoryFallback(sc, c)
-			if it, ok := aiMapped[c.SHA]; ok && strings.TrimSpace(it.Summary) != "" {
-				cat, sub = domain.SplitCategoryAndSub(sc, it.Category, it.SubCategory)
-				sum = strings.TrimSpace(it.Summary)
-				if strings.TrimSpace(it.Track) != "" {
-					track = strings.TrimSpace(it.Track)
-				} else {
-					track = domain.EffectiveProgressTrack("", cat, sub)
+			if !covered[c.SHA] {
+				remaining = append(remaining, c)
+			}
+		}
+		if len(remaining) > 0 {
+			var aiMapped map[string]domain.CommitProgressItem
+			if domain.EvaluatorSupportsTask(ev, domain.TaskProgress) {
+				if catz, ok := ev.(domain.ProgressCommitCategorizer); ok {
+					evalStart := time.Now()
+					items, aerr := catz.SummarizeCommitProgress(pctx, sc, lang, remaining)
+					s.router.RecordTelemetry(pctx, domain.TaskProgress, ev, evalStart, len(remaining), aerr)
+					if aerr == nil {
+						aiMapped = make(map[string]domain.CommitProgressItem, len(items))
+						for _, it := range items {
+							aiMapped[strings.TrimSpace(it.SHA)] = it
+						}
+					}
 				}
 			}
-			key := msKey{date: c.Date, track: strings.ToLower(track)}
-			ms := msMap[key]
-			if ms == nil {
-				ms = &commitMilestone{date: c.Date, track: track, cat: cat, sub: sub}
-				msMap[key] = ms
-				msOrder = append(msOrder, key)
-			}
-			ms.headSHA = c.SHA
-			ms.sums = append(ms.sums, sum)
-			detLine := fmt.Sprintf("[git:%s] %s", c.SHA, sum)
-			if len(c.Files) > 0 {
-				detLine += fmt.Sprintf(" (%s)", strings.Join(c.Files, ", "))
-			}
-			ms.details = append(ms.details, detLine)
-			ms.count++
-		}
-
-		for _, key := range msOrder {
-			ms := msMap[key]
-			combinedSum := strings.Join(ms.sums, " · ")
-			if ms.date != "" {
-				combinedSum = fmt.Sprintf("(%s) %s", ms.date, combinedSum)
-			}
-			if _, err := s.RecordProgress(ctx, domain.ProgressInput{
-				Scope:       sc,
-				Track:       ms.track,
-				Category:    ms.cat,
-				SubCategory: ms.sub,
-				Summary:     combinedSum,
-				Details:     strings.Join(ms.details, "\n"),
-				CommitSHA:   ms.headSHA,
-				Source:      "git_sync",
-			}); err == nil {
-				res.SyncedCommits += ms.count
-			}
+			res.SyncedCommits += s.coalesceAndRecordCommitMilestones(ctx, sc, lang, remaining, aiMapped)
 		}
 	}
 

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"memorize/internal/domain"
 )
 
 func isGuardrailExemptTool(name string) bool {
@@ -189,7 +191,7 @@ func extractPlanFromEvent(ev NormalizedHookEvent) string {
 				}
 				s = strings.TrimSpace(s)
 				if s != "" {
-					s = truncateUTF8Bytes(s, 1000)
+					s = domain.TruncateUTF8Bytes(s, 1000)
 					parts = append(parts, fmt.Sprintf("%s: %s", k, s))
 				}
 			}
@@ -197,7 +199,7 @@ func extractPlanFromEvent(ev NormalizedHookEvent) string {
 	}
 	if len(parts) <= 1 && tName != "" {
 		if raw, err := json.Marshal(in); err == nil && len(raw) > 2 {
-			parts = append(parts, "Input: "+truncateUTF8Bytes(string(raw), 1000))
+			parts = append(parts, "Input: "+domain.TruncateUTF8Bytes(string(raw), 1000))
 		}
 	}
 	if len(parts) == 0 {

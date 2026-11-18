@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -92,6 +93,7 @@ type pidState struct {
 	Model       string `json:"model"`
 	Port        int    `json:"port"`
 	DesiredPort int    `json:"desired_port,omitempty"`
+	ContextSize int    `json:"context_size,omitempty"`
 }
 
 type StatusSnapshot struct {
@@ -107,10 +109,28 @@ type StatusSnapshot struct {
 	Endpoint         string           `json:"endpoint"`
 	Port             int              `json:"port"`
 	DesiredPort      int              `json:"desired_port"`
+	ContextSize      int              `json:"context_size,omitempty"`
 	PortFallback     bool             `json:"port_fallback,omitempty"`
 	Installed        []InstalledModel `json:"installed"`
 	Presets          []Preset         `json:"presets"`
 	Download         DownloadJob      `json:"download"`
+}
+
+// SelectManagedContextSize picks a safe runtime -c window for managed llama-server instances
+// based on optional MEMORY_GGUF_CTX override, detected system RAM, and model size.
+func SelectManagedContextSize(hw HardwareSpec, modelSizeBytes int64) int {
+	if raw := strings.TrimSpace(os.Getenv("MEMORY_GGUF_CTX")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n >= 2048 && n <= 65536 {
+			return n
+		}
+	}
+	if hw.RAMGB >= 32 && modelSizeBytes <= 6<<30 {
+		return 16384
+	}
+	if hw.RAMGB >= 16 && modelSizeBytes <= 4<<30 {
+		return 8192
+	}
+	return 4096
 }
 
 type Manager struct {
@@ -230,6 +250,7 @@ func (m *Manager) Status(port int) StatusSnapshot {
 		Endpoint:         ep,
 		Port:             epPort,
 		DesiredPort:      targetPort,
+		ContextSize:      ps.ContextSize,
 		PortFallback:     running && epPort != targetPort,
 		Installed:        installed,
 		Presets:          Presets(),
@@ -302,7 +323,8 @@ func (m *Manager) startServerLocked(ctx context.Context, modelFile string, port 
 		return "", err
 	}
 	modelPath := filepath.Join(m.dir, fname)
-	if _, err := os.Stat(modelPath); err != nil {
+	modelInfo, err := os.Stat(modelPath)
+	if err != nil {
 		return "", fmt.Errorf("model file not found: %s", fname)
 	}
 	if err := os.MkdirAll(m.RuntimeDir(), 0o755); err != nil {
@@ -320,6 +342,7 @@ func (m *Manager) startServerLocked(ctx context.Context, modelFile string, port 
 	if perr != nil {
 		return "", perr
 	}
+	ctxSize := SelectManagedContextSize(DetectHardware(), modelInfo.Size())
 
 	logF, err := os.OpenFile(m.logFilePath(), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -330,7 +353,7 @@ func (m *Manager) startServerLocked(ctx context.Context, modelFile string, port 
 		"--host", "127.0.0.1",
 		"--port", fmt.Sprintf("%d", chosenPort),
 		"-ngl", "99",
-		"-c", "4096",
+		"-c", strconv.Itoa(ctxSize),
 	)
 	cmd.Dir = filepath.Dir(bin)
 	cmd.Stdout = logF
@@ -347,7 +370,7 @@ func (m *Manager) startServerLocked(ctx context.Context, modelFile string, port 
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait() }()
 
-	psBytes, _ := json.Marshal(pidState{PID: pid, Model: fname, Port: chosenPort, DesiredPort: desiredPort})
+	psBytes, _ := json.Marshal(pidState{PID: pid, Model: fname, Port: chosenPort, DesiredPort: desiredPort, ContextSize: ctxSize})
 	_ = os.WriteFile(m.pidFilePath(), psBytes, 0o600)
 
 	ep := fmt.Sprintf("http://127.0.0.1:%d", chosenPort)

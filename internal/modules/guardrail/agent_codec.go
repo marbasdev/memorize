@@ -128,12 +128,13 @@ func decodeHookEvent(mode string, rawStdin []byte) NormalizedHookEvent {
 	}
 }
 
-func (ev NormalizedHookEvent) shouldSkipStopHook() bool {
-	if ev.Raw.ContinuationActive || ev.Raw.StopHookActive {
-		return true
-	}
+func (ev NormalizedHookEvent) isCancelTermination() bool {
 	tr := strings.ToUpper(strings.TrimSpace(ev.Raw.TerminationReason))
 	return tr != "" && tr != "NO_TOOL_CALL"
+}
+
+func (ev NormalizedHookEvent) isStopContinuation() bool {
+	return ev.Raw.ContinuationActive || ev.Raw.StopHookActive
 }
 
 // AgentCodec formats hook verdicts and injected memory context for a specific coding agent or VCS host.

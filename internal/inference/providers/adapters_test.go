@@ -425,3 +425,87 @@ func TestIsTypesafeCloudURL(t *testing.T) {
 		}
 	}
 }
+
+func TestContextWindowProbingForGGUFOpenAIAndGemini(t *testing.T) {
+	ctx := context.Background()
+
+	// 1. GGUF /props n_ctx
+	ggufSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/props" {
+			_, _ = w.Write([]byte(`{"default_generation_settings":{"n_ctx":8192}}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer ggufSrv.Close()
+	ggufEv := NewGGUFAdapter(ggufSrv.URL, "qwen3.gguf")
+	if got := domain.EvaluatorInputTokenLimit(ctx, ggufEv); got != 8192 {
+		t.Fatalf("expected GGUF InputTokenLimit=8192 from /props, got %d", got)
+	}
+
+	// 2. OpenAI-compatible /v1/models max_model_len vs generic Ollama (0 = unknown)
+	vllmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			_, _ = w.Write([]byte(`{"data":[{"id":"qwen3-coder","max_model_len":16384},{"id":"ollama-only"}]}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer vllmSrv.Close()
+	vllmEv := NewOpenAICompatibleAdapter(vllmSrv.URL+"/v1", "qwen3-coder", "")
+	if got := domain.EvaluatorInputTokenLimit(ctx, vllmEv); got != 16384 {
+		t.Fatalf("expected vLLM max_model_len=16384, got %d", got)
+	}
+	ollamaEv := NewOpenAICompatibleAdapter(vllmSrv.URL+"/v1", "ollama-only", "")
+	if got := domain.EvaluatorInputTokenLimit(ctx, ollamaEv); got != 0 {
+		t.Fatalf("expected unknown Ollama context limit to return 0 (no guessing), got %d", got)
+	}
+
+	// 3. Gemini live /v1beta/models/<id> probe + canonical catalog fallback
+	gemSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1beta/models/gemini-custom-test" {
+			_, _ = w.Write([]byte(`{"name":"models/gemini-custom-test","inputTokenLimit":32768}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer gemSrv.Close()
+	t.Setenv("GEMINI_API_BASE", gemSrv.URL)
+
+	gemCustom := NewGeminiAdapterConfig("k-gem", "gemini-custom-test")
+	if got := domain.EvaluatorInputTokenLimit(ctx, gemCustom); got != 32768 {
+		t.Fatalf("expected custom Gemini model limit=32768, got %d", got)
+	}
+	gemDec := NewGeminiDecisionsAdapterConfig("k-gem", "gemini-decision-1")
+	if got := domain.EvaluatorInputTokenLimit(ctx, gemDec); got != 262144 {
+		t.Fatalf("expected canonical gemini-decision-1 limit=262144, got %d", got)
+	}
+}
+
+func TestSchemaEvaluatorSummarizeCommitMilestones(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"choices": [{
+				"message": {
+					"content": "{\"milestones\":[{\"track\":\"Guardrail\",\"category\":\"architecture\",\"sub_category\":\"guardrail\",\"date\":\"2026-11-18\",\"summary\":\"Diff chunking and Stop retry loop completed\",\"commit_shas\":[\"aaa1111\",\"bbb2222\",\"ccc3333\"]}]}"
+				}
+			}]
+		}`))
+	}))
+	defer srv.Close()
+
+	ev := NewOpenAICompatibleAdapter(srv.URL+"/v1", "qwen3:4b", "")
+	ms, ok := any(ev).(domain.ProgressMilestoneSummarizer)
+	if !ok {
+		t.Fatal("expected BatchEvaluator to implement ProgressMilestoneSummarizer")
+	}
+	got, err := ms.SummarizeCommitMilestones(context.Background(), "project:memorize", "en", []domain.GitCommitBrief{
+		{SHA: "aaa1111", Date: "2026-11-18", Subject: "feat: chunk diffs"},
+		{SHA: "bbb2222", Date: "2026-11-18", Subject: "feat: add budget probe"},
+		{SHA: "ccc3333", Date: "2026-11-18", Subject: "feat: bounded stop re-verify"},
+	})
+	if err != nil || len(got) != 1 || len(got[0].CommitSHAs) != 3 {
+		t.Fatalf("expected 1 synthesized milestone covering 3 SHAs, got %+v (err=%v)", got, err)
+	}
+}

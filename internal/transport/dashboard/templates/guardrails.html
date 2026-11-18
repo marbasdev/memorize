@@ -130,7 +130,7 @@
           <div style="display:flex;justify-content:space-between;align-items:center;gap:0.45rem;flex-wrap:wrap;">
             <div style="display:flex;align-items:center;gap:0.38rem;flex-wrap:wrap;">
               <span class="badge {{guardrailBadge .Verdict}}">
-                {{if .Blocked}}🚫 {{else}}✓ {{end}}{{guardrailVerdictLabel $.Lang .Verdict}}
+                {{if .Blocked}}🚫 {{else if eq .Verdict "partial"}}⚠️ {{else}}✓ {{end}}{{guardrailVerdictLabel $.Lang .Verdict}}
               </span>
               <span class="badge b-accent">{{.Scope}}</span>
               <span class="tag-chip">{{guardrailSourceLabel $.Lang .Source}}{{if .ToolName}} · {{.ToolName}}{{end}}</span>

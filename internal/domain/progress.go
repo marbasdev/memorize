@@ -87,6 +87,16 @@ type CommitProgressItem struct {
 	Summary     string `json:"summary"`
 }
 
+// GitMilestoneSummary holds a cohesive synthesized milestone spanning one or more Git commits.
+type GitMilestoneSummary struct {
+	Track       string   `json:"track"`
+	Category    string   `json:"category"`
+	SubCategory string   `json:"sub_category,omitempty"`
+	Date        string   `json:"date,omitempty"`
+	Summary     string   `json:"summary"`
+	CommitSHAs  []string `json:"commit_shas"`
+}
+
 // ProgressRecord represents one persisted entry in project_progress.
 type ProgressRecord struct {
 	ID           int64    `json:"id"`

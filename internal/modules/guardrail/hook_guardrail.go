@@ -6,12 +6,10 @@ import (
 	"os"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"memorize/internal/domain"
 	"memorize/internal/infra/git"
 	"memorize/internal/infra/sqlite"
-	"memorize/internal/modules/memory"
 )
 
 func formatDiffLines(prefix string, lines []string) string {
@@ -21,20 +19,9 @@ func formatDiffLines(prefix string, lines []string) string {
 			sb.WriteByte('\n')
 		}
 		sb.WriteString(prefix)
-		sb.WriteString(l)
+		sb.WriteString(domain.CompactDiffLine(l, domain.MaxDiffSingleLineBytes))
 	}
 	return sb.String()
-}
-
-func truncateUTF8Bytes(s string, maxBytes int) string {
-	if maxBytes <= 0 || len(s) <= maxBytes {
-		return s
-	}
-	b := maxBytes
-	for b > 0 && !utf8.RuneStart(s[b]) {
-		b--
-	}
-	return s[:b] + "..."
 }
 
 func trimChangedLineEdges(oldRaw, newRaw string) (oldMid, newMid []string) {
@@ -63,14 +50,14 @@ func formatEdgeDiff(oldMid, newMid []string, addPrefix string, maxBytes int) str
 		combined := removed + "\n" + added
 		if maxBytes > 0 && len(combined) > maxBytes {
 			half := max(64, (maxBytes-50)/2)
-			combined = truncateUTF8Bytes(removed, half) + "\n" + truncateUTF8Bytes(added, half)
+			combined = domain.TruncateUTF8Bytes(removed, half) + "\n" + domain.TruncateUTF8Bytes(added, half)
 		}
 		return combined
 	}
 	if len(newMid) > 0 {
-		return truncateUTF8Bytes(formatDiffLines(addPrefix, newMid), maxBytes)
+		return domain.TruncateUTF8Bytes(formatDiffLines(addPrefix, newMid), maxBytes)
 	}
-	return truncateUTF8Bytes("Removed:\n"+strings.Join(oldMid, "\n"), maxBytes)
+	return domain.TruncateUTF8Bytes("Removed:\n"+formatDiffLines("", oldMid), maxBytes)
 }
 
 func diffEditSnippet(oldRaw, newRaw string) string {
@@ -90,50 +77,10 @@ func (s *Service) activeOverrideTurnInput(ctx context.Context, ev NormalizedHook
 }
 
 func (s *Service) evaluateGuardrailViolations(ctx context.Context, plan string, ev NormalizedHookEvent, scope string, minProb float64) (int, []domain.PlanViolation, error) {
-	scA, scB := memory.ScopesFor(scope, true)
-	rules, err := s.loadEnforceableFacts(ctx, scA, scB)
-	if err != nil || len(rules) == 0 {
-		return 0, nil, err
-	}
-
-	eval := s.router.EvalForTask(ctx, domain.TaskVerify)
-	if eval == nil {
-		return len(rules), nil, fmt.Errorf("no active evaluation engine configured")
-	}
-	// Phase 1: evaluate strictly on concrete action/diff without user turn prose so benign
-	// commands cannot trigger rules from chat wording while prefix caches stay stable.
-	evalStart := time.Now()
-	violations, err := eval.VerifyPlan(ctx, plan, rules)
-	s.router.RecordTelemetry(ctx, domain.TaskVerify, eval, evalStart, len(rules), err)
-	if err != nil {
-		return len(rules), nil, err
-	}
-	blocking := filterAndSortViolations(violations, minProb)
-	if len(blocking) == 0 {
-		return len(rules), nil, nil
-	}
-
-	// Phase 2 (lazy override): only re-check flagged rules with Turn Context when Phase 1
-	// hits and sufficient hook deadline budget remains.
-	turnInp := s.activeOverrideTurnInput(ctx, ev, scA)
-	if turnInp == "" {
-		return len(rules), blocking, nil
-	}
-	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < 1200*time.Millisecond {
-		return len(rules), blocking, nil
-	}
-	flagged := make([]domain.Fact, 0, len(blocking))
-	for _, b := range blocking {
-		flagged = append(flagged, b.Fact)
-	}
-	overridePlan := plan + "\nTurn Context (User Prompt - check ONLY whether this instruction explicitly overrides the flagged rules): " + turnInp
-	ovStart := time.Now()
-	ovViolations, ovErr := eval.VerifyPlan(ctx, overridePlan, flagged)
-	s.router.RecordTelemetry(ctx, domain.TaskVerify, eval, ovStart, len(flagged), ovErr)
-	if ovErr != nil {
-		return len(rules), blocking, nil
-	}
-	return len(rules), filterAndSortViolations(ovViolations, minProb), nil
+	res := s.evaluateGuardrailPlanChunks(ctx, func(budget int) []diffPlanChunk {
+		return packPlainTextChunks(plan, budget)
+	}, ev, scope, minProb, false)
+	return res.RuleCount, res.Blocking, res.VerifyErr
 }
 
 func (s *Service) rememberRepo(ctx context.Context, scope, repoDir string) {
@@ -156,15 +103,26 @@ func (s *Service) runGuardrailHook(ctx context.Context, ev NormalizedHookEvent, 
 	if ev.Phase == domain.HookPhasePreTool && ev.SessionID != "" {
 		s.mem.TouchTurnSession(ctx, ev.SessionID, scope)
 	}
+	var stagedSections []fileDiffSection
 	if plan == "" && ev.Phase == domain.HookPhasePreCommit && repoDir != "" {
-		if diffOut, err := git.Run(ctx, repoDir, "diff", "--cached", "--unified=0"); err == nil && diffOut != "" {
-			if len(diffOut) > 2000 {
-				diffOut = diffOut[:2000] + "..."
+		if stagedFiles, err := git.StagedDiffFiles(ctx, repoDir); err == nil && len(stagedFiles) > 0 {
+			stagedSections = make([]fileDiffSection, 0, len(stagedFiles))
+			for _, sf := range stagedFiles {
+				if sf.Binary || sf.Body == "(whitespace/formatting only)" {
+					stagedSections = append(stagedSections, fileDiffSection{
+						Label: sf.Path,
+						Body:  fmt.Sprintf("File: %s %s", sf.Path, sf.Body),
+					})
+					continue
+				}
+				stagedSections = append(stagedSections, fileDiffSection{
+					Label: sf.Path,
+					Body:  fmt.Sprintf("File: %s\n%s", sf.Path, sf.Body),
+				})
 			}
-			plan = "Git staged commit diff:\n" + diffOut
 		}
 	}
-	if plan == "" {
+	if plan == "" && len(stagedSections) == 0 {
 		return codec.FormatAllowPreTool()
 	}
 	hookStart := time.Now()
@@ -173,6 +131,10 @@ func (s *Service) runGuardrailHook(ctx context.Context, ev NormalizedHookEvent, 
 	// Enforce the turn pre-mutate gate first so durable decisions in the current chat are
 	// persisted before evaluating the tool call against active personal and team rules.
 	if gateReason, gateIDs := s.checkTurnPreMutateGate(ctx, ev, scope); gateReason != "" {
+		gateSnippet := plan
+		if gateSnippet == "" && len(stagedSections) > 0 {
+			gateSnippet = stagedSections[0].Body
+		}
 		_, _ = s.RecordGuardrailLog(ctx, domain.GuardrailLogInput{
 			Scope:       scope,
 			Source:      ev.Mode,
@@ -180,7 +142,7 @@ func (s *Service) runGuardrailHook(ctx context.Context, ev NormalizedHookEvent, 
 			Verdict:     domain.GuardrailVerdictPreMutateGate,
 			Blocked:     true,
 			ViolatedIDs: gateIDs,
-			PlanSnippet: plan,
+			PlanSnippet: gateSnippet,
 			Details:     gateReason,
 			ElapsedMs:   domain.ElapsedMsSince(hookStart),
 		})
@@ -194,8 +156,27 @@ func (s *Service) runGuardrailHook(ctx context.Context, ev NormalizedHookEvent, 
 		return codec.FormatAllowPreTool()
 	}
 
-	candidateCount, blocking, verifyErr := s.evaluateGuardrailViolations(ctx, plan, ev, scope, 0.80)
-	if blocked := s.recordVerifyOutcomeLog(ctx, scope, ev.Mode, toolName, candidateCount, plan, blocking, verifyErr, domain.ElapsedMsSince(hookStart)); !blocked {
+	var (
+		candidateCount int
+		blocking       []domain.PlanViolation
+		verifyErr      error
+		logSnippet     = plan
+	)
+	if len(stagedSections) > 0 {
+		res := s.evaluateGuardrailPlanChunks(ctx, func(budget int) []diffPlanChunk {
+			return packDiffChunks(func(idx, total int, labels []string) string {
+				if total <= 1 {
+					return "Git staged commit diff:\n"
+				}
+				return fmt.Sprintf("Git staged commit diff (part %d/%d — %s):\n", idx+1, total, strings.Join(labels, ", "))
+			}, stagedSections, budget)
+		}, ev, scope, 0.80, false)
+		candidateCount, blocking, verifyErr = res.RuleCount, res.Blocking, res.VerifyErr
+		logSnippet = res.CombinedSnippet
+	} else {
+		candidateCount, blocking, verifyErr = s.evaluateGuardrailViolations(ctx, plan, ev, scope, 0.80)
+	}
+	if blocked := s.recordVerifyOutcomeLog(ctx, scope, ev.Mode, toolName, candidateCount, logSnippet, blocking, verifyErr, domain.ElapsedMsSince(hookStart)); !blocked {
 		return codec.FormatAllowPreTool()
 	}
 	if verifyErr != nil {

@@ -182,3 +182,47 @@ func TestIsolatedRulePackCommitAndProtectedBranchError(t *testing.T) {
 		}
 	}
 }
+
+func TestStagedDiffFilesCompactsWhitespaceAndBinary(t *testing.T) {
+	_, repo := initTestRepoWithOrigin(t)
+	ctx := context.Background()
+
+	// Seed a baseline file for whitespace-only formatting change test.
+	wsFile := filepath.Join(repo, "ws.go")
+	if err := os.WriteFile(wsFile, []byte("package main\nfunc keep() int { return 1 }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, repo, "add", "ws.go")
+	runTestGit(t, repo, "commit", "-m", "chore: seed ws.go")
+
+	// Stage 1: whitespace-only change, 2: semantic + long minified line, 3: binary file.
+	if err := os.WriteFile(wsFile, []byte("package main\n\n  func keep() int { return 1 }\n\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	longLine := "var blob = \"" + strings.Repeat("abcdefghij", 120) + "\""
+	if err := os.WriteFile(filepath.Join(repo, "code.go"), []byte("package main\n"+longLine+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "bin.dat"), []byte{0x00, 0x01, 0x02, 0xff}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, repo, "add", "ws.go", "code.go", "bin.dat")
+
+	files, err := StagedDiffFiles(ctx, repo)
+	if err != nil {
+		t.Fatalf("StagedDiffFiles: %v", err)
+	}
+	byPath := make(map[string]StagedFileDiff, len(files))
+	for _, f := range files {
+		byPath[f.Path] = f
+	}
+	if f, ok := byPath["ws.go"]; !ok || f.Body != "(whitespace/formatting only)" {
+		t.Fatalf("expected ws.go collapsed to whitespace-only summary, got %+v", byPath)
+	}
+	if f, ok := byPath["bin.dat"]; !ok || !f.Binary {
+		t.Fatalf("expected bin.dat marked Binary=true, got %+v", byPath)
+	}
+	if f, ok := byPath["code.go"]; !ok || !strings.Contains(f.Body, "+var blob =") || len(f.Body) > 950 {
+		t.Fatalf("expected code.go long line capped safely, got len=%d body=%q", len(f.Body), f.Body)
+	}
+}

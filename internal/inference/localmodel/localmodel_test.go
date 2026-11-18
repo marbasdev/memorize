@@ -172,3 +172,20 @@ func TestPortFallbackDiscoveryAndManagedState(t *testing.T) {
 		t.Fatalf("expected EnsureRunningEndpoint to reuse active fallback endpoint :%d, got ep=%q err=%v", mockPort, ep, err)
 	}
 }
+
+func TestSelectManagedContextSize(t *testing.T) {
+	t.Setenv("MEMORY_GGUF_CTX", "")
+	if got := SelectManagedContextSize(HardwareSpec{RAMGB: 8}, 2<<30); got != 4096 {
+		t.Fatalf("expected 4096 for 8GB RAM, got %d", got)
+	}
+	if got := SelectManagedContextSize(HardwareSpec{RAMGB: 16}, 2<<30); got != 8192 {
+		t.Fatalf("expected 8192 for 16GB RAM + 2GB model, got %d", got)
+	}
+	if got := SelectManagedContextSize(HardwareSpec{RAMGB: 32}, 4<<30); got != 16384 {
+		t.Fatalf("expected 16384 for 32GB RAM + 4GB model, got %d", got)
+	}
+	t.Setenv("MEMORY_GGUF_CTX", "12288")
+	if got := SelectManagedContextSize(HardwareSpec{RAMGB: 8}, 2<<30); got != 12288 {
+		t.Fatalf("expected MEMORY_GGUF_CTX=12288 override, got %d", got)
+	}
+}

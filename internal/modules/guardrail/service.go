@@ -146,27 +146,17 @@ func formatViolationRef(f domain.Fact) string {
 }
 
 // EvaluatePlanViolations loads all active enforceable rules (excluding soft unpinned preferences),
-// evaluates whether proposedPlan violates them, filters by minProb, and sorts descending by probability.
+// evaluates whether proposedPlan violates them (chunked safely when exceeding model context),
+// filters by minProb, and sorts descending by probability.
 func (s *Service) EvaluatePlanViolations(ctx context.Context, proposedPlan, rawScope string, minProb float64) (string, int, []domain.PlanViolation, error) {
-	scA, scB := memory.ScopesFor(rawScope, true)
-	rules, err := s.loadEnforceableFacts(ctx, scA, scB)
-	if err != nil {
-		return scA, 0, nil, err
+	scA, _ := memory.ScopesFor(rawScope, true)
+	res := s.evaluateGuardrailPlanChunks(ctx, func(budget int) []diffPlanChunk {
+		return packPlainTextChunks(proposedPlan, budget)
+	}, NormalizedHookEvent{}, rawScope, minProb, false)
+	if res.VerifyErr != nil {
+		return scA, res.RuleCount, nil, res.VerifyErr
 	}
-	if len(rules) == 0 {
-		return scA, 0, nil, nil
-	}
-	ev := s.router.EvalForTask(ctx, domain.TaskVerify)
-	if ev == nil {
-		return scA, len(rules), nil, fmt.Errorf("no active evaluation engine configured")
-	}
-	evalStart := time.Now()
-	violations, err := ev.VerifyPlan(ctx, proposedPlan, rules)
-	s.router.RecordTelemetry(ctx, domain.TaskVerify, ev, evalStart, len(rules), err)
-	if err != nil {
-		return scA, len(rules), nil, err
-	}
-	return scA, len(rules), filterAndSortViolations(violations, minProb), nil
+	return scA, res.RuleCount, res.Blocking, nil
 }
 
 // VerifyPlan evaluates proposedPlan against active scope+global enforceable rules and records an audit log entry.

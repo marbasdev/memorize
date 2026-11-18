@@ -93,6 +93,14 @@ func newSchemaEvaluator(tr jsonSchemaTransport) domain.Evaluator {
 
 func (e *schemaEvaluator) Name() string { return e.tr.Name() }
 
+// InputTokenLimit forwards the underlying transport's verified context limit when available.
+func (e *schemaEvaluator) InputTokenLimit(ctx context.Context) int {
+	if p, ok := e.tr.(domain.ContextWindowProvider); ok {
+		return p.InputTokenLimit(ctx)
+	}
+	return 0
+}
+
 func (e *schemaEvaluator) ScoreRelevance(ctx context.Context, currentTask string, facts []domain.Fact) ([]domain.ScoredFact, error) {
 	if len(facts) == 0 {
 		return nil, nil
@@ -524,6 +532,20 @@ Active Memories:
 	return out, nil
 }
 
+func commitPromptLangRule(lang string) string {
+	if strings.EqualFold(strings.TrimSpace(lang), "ko") {
+		return "Write summary in concise Korean."
+	}
+	return "Keep the original language (or concise English if mixed)."
+}
+
+func appendCommitBriefLines(sb *strings.Builder, commits []domain.GitCommitBrief) {
+	for _, c := range commits {
+		files := strings.Join(c.Files, ", ")
+		fmt.Fprintf(sb, "- [%s] (%s) %s | files: %s\n", c.SHA, c.Date, c.Subject, files)
+	}
+}
+
 // SummarizeCommitProgress categorizes incremental commits strictly for the separated project_progress table
 // (human work-progress sync; never stored in memories or lifecycle hooks).
 func (e *schemaEvaluator) SummarizeCommitProgress(ctx context.Context, scope, lang string, commits []domain.GitCommitBrief) ([]domain.CommitProgressItem, error) {
@@ -531,21 +553,14 @@ func (e *schemaEvaluator) SummarizeCommitProgress(ctx context.Context, scope, la
 		return nil, nil
 	}
 	presets := domain.PresetCategoriesFromContext(ctx)
-	langRule := "Keep the original language (or concise English if mixed)."
-	if strings.EqualFold(strings.TrimSpace(lang), "ko") {
-		langRule = "Write summary in concise Korean."
-	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `Scope: %s
 Preset Taxonomy (category -> sub_categories): %s
 Map each incremental change into a human-friendly work stream "track" (e.g. a concise feature/module topic in the requested language so related commits share the same track name), a category/sub_category, and a clear human-readable progress summary.
 Language: %s
 Changes:
-`, scope, presets, langRule)
-	for _, c := range commits {
-		files := strings.Join(c.Files, ", ")
-		fmt.Fprintf(&sb, "- [%s] (%s) %s | files: %s\n", c.SHA, c.Date, c.Subject, files)
-	}
+`, scope, presets, commitPromptLangRule(lang))
+	appendCommitBriefLines(&sb, commits)
 
 	d := e.tr.Dialect()
 	itemSchema := d.obj(map[string]any{
@@ -566,4 +581,47 @@ Changes:
 		return nil, err
 	}
 	return parsed.Items, nil
+}
+
+// SummarizeCommitMilestones synthesizes multiple pending Git commits into 1-4 high-level work milestones
+// rather than echoing every commit line individually.
+func (e *schemaEvaluator) SummarizeCommitMilestones(ctx context.Context, scope, lang string, commits []domain.GitCommitBrief) ([]domain.GitMilestoneSummary, error) {
+	if len(commits) == 0 {
+		return nil, nil
+	}
+	presets := domain.PresetCategoriesFromContext(ctx)
+	var sb strings.Builder
+	fmt.Fprintf(&sb, `Scope: %s
+Preset Taxonomy (category -> sub_categories): %s
+Synthesize these %d Git commits into 1 to 4 cohesive, outcome-oriented work milestones (do NOT list every commit 1-by-1 like a git log).
+Rules:
+1. Group related commits by shared feature, module, or work stream into one milestone.
+2. Write "track" as a short work-stream name and "summary" as one crisp sentence (<= 140 chars) describing the combined accomplishment (NOT a "commit1 · commit2 · commit3" chain).
+3. Include every commit SHA from Changes in "commit_shas" of its milestone, and set "date" to the latest commit date (YYYY-MM-DD) in that group.
+4. Language: %s
+
+Changes:
+`, scope, presets, len(commits), commitPromptLangRule(lang))
+	appendCommitBriefLines(&sb, commits)
+
+	d := e.tr.Dialect()
+	itemSchema := d.obj(map[string]any{
+		"track":        map[string]any{"type": d.t("string")},
+		"category":     map[string]any{"type": d.t("string")},
+		"sub_category": map[string]any{"type": d.t("string")},
+		"date":         map[string]any{"type": d.t("string")},
+		"summary":      map[string]any{"type": d.t("string")},
+		"commit_shas":  map[string]any{"type": d.t("array"), "items": map[string]any{"type": d.t("string")}},
+	}, []string{"track", "category", "sub_category", "date", "summary", "commit_shas"})
+	schema := d.obj(map[string]any{
+		"milestones": map[string]any{"type": d.t("array"), "items": itemSchema},
+	}, []string{"milestones"})
+
+	var parsed struct {
+		Milestones []domain.GitMilestoneSummary `json:"milestones"`
+	}
+	if _, err := e.tr.CallJSON(ctx, sb.String(), schema, &parsed); err != nil {
+		return nil, err
+	}
+	return parsed.Milestones, nil
 }
