@@ -12,7 +12,7 @@ var streamBootID = time.Now().UnixNano()
 
 func registerRetentionAPIRoutes(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("/api/events", func(w http.ResponseWriter, r *http.Request) {
-		if !thttp.IsAllowedLocalOrigin(r) {
+		if !thttp.IsAllowedOrigin(r, d.ServerMode) {
 			thttp.WriteJSON(w, http.StatusForbidden, map[string]any{"error": "cross-origin request blocked"})
 			return
 		}
@@ -50,7 +50,7 @@ func registerRetentionAPIRoutes(mux *http.ServeMux, d Deps) {
 	})
 
 	mux.HandleFunc("/api/retention", func(w http.ResponseWriter, r *http.Request) {
-		if !thttp.IsAllowedLocalOrigin(r) {
+		if !thttp.IsAllowedOrigin(r, d.ServerMode) {
 			thttp.WriteJSON(w, http.StatusForbidden, map[string]any{"error": "cross-origin request blocked"})
 			return
 		}
@@ -58,7 +58,7 @@ func registerRetentionAPIRoutes(mux *http.ServeMux, d Deps) {
 			thttp.WriteJSON(w, http.StatusOK, d.Progress.GetRetentionPolicy(r.Context()))
 			return
 		}
-		thttp.PostJSON(func(w http.ResponseWriter, r *http.Request) {
+		thttp.PostJSONMode(d.ServerMode, requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 			var req struct {
 				ProgressDays            *int  `json:"progress_days"`
 				GuardrailDays           *int  `json:"guardrail_days"`
@@ -96,10 +96,10 @@ func registerRetentionAPIRoutes(mux *http.ServeMux, d Deps) {
 				"deleted_progress":  deletedProg,
 				"deleted_guardrail": deletedGr,
 			})
-		})(w, r)
+		}))(w, r)
 	})
 
-	mux.HandleFunc("/api/progress/cleanup", thttp.PostJSON(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/progress/cleanup", thttp.PostJSONMode(d.ServerMode, requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Scope         string `json:"scope"`
 			OlderThanDays *int   `json:"older_than_days"`
@@ -121,9 +121,9 @@ func registerRetentionAPIRoutes(mux *http.ServeMux, d Deps) {
 			"scope":           req.Scope,
 			"older_than_days": days,
 		})
-	}))
+	})))
 
-	mux.HandleFunc("/api/guardrail-logs/cleanup", thttp.PostJSON(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/guardrail-logs/cleanup", thttp.PostJSONMode(d.ServerMode, requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Scope          string `json:"scope"`
 			OlderThanDays  *int   `json:"older_than_days"`
@@ -147,5 +147,5 @@ func registerRetentionAPIRoutes(mux *http.ServeMux, d Deps) {
 			"older_than_days": days,
 			"include_blocked": req.IncludeBlocked,
 		})
-	}))
+	})))
 }

@@ -35,10 +35,11 @@ type daemonLifecycle struct {
 	absModels string
 	logPath   string
 
-	boundAddr string
-	boundHost string
-	boundPort int
-	startedAt time.Time
+	boundAddr  string
+	boundHost  string
+	boundPort  int
+	serverMode bool
+	startedAt  time.Time
 
 	srv             *http.Server
 	closeOnce       sync.Once
@@ -249,8 +250,7 @@ func (d *daemonLifecycle) triggerReexecAsync(bin, addr string, delay time.Durati
 }
 
 func (d *daemonLifecycle) dashboardHooks() thttp.DashboardHooks {
-	return thttp.DashboardHooks{
-		YieldFn:    d.close,
+	hooks := thttp.DashboardHooks{
 		BinMtimeFn: currentBinaryModTime,
 		DaemonStatusFn: func() thttp.DaemonPortState {
 			st := d.buildStatus()
@@ -263,7 +263,10 @@ func (d *daemonLifecycle) dashboardHooks() thttp.DashboardHooks {
 				Fallback:       st.DaemonFallback,
 			}
 		},
-		ApplyDaemonPortFn: func(ctx context.Context, dp, gp int) (thttp.DaemonPortApplyResult, error) {
+	}
+	if !d.serverMode {
+		hooks.YieldFn = d.close
+		hooks.ApplyDaemonPortFn = func(ctx context.Context, dp, gp int) (thttp.DaemonPortApplyResult, error) {
 			res, err := d.applyPorts(ctx, dp, gp)
 			if err != nil {
 				return thttp.DaemonPortApplyResult{}, err
@@ -279,12 +282,15 @@ func (d *daemonLifecycle) dashboardHooks() thttp.DashboardHooks {
 				GGUFFallback:     res.GGUFFallback,
 				GGUFRunning:      res.GGUFRunning,
 			}, nil
-		},
+		}
 	}
+	return hooks
 }
 
 func (d *daemonLifecycle) buildRootHandler() http.Handler {
 	dashHandler := dashboard.NewHandler(dashboard.Deps{
+		ServerMode: d.serverMode,
+		DB:         d.bundle.mem.DB(),
 		Memory:     d.bundle.mem,
 		Progress:   d.bundle.prog,
 		Guardrail:  d.bundle.gr,
@@ -292,21 +298,14 @@ func (d *daemonLifecycle) buildRootHandler() http.Handler {
 		LocalModel: d.bundle.mgr,
 		Hooks:      d.dashboardHooks(),
 	})
-	return thttp.NewDaemonMux(thttp.DaemonDeps{
+	deps := thttp.DaemonDeps{
+		ServerMode:    d.serverMode,
+		DB:            d.bundle.mem.DB(),
 		Memory:        d.bundle.mem,
 		Guardrail:     d.bundle.gr,
 		MCPServer:     buildMCPServer(d.version, d.bundle),
 		Dashboard:     dashHandler,
 		BuildStatusFn: d.buildStatus,
-		ApplyPortsFn:  d.applyPorts,
-		RestartFn: func() (string, error) {
-			nextBin, _ := NewestWatchedBinary(0)
-			if nextBin == "" {
-				nextBin, _ = os.Executable()
-			}
-			d.triggerReexecAsync(nextBin, d.boundAddr, 35*time.Millisecond)
-			return nextBin, nil
-		},
 		StopFn: func() {
 			go func() {
 				time.Sleep(35 * time.Millisecond)
@@ -318,7 +317,19 @@ func (d *daemonLifecycle) buildRootHandler() http.Handler {
 				_ = d.close()
 			}()
 		},
-	})
+	}
+	if !d.serverMode {
+		deps.ApplyPortsFn = d.applyPorts
+		deps.RestartFn = func() (string, error) {
+			nextBin, _ := NewestWatchedBinary(0)
+			if nextBin == "" {
+				nextBin, _ = os.Executable()
+			}
+			d.triggerReexecAsync(nextBin, d.boundAddr, 35*time.Millisecond)
+			return nextBin, nil
+		}
+	}
+	return thttp.NewDaemonMux(deps)
 }
 
 func (d *daemonLifecycle) watchBinaryReload(startMtime int64) {
@@ -345,12 +356,16 @@ func (d *daemonLifecycle) serve(ln net.Listener) int {
 
 	d.srv.Handler = d.buildRootHandler()
 	_, startMtime := NewestWatchedBinary(0)
-	if runtime.GOOS != "windows" {
+	if !d.serverMode && runtime.GOOS != "windows" {
 		go d.watchBinaryReload(startMtime)
 	}
 
-	log.Printf("memorize daemon v%s listening on http://%s (pid=%d, db=%s, provider=%s)",
-		d.version, d.boundAddr, os.Getpid(), d.absDB, d.bundle.mem.ProviderName())
+	kind := "daemon"
+	if d.serverMode {
+		kind = "team server"
+	}
+	log.Printf("memorize %s v%s listening on http://%s (pid=%d, db=%s, provider=%s)",
+		kind, d.version, d.boundAddr, os.Getpid(), d.absDB, d.bundle.mem.ProviderName())
 
 	if err := d.srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Printf("memorize daemon serve error: %v", err)

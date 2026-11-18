@@ -172,6 +172,8 @@ func buildMemoriesView(ctx context.Context, d Deps, lang string, q url.Values, o
 	return ssrMemoriesData{
 		Lang:             lang,
 		OOB:              oob,
+		ServerMode:       domain.IsServerMode(ctx),
+		CanAdmin:         domain.CanAccessAdminFeatures(ctx),
 		Stats:            stats,
 		GeneralCount:     max(0, stats.ActiveCount-stats.PinnedCount),
 		Histogram:        buildHistogramData(stats.ConfidenceBins, oob),

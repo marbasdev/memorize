@@ -12,7 +12,9 @@
   <header class="topbar">
     <div class="brand-row">
       <h1>memorize</h1>
-      <button type="button" class="badge b-muted" id="daemonBadge" style="display:none;font-family:var(--mono);cursor:pointer;border:1px solid var(--border);" hx-get="/ui/modal/ports" hx-target="#modalHost" hx-swap="innerHTML" title="{{t .Lang "ports_title"}}"></button>
+      {{if .CanAdmin}}
+        <button type="button" class="badge b-muted" id="daemonBadge" style="display:none;font-family:var(--mono);cursor:pointer;border:1px solid var(--border);" hx-get="/ui/modal/ports" hx-target="#modalHost" hx-swap="innerHTML" title="{{t .Lang "ports_title"}}"></button>
+      {{end}}
     </div>
 
     <div class="nav-tabs" role="tablist" aria-label="Console Sections">
@@ -30,17 +32,26 @@
         :aria-selected="activeTab === 'guardrails'"
         hx-get="/ui/guardrails" hx-include="#guardrailFilterForm" hx-target="#guardrailsSection" hx-swap="innerHTML"
         @click="switchTab('guardrails')">{{t .Lang "tab_guardrails"}}</button>
-      <button type="button" class="nav-tab" role="tab" id="tabBtn-engines"
-        :aria-selected="activeTab === 'engines'"
-        hx-get="/ui/engines" hx-target="#enginesSection" hx-swap="innerHTML"
-        @click="switchTab('engines')">{{t .Lang "tab_engines"}}</button>
-      <button type="button" class="nav-tab" role="tab" id="tabBtn-calibrate"
-        :aria-selected="activeTab === 'calibrate'"
-        hx-get="/ui/calibrate" hx-include="#calHistScope" hx-target="#calibrateSection" hx-swap="innerHTML"
-        @click="switchTab('calibrate')">{{t .Lang "tab_calibrate"}}</button>
+      {{if .CanAdmin}}
+        <button type="button" class="nav-tab" role="tab" id="tabBtn-engines"
+          :aria-selected="activeTab === 'engines'"
+          hx-get="/ui/engines" hx-target="#enginesSection" hx-swap="innerHTML"
+          @click="switchTab('engines')">{{t .Lang "tab_engines"}}</button>
+        <button type="button" class="nav-tab" role="tab" id="tabBtn-calibrate"
+          :aria-selected="activeTab === 'calibrate'"
+          hx-get="/ui/calibrate" hx-include="#calHistScope" hx-target="#calibrateSection" hx-swap="innerHTML"
+          @click="switchTab('calibrate')">{{t .Lang "tab_calibrate"}}</button>
+      {{end}}
     </div>
 
-    <div style="display:flex;gap:0.4rem;align-items:center;">
+    <div style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;">
+      {{if .ServerMode}}
+        <span class="badge b-accent" id="authPrincipalBadge" title="{{.AuthRole}}">@{{.AuthAccount}} · {{.AuthRole}}</span>
+        {{if .CanAdmin}}
+          <button type="button" class="btn btn-sm" id="btnOpenUsers"
+            hx-get="/ui/modal/users" hx-target="#modalHost" hx-swap="innerHTML">{{t .Lang "btn_users"}}</button>
+        {{end}}
+      {{end}}
       <select id="langSelect" name="lang" aria-label="Language"
         style="padding:0.24rem 0.5rem;font-size:0.75rem;background:var(--elevated);font-weight:600;cursor:pointer;"
         hx-post="/ui/lang" hx-trigger="change" hx-swap="none">
@@ -48,6 +59,9 @@
         <option value="ko" {{if eq .Lang "ko"}}selected{{end}}>한국어</option>
       </select>
       <button type="button" class="btn btn-sm" id="btnTheme" @click="toggleTheme()">{{t .Lang "btn_theme"}}</button>
+      {{if .ServerMode}}
+        <button type="button" class="btn btn-sm" id="btnLogout" hx-post="/logout" hx-swap="none">{{t .Lang "btn_logout"}}</button>
+      {{end}}
     </div>
   </header>
 
@@ -83,6 +97,7 @@
   </section>
 
   <!-- ==================== TAB 4: ENGINES ==================== -->
+  {{if .CanAdmin}}
   <section class="tab-panel" :class="{ 'active': activeTab === 'engines' }" id="panel-engines" role="tabpanel">
     <div class="card" id="enginesSection" style="display:flex;flex-direction:column;gap:0.9rem;"
       hx-get="/ui/engines" hx-trigger="memorizeRefreshEngines from:body" hx-target="#enginesSection" hx-swap="innerHTML">
@@ -96,6 +111,7 @@
       {{template "calibrate_section" .Calibrate}}
     </div>
   </section>
+  {{end}}
 </div>
 
 <div id="modalHost"></div>

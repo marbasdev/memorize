@@ -77,6 +77,18 @@ func formatViolationDetails(violations []domain.PlanViolation) ([]int64, string)
 // RecordGuardrailLog appends an audit entry for a guardrail or plan verification evaluation.
 func (s *Service) RecordGuardrailLog(ctx context.Context, inp domain.GuardrailLogInput) (int64, error) {
 	sc := domain.NormalizeScope(inp.Scope)
+	acc := domain.NormalizeAccount(inp.Account)
+	if domain.IsServerMode(ctx) || acc == "" {
+		if s.mem != nil {
+			acc = s.mem.CurrentAccount(ctx)
+		} else {
+			acc = domain.EffectivePrincipalAccount(ctx)
+		}
+	}
+	privInt := 0
+	if inp.IsPrivate || sc == "personal" {
+		privInt = 1
+	}
 	src := strings.TrimSpace(inp.Source)
 	if src == "" {
 		src = "guardrail"
@@ -104,9 +116,9 @@ func (s *Service) RecordGuardrailLog(ctx context.Context, inp domain.GuardrailLo
 	}
 
 	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO guardrail_logs (scope, source, tool_name, verdict, blocked, rule_count, violated_ids, plan_snippet, details, elapsed_ms)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		sc, src, toolName, verdict, blockedInt, ruleCnt, idStr, planStr, detailStr, elapsedMs)
+		INSERT INTO guardrail_logs (scope, account, is_private, source, tool_name, verdict, blocked, rule_count, violated_ids, plan_snippet, details, elapsed_ms)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		sc, acc, privInt, src, toolName, verdict, blockedInt, ruleCnt, idStr, planStr, detailStr, elapsedMs)
 	if err != nil {
 		return 0, err
 	}
@@ -119,6 +131,16 @@ func (s *Service) RecordGuardrailLog(ctx context.Context, inp domain.GuardrailLo
 	return newID, nil
 }
 
+func guardrailVisibilitySQL(ctx context.Context, curAcc string) (string, []any) {
+	if !domain.IsServerMode(ctx) {
+		return "1 = 1", nil
+	}
+	if !domain.CanAccessAdminFeatures(ctx) {
+		return `account = ?`, []any{curAcc}
+	}
+	return `(is_private = 0 OR account = ?)`, []any{curAcc}
+}
+
 func buildGuardrailWhereClause(q domain.GuardrailLogQuery) (string, []any) {
 	var conds []string
 	var args []any
@@ -126,6 +148,10 @@ func buildGuardrailWhereClause(q domain.GuardrailLogQuery) (string, []any) {
 	if sc := strings.TrimSpace(q.Scope); sc != "" {
 		conds = append(conds, `scope = ?`)
 		args = append(args, sc)
+	}
+	if acc := strings.TrimSpace(q.Account); acc != "" {
+		conds = append(conds, `LOWER(COALESCE(account, '')) = LOWER(?)`)
+		args = append(args, acc)
 	}
 	switch strings.ToLower(strings.TrimSpace(q.State)) {
 	case "blocked", "violation", "denied":
@@ -166,19 +192,29 @@ func buildGuardrailWhereClause(q domain.GuardrailLogQuery) (string, []any) {
 
 // QueryGuardrailLogsPage performs SQLite server-side filtering and LIMIT/OFFSET pagination over guardrail_logs.
 func (s *Service) QueryGuardrailLogsPage(ctx context.Context, q domain.GuardrailLogQuery) (domain.GuardrailLogPage, error) {
+	curAcc := ""
+	if s.mem != nil {
+		curAcc = s.mem.CurrentAccount(ctx)
+	} else {
+		curAcc = domain.EffectivePrincipalAccount(ctx)
+	}
+	visSQL, visArgs := guardrailVisibilitySQL(ctx, curAcc)
 	sc := strings.TrimSpace(q.Scope)
 	var totalCnt, blockedCnt, passCnt int
+	totArgs := append([]any{sc, sc}, visArgs...)
 	if err := s.db.QueryRowContext(ctx, `
 		SELECT
 			COUNT(*),
 			COALESCE(SUM(CASE WHEN blocked = 1 THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN blocked = 0 THEN 1 ELSE 0 END), 0)
 		FROM guardrail_logs
-		WHERE (? = '' OR scope = ?)`, sc, sc).Scan(&totalCnt, &blockedCnt, &passCnt); err != nil {
+		WHERE (? = '' OR scope = ?) AND `+visSQL, totArgs...).Scan(&totalCnt, &blockedCnt, &passCnt); err != nil {
 		return domain.GuardrailLogPage{}, err
 	}
 
 	whereSQL, whereArgs := buildGuardrailWhereClause(q)
+	whereSQL = `(` + whereSQL + `) AND ` + visSQL
+	whereArgs = append(whereArgs, visArgs...)
 	var filteredCnt int
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM guardrail_logs WHERE `+whereSQL, whereArgs...).Scan(&filteredCnt); err != nil {
 		return domain.GuardrailLogPage{}, err
@@ -220,7 +256,7 @@ func (s *Service) QueryGuardrailLogsPage(ctx context.Context, q domain.Guardrail
 
 	selArgs := append(append([]any{}, whereArgs...), pageSize, offset)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, scope, source, COALESCE(tool_name, ''), verdict, blocked, rule_count,
+		SELECT id, scope, COALESCE(account, ''), COALESCE(is_private, 0), source, COALESCE(tool_name, ''), verdict, blocked, rule_count,
 		       COALESCE(violated_ids, ''), COALESCE(plan_snippet, ''), COALESCE(details, ''),
 		       COALESCE(elapsed_ms, 0), COALESCE(created_at, '')
 		FROM guardrail_logs
@@ -234,12 +270,13 @@ func (s *Service) QueryGuardrailLogsPage(ctx context.Context, q domain.Guardrail
 
 	for rows.Next() {
 		var r domain.GuardrailLogRecord
-		var blk int
+		var blk, privInt int
 		var rawIDs string
-		if err := rows.Scan(&r.ID, &r.Scope, &r.Source, &r.ToolName, &r.Verdict, &blk, &r.RuleCount, &rawIDs, &r.PlanSnippet, &r.Details, &r.ElapsedMs, &r.CreatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.Scope, &r.Account, &privInt, &r.Source, &r.ToolName, &r.Verdict, &blk, &r.RuleCount, &rawIDs, &r.PlanSnippet, &r.Details, &r.ElapsedMs, &r.CreatedAt); err != nil {
 			return domain.GuardrailLogPage{}, err
 		}
 		r.Blocked = blk != 0
+		r.IsPrivate = privInt != 0
 		r.ViolatedIDs = parseGuardrailIDs(rawIDs)
 		out.Records = append(out.Records, r)
 	}

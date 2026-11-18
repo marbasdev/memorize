@@ -3,6 +3,7 @@ package http
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -20,6 +21,8 @@ import (
 
 // DaemonDeps wires unified daemon HTTP routes to MCP, Guardrail, Dashboard, and process control callbacks.
 type DaemonDeps struct {
+	ServerMode    bool
+	DB            *sql.DB
 	Memory        *memory.Service
 	Guardrail     *guardrail.Service
 	MCPServer     *server.MCPServer
@@ -28,6 +31,30 @@ type DaemonDeps struct {
 	ApplyPortsFn  func(ctx context.Context, daemonPort, ggufPort int) (PortApplyResponse, error)
 	RestartFn     func() (string, error)
 	StopFn        func()
+}
+
+func resolveDaemonAuth(deps DaemonDeps, r *http.Request) (domain.AuthPrincipal, bool) {
+	if !deps.ServerMode {
+		return domain.AuthPrincipal{ServerMode: false}, true
+	}
+	if deps.DB == nil {
+		return domain.AuthPrincipal{}, false
+	}
+	return AuthenticateHTTPRequest(deps.DB, r)
+}
+
+func attachAuthContext(ctx context.Context, deps DaemonDeps, p domain.AuthPrincipal, fallbackAccount string) context.Context {
+	if deps.ServerMode {
+		ctx = domain.WithAuthPrincipal(ctx, p)
+		if p.Account != "" {
+			ctx = domain.WithAccount(ctx, p.Account)
+		}
+		return ctx
+	}
+	if acc := strings.TrimSpace(fallbackAccount); acc != "" {
+		ctx = domain.WithAccount(ctx, acc)
+	}
+	return ctx
 }
 
 // NewDaemonMux constructs the root HTTP handler combining /mcp, /api/daemon/*, and the dashboard handler.
@@ -41,8 +68,28 @@ func NewDaemonMux(deps DaemonDeps) http.Handler {
 		pool = transportmcp.NewSessionPool(deps.MCPServer)
 	}
 
+	requireDaemonAdmin := func(w http.ResponseWriter, r *http.Request) bool {
+		if !IsJSONPost(r, deps.ServerMode) {
+			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+			return false
+		}
+		if !deps.ServerMode {
+			return true
+		}
+		p, ok := resolveDaemonAuth(deps, r)
+		if !ok {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return false
+		}
+		if p.Role != domain.RoleAdmin {
+			http.Error(w, `{"error":"admin role required"}`, http.StatusForbidden)
+			return false
+		}
+		return true
+	}
+
 	mux.Handle("/mcp", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !IsAllowedLocalOrigin(r) {
+		if !IsAllowedOrigin(r, deps.ServerMode) {
 			http.Error(w, `{"error":"non-local request blocked"}`, http.StatusForbidden)
 			return
 		}
@@ -56,28 +103,51 @@ func NewDaemonMux(deps DaemonDeps) http.Handler {
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 			return
 		}
+		p, ok := resolveDaemonAuth(deps, r)
+		if !ok {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
 		if streamHTTP == nil {
 			http.Error(w, `{"error":"mcp server unavailable"}`, http.StatusServiceUnavailable)
 			return
 		}
-		streamHTTP.ServeHTTP(w, r)
+		reqCtx := attachAuthContext(r.Context(), deps, p, r.Header.Get("X-Memorize-Account"))
+		streamHTTP.ServeHTTP(w, r.WithContext(reqCtx))
 	}))
 
 	mux.HandleFunc("/api/daemon/status", func(w http.ResponseWriter, r *http.Request) {
-		if !IsAllowedLocalOrigin(r) {
+		if !IsAllowedOrigin(r, deps.ServerMode) {
 			http.Error(w, `{"error":"non-local request blocked"}`, http.StatusForbidden)
+			return
+		}
+		p, ok := resolveDaemonAuth(deps, r)
+		if !ok {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
 		var st DaemonStatus
 		if deps.BuildStatusFn != nil {
 			st = deps.BuildStatusFn()
 		}
+		if deps.ServerMode {
+			st.ServerMode = true
+			st.Account = p.Account
+			st.Role = p.Role
+			if p.Role != domain.RoleAdmin {
+				st.PID = 0
+				st.ListenAddr = ""
+				st.DBPath = ""
+				st.ModelsDir = ""
+				st.LogPath = ""
+				st.GGUFEndpoint = ""
+			}
+		}
 		WriteJSON(w, http.StatusOK, st)
 	})
 
 	mux.HandleFunc("/api/daemon/port", func(w http.ResponseWriter, r *http.Request) {
-		if !IsLocalJSONPost(r) {
-			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+		if !requireDaemonAdmin(w, r) {
 			return
 		}
 		var req PortApplyRequest
@@ -102,8 +172,7 @@ func NewDaemonMux(deps DaemonDeps) http.Handler {
 	})
 
 	mux.HandleFunc("/api/daemon/restart", func(w http.ResponseWriter, r *http.Request) {
-		if !IsLocalJSONPost(r) {
-			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+		if !requireDaemonAdmin(w, r) {
 			return
 		}
 		var nextBin string
@@ -123,8 +192,7 @@ func NewDaemonMux(deps DaemonDeps) http.Handler {
 	})
 
 	mux.HandleFunc("/api/daemon/stop", func(w http.ResponseWriter, r *http.Request) {
-		if !IsLocalJSONPost(r) {
-			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+		if !requireDaemonAdmin(w, r) {
 			return
 		}
 		WriteJSON(w, http.StatusOK, map[string]any{
@@ -137,8 +205,13 @@ func NewDaemonMux(deps DaemonDeps) http.Handler {
 	})
 
 	mux.HandleFunc("/api/daemon/mcp", func(w http.ResponseWriter, r *http.Request) {
-		if !IsLocalJSONPost(r) {
+		if !IsJSONPost(r, deps.ServerMode) {
 			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+			return
+		}
+		p, ok := resolveDaemonAuth(deps, r)
+		if !ok {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
 		if deps.MCPServer == nil || pool == nil {
@@ -162,16 +235,19 @@ func NewDaemonMux(deps DaemonDeps) http.Handler {
 				}
 			}
 		}
-		ctx := r.Context()
-		if acc := strings.TrimSpace(r.Header.Get("X-Memorize-Account")); acc != "" {
-			ctx = domain.WithAccount(ctx, acc)
+		var scopeHints map[string]string
+		if rawHints := strings.TrimSpace(r.Header.Get("X-Memorize-Scope-Hints")); rawHints != "" {
+			_ = json.Unmarshal([]byte(rawHints), &scopeHints)
 		}
+		ctx := attachAuthContext(r.Context(), deps, p, r.Header.Get("X-Memorize-Account"))
 		ctx = transportmcp.WithBridgeMeta(ctx, transportmcp.BridgeReqMeta{
-			SessionID: sid,
-			Cwd:       strings.TrimSpace(r.Header.Get("X-Memorize-Cwd")),
-			Roots:     roots,
+			SessionID:  sid,
+			Cwd:        strings.TrimSpace(r.Header.Get("X-Memorize-Cwd")),
+			Roots:      roots,
+			ScopeHints: scopeHints,
 		})
-		ctx = deps.MCPServer.WithContext(ctx, pool.GetOrCreate(sid))
+		scopedSID := domain.ScopedSessionID(ctx, sid)
+		ctx = deps.MCPServer.WithContext(ctx, pool.GetOrCreate(scopedSID))
 
 		rpcResp := deps.MCPServer.HandleMessage(ctx, json.RawMessage(rawMsg))
 		w.Header().Set("Content-Type", "application/json")
@@ -183,22 +259,21 @@ func NewDaemonMux(deps DaemonDeps) http.Handler {
 	})
 
 	mux.HandleFunc("/api/daemon/hook", func(w http.ResponseWriter, r *http.Request) {
-		if !IsLocalJSONPost(r) {
+		if !IsJSONPost(r, deps.ServerMode) {
 			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+			return
+		}
+		p, ok := resolveDaemonAuth(deps, r)
+		if !ok {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
 		if deps.Guardrail == nil {
 			http.Error(w, `{"error":"guardrail unavailable"}`, http.StatusServiceUnavailable)
 			return
 		}
-		var req struct {
-			Mode      string `json:"mode"`
-			Stdin     string `json:"stdin"`
-			Cwd       string `json:"cwd"`
-			Account   string `json:"account"`
-			TimeoutMs int64  `json:"timeout_ms,omitempty"`
-		}
-		if err := json.NewDecoder(io.LimitReader(r.Body, 2<<20)).Decode(&req); err != nil {
+		var req DaemonHookRequest
+		if err := json.NewDecoder(io.LimitReader(r.Body, 4<<20)).Decode(&req); err != nil {
 			http.Error(w, `{"error":"invalid hook json"}`, http.StatusBadRequest)
 			return
 		}
@@ -208,10 +283,15 @@ func NewDaemonMux(deps DaemonDeps) http.Handler {
 			ctx, cancel = context.WithTimeout(ctx, time.Duration(req.TimeoutMs)*time.Millisecond)
 		}
 		defer cancel()
-		if strings.TrimSpace(req.Account) != "" {
-			ctx = domain.WithAccount(ctx, req.Account)
+		ctx = attachAuthContext(ctx, deps, p, req.Account)
+		if req.ClientCtx != nil {
+			ctx = domain.WithClientHookContext(ctx, req.ClientCtx)
 		}
-		out, code, _ := deps.Guardrail.ExecuteHook(ctx, req.Mode, []byte(req.Stdin), req.Cwd)
+		fallbackCwd := req.Cwd
+		if deps.ServerMode {
+			fallbackCwd = ""
+		}
+		out, code, _ := deps.Guardrail.ExecuteHook(ctx, req.Mode, []byte(req.Stdin), fallbackCwd)
 		WriteJSON(w, http.StatusOK, map[string]any{
 			"output":    out,
 			"exit_code": code,

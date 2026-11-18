@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"database/sql"
 	"embed"
 	"net/http"
 	"net/url"
@@ -25,6 +26,8 @@ var embeddedFS embed.FS
 
 // Deps supplies the module services and optional daemon hooks required to serve the dashboard UI.
 type Deps struct {
+	ServerMode bool
+	DB         *sql.DB
 	Memory     *memory.Service
 	Progress   *progress.Service
 	Guardrail  *guardrail.Service
@@ -39,6 +42,9 @@ func NewHandler(d Deps) http.Handler {
 		d.LocalModel = localmodel.NewManager("")
 	}
 	if d.Memory != nil {
+		if d.DB == nil {
+			d.DB = d.Memory.DB()
+		}
 		if d.Progress == nil {
 			d.Progress = progress.New(d.Memory)
 		}
@@ -50,12 +56,13 @@ func NewHandler(d Deps) http.Handler {
 		}
 	}
 	mux := http.NewServeMux()
+	registerSSRAuthRoutes(mux, d)
 	registerSSRRoutes(mux, d)
-	registerAssetRoute(mux, d.Hooks)
-	registerHandoverAPIRoutes(mux, d.Hooks)
-	registerRecordsExportRoute(mux, d.Memory)
+	registerAssetRoute(mux, d)
+	registerHandoverAPIRoutes(mux, d)
+	registerRecordsExportRoute(mux, d)
 	registerRetentionAPIRoutes(mux, d)
-	return thttp.SecurityHeadersMiddleware(mux)
+	return thttp.SecurityHeadersMiddleware(dashboardAuthMiddleware(d, mux))
 }
 
 func isDevHotReloadEnabled() bool {
@@ -126,9 +133,9 @@ func parseRecordQuery(q url.Values) domain.RecordQuery {
 	}
 }
 
-func registerAssetRoute(mux *http.ServeMux, hooks thttp.DashboardHooks) {
+func registerAssetRoute(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("/assets/", func(w http.ResponseWriter, r *http.Request) {
-		if !thttp.IsAllowedLocalOrigin(r) {
+		if !thttp.IsAllowedOrigin(r, d.ServerMode) {
 			thttp.WriteJSON(w, http.StatusForbidden, map[string]any{"error": "non-local host blocked"})
 			return
 		}
@@ -143,7 +150,7 @@ func registerAssetRoute(mux *http.ServeMux, hooks thttp.DashboardHooks) {
 			http.NotFound(w, r)
 			return
 		}
-		data, ok := resolveLiveAsset("assets/"+name, hooks)
+		data, ok := resolveLiveAsset("assets/"+name, d.Hooks)
 		if !ok {
 			http.NotFound(w, r)
 			return
@@ -154,42 +161,42 @@ func registerAssetRoute(mux *http.ServeMux, hooks thttp.DashboardHooks) {
 	})
 }
 
-func registerHandoverAPIRoutes(mux *http.ServeMux, hooks thttp.DashboardHooks) {
-	mux.HandleFunc("/api/dashboard/meta", func(w http.ResponseWriter, r *http.Request) {
-		if !thttp.IsAllowedLocalOrigin(r) {
+func registerHandoverAPIRoutes(mux *http.ServeMux, d Deps) {
+	mux.HandleFunc("/api/dashboard/meta", requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
+		if !thttp.IsAllowedOrigin(r, d.ServerMode) {
 			thttp.WriteJSON(w, http.StatusForbidden, map[string]any{"error": "cross-origin request blocked"})
 			return
 		}
 		thttp.WriteJSON(w, http.StatusOK, map[string]any{
 			"pid":       os.Getpid(),
-			"bin_mtime": currentBinModTime(hooks),
-			"can_yield": hooks.YieldFn != nil,
+			"bin_mtime": currentBinModTime(d.Hooks),
+			"can_yield": d.Hooks.YieldFn != nil,
 		})
-	})
+	}))
 
-	mux.HandleFunc("/api/dashboard/yield", thttp.PostJSON(func(w http.ResponseWriter, r *http.Request) {
-		if hooks.YieldFn == nil {
+	mux.HandleFunc("/api/dashboard/yield", thttp.PostJSONMode(d.ServerMode, requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
+		if d.Hooks.YieldFn == nil {
 			thttp.WriteJSON(w, http.StatusBadRequest, map[string]any{"error": "yield not supported on this handler"})
 			return
 		}
 		thttp.WriteJSON(w, http.StatusOK, map[string]any{"yielded": true, "pid": os.Getpid()})
 		go func() {
 			time.Sleep(25 * time.Millisecond)
-			_ = hooks.YieldFn()
+			_ = d.Hooks.YieldFn()
 		}()
-	}))
+	})))
 }
 
-func registerRecordsExportRoute(mux *http.ServeMux, mem *memory.Service) {
+func registerRecordsExportRoute(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("/api/records", func(w http.ResponseWriter, r *http.Request) {
-		if !thttp.IsAllowedLocalOrigin(r) {
+		if !thttp.IsAllowedOrigin(r, d.ServerMode) {
 			thttp.WriteJSON(w, http.StatusForbidden, map[string]any{"error": "cross-origin request blocked"})
 			return
 		}
 		ctx := r.Context()
 		rq := parseRecordQuery(r.URL.Query())
 		if r.URL.Query().Get("ids_only") == "1" {
-			ids, err := mem.QueryMatchingActiveIDs(ctx, rq, 5000)
+			ids, err := d.Memory.QueryMatchingActiveIDs(ctx, rq, 5000)
 			if err != nil {
 				thttp.WriteErr(w, http.StatusInternalServerError, err)
 				return
@@ -197,7 +204,7 @@ func registerRecordsExportRoute(mux *http.ServeMux, mem *memory.Service) {
 			thttp.WriteJSON(w, http.StatusOK, map[string]any{"ids": ids})
 			return
 		}
-		pageRes, err := mem.QueryRecordsPage(ctx, rq)
+		pageRes, err := d.Memory.QueryRecordsPage(ctx, rq)
 		if err != nil {
 			thttp.WriteErr(w, http.StatusInternalServerError, err)
 			return

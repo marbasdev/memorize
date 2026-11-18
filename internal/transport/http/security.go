@@ -35,10 +35,34 @@ func IsLoopbackHost(rawHost string) bool {
 
 // IsAllowedLocalOrigin blocks cross-site browser requests and non-loopback Host headers (DNS rebinding).
 func IsAllowedLocalOrigin(r *http.Request) bool {
+	return IsAllowedOrigin(r, false)
+}
+
+// IsAllowedOrigin verifies Host/Origin/Sec-Fetch-Site against either local loopback or team server mode.
+func IsAllowedOrigin(r *http.Request, serverMode bool) bool {
+	if r == nil {
+		return false
+	}
 	if strings.EqualFold(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")), "cross-site") {
 		return false
 	}
-	if !IsLoopbackHost(r.Host) {
+	if !serverMode {
+		if !IsLoopbackHost(r.Host) {
+			return false
+		}
+		orig := strings.TrimSpace(r.Header.Get("Origin"))
+		if orig == "" {
+			return true
+		}
+		u, err := url.Parse(orig)
+		if err != nil {
+			return false
+		}
+		host := strings.ToLower(u.Hostname())
+		return host == "127.0.0.1" || host == "localhost" || host == "::1"
+	}
+	hostHeader := strings.TrimSpace(r.Host)
+	if hostHeader == "" {
 		return false
 	}
 	orig := strings.TrimSpace(r.Header.Get("Origin"))
@@ -46,11 +70,47 @@ func IsAllowedLocalOrigin(r *http.Request) bool {
 		return true
 	}
 	u, err := url.Parse(orig)
-	if err != nil {
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return false
 	}
-	host := strings.ToLower(u.Hostname())
-	return host == "127.0.0.1" || host == "localhost" || host == "::1"
+	if strings.EqualFold(u.Host, hostHeader) {
+		return true
+	}
+	if xfh := strings.TrimSpace(r.Header.Get("X-Forwarded-Host")); xfh != "" {
+		first := strings.TrimSpace(strings.Split(xfh, ",")[0])
+		if first != "" && strings.EqualFold(u.Host, first) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsJSONPost verifies POST method, application/json Content-Type, and mode-aware Origin checks.
+func IsJSONPost(r *http.Request, serverMode bool) bool {
+	if r == nil || r.Method != http.MethodPost || !IsAllowedOrigin(r, serverMode) {
+		return false
+	}
+	ct := strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type")))
+	return strings.HasPrefix(ct, "application/json")
+}
+
+// PostJSONMode enforces POST + application/json + mode-aware Origin checks.
+func PostJSONMode(serverMode bool, fn http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !IsAllowedOrigin(r, serverMode) {
+			http.Error(w, "forbidden origin", http.StatusForbidden)
+			return
+		}
+		if !IsJSONPost(r, serverMode) {
+			http.Error(w, "unsupported media type", http.StatusUnsupportedMediaType)
+			return
+		}
+		fn(w, r)
+	}
 }
 
 // IsLocalJSONPost verifies loopback Host/Origin, POST method, and application/json Content-Type.

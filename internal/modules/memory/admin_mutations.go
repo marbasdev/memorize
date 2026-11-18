@@ -28,7 +28,7 @@ func (s *Service) clearSessionIDs(ids ...int64) {
 }
 
 func (s *Service) checkPersonalOwnership(ctx context.Context, id int64, recScope, recAccount string) error {
-	if domain.IsAdminContext(ctx) || recScope != "personal" {
+	if s.canBypassPersonal(ctx) || recScope != "personal" {
 		return nil
 	}
 	cur := s.CurrentAccount(ctx)
@@ -60,6 +60,9 @@ func (s *Service) ForgetMemories(ctx context.Context, ids []int64) (int64, error
 			if err := s.checkPersonalOwnership(ctx, id, sc, acc); err != nil {
 				return 0, err
 			}
+			if err := domain.CanModifyScope(ctx, sc); err != nil {
+				return 0, err
+			}
 		}
 	}
 	var total int64
@@ -83,7 +86,7 @@ func (s *Service) ForgetMemories(ctx context.Context, ids []int64) (int64, error
 	}
 	// Keep session_sent rows intact until each active session consumes a 1-time [REVOKED] notice
 	s.clearInMemorySessionIDs(ids...)
-	s.MarkAllTurnsMutated()
+	s.MarkAllTurnsMutatedCtx(ctx)
 	return total, nil
 }
 
@@ -95,6 +98,9 @@ func (s *Service) UndoMemory(ctx context.Context, id int64) (string, error) {
 		return "", fmt.Errorf("memory #%d not found", id)
 	}
 	if err := s.checkPersonalOwnership(ctx, id, recScope, recAcc); err != nil {
+		return "", err
+	}
+	if err := domain.CanModifyScope(ctx, recScope); err != nil {
 		return "", err
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT id FROM memories WHERE superseded_by = ?`, id)
@@ -135,7 +141,7 @@ func (s *Service) UndoMemory(ctx context.Context, id int64) (string, error) {
 	} else {
 		s.clearSessionIDs(id)
 	}
-	s.MarkAllTurnsMutated()
+	s.MarkAllTurnsMutatedCtx(ctx)
 	return msg, nil
 }
 
@@ -154,12 +160,18 @@ func (s *Service) UpdateMemoryFull(ctx context.Context, id int64, rawScope, cate
 	if err := s.checkPersonalOwnership(ctx, id, curScope, curAcc); err != nil {
 		return err
 	}
+	if err := domain.CanModifyScope(ctx, curScope); err != nil {
+		return err
+	}
 	scope := curScope
 	if strings.TrimSpace(rawScope) != "" {
 		scope = domain.NormalizeScope(rawScope)
 	}
+	if err := domain.CanModifyScope(ctx, scope); err != nil {
+		return err
+	}
 	acc := curAcc
-	if acc == "" {
+	if acc == "" || (scope == "personal" && domain.IsServerMode(ctx)) {
 		acc = s.CurrentAccount(ctx)
 	}
 	cat := curCat
@@ -200,7 +212,7 @@ func (s *Service) UpdateMemoryFull(ctx context.Context, id int64, rawScope, cate
 		`, id, curContent, id)
 	}
 	s.clearSessionIDs(id)
-	s.MarkAllTurnsMutated()
+	s.MarkAllTurnsMutatedCtx(ctx)
 	s.RegisterTaxonomyAppendOnly(ctx, scope, cat, sub)
 	if txt != curContent || cat != curCat || sub != curSub {
 		s.emitMutation(ctx, MutationEvent{
@@ -217,12 +229,19 @@ func (s *Service) UpdateMemoryFull(ctx context.Context, id int64, rawScope, cate
 
 // UpdateMemoryAccount reassigns the owning account for memory id.
 func (s *Service) UpdateMemoryAccount(ctx context.Context, id int64, rawAccount string) error {
-	if _, _, err := s.loadOwnedScope(ctx, id); err != nil {
+	recScope, _, err := s.loadOwnedScope(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := domain.CanModifyScope(ctx, recScope); err != nil {
 		return err
 	}
 	acc := domain.NormalizeAccount(rawAccount)
 	if acc == "" {
 		acc = s.CurrentAccount(ctx)
+	}
+	if domain.IsServerMode(ctx) && recScope == "personal" && acc != s.CurrentAccount(ctx) {
+		return fmt.Errorf("permission denied: cannot reassign personal memory #%d across accounts in server mode", id)
 	}
 	if err := s.withTx(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `UPDATE memories SET account = ? WHERE id = ?`, acc, id)
@@ -238,6 +257,9 @@ func (s *Service) UpdateMemoryAccount(ctx context.Context, id int64, rawAccount 
 func (s *Service) UpdateMemoryTags(ctx context.Context, id int64, rawTags string) error {
 	scope, _, err := s.loadOwnedScope(ctx, id)
 	if err != nil {
+		return err
+	}
+	if err := domain.CanModifyScope(ctx, scope); err != nil {
 		return err
 	}
 	parts := strings.FieldsFunc(rawTags, func(r rune) bool {
@@ -257,7 +279,12 @@ func (s *Service) UpdateMemoryTags(ctx context.Context, id int64, rawTags string
 // PurgeTombstones permanently deletes inactive memories while preserving superseded lineage on active parent records.
 func (s *Service) PurgeTombstones(ctx context.Context, scopeFilter string) (int64, error) {
 	sc := strings.TrimSpace(scopeFilter)
-	isAdmin := domain.IsAdminContext(ctx)
+	if domain.IsServerMode(ctx) && domain.NormalizeScope(sc) != "personal" {
+		if err := domain.RequireAdmin(ctx); err != nil {
+			return 0, err
+		}
+	}
+	isAdmin := s.canBypassPersonal(ctx)
 	curAcc := s.CurrentAccount(ctx)
 	var n int64
 	if err := s.withTx(ctx, func(tx *sql.Tx) error {
@@ -325,6 +352,9 @@ func boolToInt(v bool) int {
 
 // RecalibrateConfidence re-evaluates semantic confidence [0.0, 1.0] for active memories using the configured AI evaluator.
 func (s *Service) RecalibrateConfidence(ctx context.Context, scopeFilter string) (int, error) {
+	if err := domain.RequireAdmin(ctx); err != nil {
+		return 0, err
+	}
 	ev := s.router.EvalForTask(ctx, domain.TaskCalibrate)
 	if ev == nil {
 		return 0, fmt.Errorf("no active evaluation engine configured")
@@ -335,7 +365,7 @@ func (s *Service) RecalibrateConfidence(ctx context.Context, scopeFilter string)
 	}
 
 	sc := strings.TrimSpace(scopeFilter)
-	isAdmin := domain.IsAdminContext(ctx)
+	isAdmin := s.canBypassPersonal(ctx)
 	curAcc := s.CurrentAccount(ctx)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, scope, COALESCE(account, ''), category, COALESCE(sub_category, ''), tags, content, pinned

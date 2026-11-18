@@ -403,16 +403,18 @@ func (s *Service) GetProgressOverviewWithQuery(ctx context.Context, q domain.Pro
 		out.Sync = s.InspectProgressSync(ctx, sqlScope, q.ExplicitRepo)
 	}
 
+	accFilter := strings.TrimSpace(q.Account)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, scope, COALESCE(session_id, ''), COALESCE(track, ''), category, COALESCE(sub_category, ''),
+		SELECT id, scope, COALESCE(account, ''), COALESCE(session_id, ''), COALESCE(track, ''), category, COALESCE(sub_category, ''),
 		       summary, COALESCE(details, ''), COALESCE(next_step, ''),
 		       COALESCE(memory_ids, ''), COALESCE(commit_sha, ''), COALESCE(source, 'manual'),
 		       COALESCE(created_at, ''), COALESCE(updated_at, '')
 		FROM project_progress
 		WHERE (? = '' OR scope = ?)
+		  AND (? = '' OR LOWER(COALESCE(account, '')) = LOWER(?))
 		ORDER BY id DESC
 		LIMIT 2000
-	`, sqlScope, sqlScope)
+	`, sqlScope, sqlScope, accFilter, accFilter)
 	if err != nil {
 		return out, err
 	}
@@ -422,7 +424,7 @@ func (s *Service) GetProgressOverviewWithQuery(ctx context.Context, q domain.Pro
 	for rows.Next() {
 		var r domain.ProgressRecord
 		var memStr string
-		if err := rows.Scan(&r.ID, &r.Scope, &r.SessionID, &r.Track, &r.Category, &r.SubCategory,
+		if err := rows.Scan(&r.ID, &r.Scope, &r.Account, &r.SessionID, &r.Track, &r.Category, &r.SubCategory,
 			&r.Summary, &r.Details, &r.NextStep, &memStr, &r.CommitSHA, &r.Source, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return out, err
 		}

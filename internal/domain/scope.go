@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/user"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -245,4 +246,37 @@ func ContainsCJKRune(s string) bool {
 		}
 	}
 	return false
+}
+
+// CanonicalPathBase returns the normalized final path element across both POSIX and Windows separators.
+func CanonicalPathBase(rawPath string) string {
+	s := strings.TrimSpace(strings.ReplaceAll(rawPath, "\\", "/"))
+	s = strings.TrimRight(s, "/")
+	if s == "" || (len(s) == 2 && s[1] == ':') {
+		return ""
+	}
+	b := path.Base(s)
+	if b == "" || b == "." || b == "/" {
+		return ""
+	}
+	return b
+}
+
+// CanonicalProjectSlugFromRemote extracts the canonical lowercase repository slug from an origin remote URL
+// (supporting SSH SCP syntax git@host:org/repo.git as well as https:// and ssh:// URLs).
+func CanonicalProjectSlugFromRemote(rawURL string) string {
+	u := strings.TrimSpace(rawURL)
+	if u == "" {
+		return ""
+	}
+	u = strings.TrimRight(u, "/")
+	if !strings.Contains(u, "://") {
+		if idx := strings.LastIndex(u, ":"); idx >= 0 && idx+1 < len(u) {
+			u = u[idx+1:]
+		}
+	}
+	base := CanonicalPathBase(u)
+	base = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(base)), ".git")
+	base = strings.ReplaceAll(base, " ", "-")
+	return base
 }

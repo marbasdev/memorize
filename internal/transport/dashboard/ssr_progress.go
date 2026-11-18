@@ -14,6 +14,8 @@ import (
 
 type ssrProgressData struct {
 	Lang           string
+	ServerMode     bool
+	CanAdmin       bool
 	Scope          string
 	Scopes         []string
 	KindFilter     string
@@ -153,6 +155,8 @@ func buildProgressView(ctx context.Context, d Deps, lang string, q url.Values) (
 
 	return ssrProgressData{
 		Lang:           lang,
+		ServerMode:     domain.IsServerMode(ctx),
+		CanAdmin:       domain.CanAccessAdminFeatures(ctx),
 		Scope:          sc,
 		Scopes:         scopes,
 		KindFilter:     kindF,
@@ -205,7 +209,7 @@ func registerSSRProgressRoutes(mux *http.ServeMux, d Deps) {
 		writeHTMLTemplate(w, "progress_section", view)
 	}))
 
-	mux.HandleFunc("/ui/progress/retention", postHX(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ui/progress/retention", postHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
 		days, err := strconv.Atoi(strings.TrimSpace(r.FormValue("retention_days")))
 		if err != nil {
@@ -220,9 +224,9 @@ func registerSSRProgressRoutes(mux *http.ServeMux, d Deps) {
 		msg := formatRetentionToast(lang, "Progress history policy saved", "작업 히스토리 보관 정책 저장", pol.ProgressDays, deleted)
 		r.Form.Set("page", "1")
 		renderProgressAfterMutation(w, r, d, lang, msg, r.Form)
-	}))
+	})))
 
-	mux.HandleFunc("/ui/progress/cleanup", postHX(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ui/progress/cleanup", postHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
 		sc := strings.TrimSpace(r.FormValue("scope"))
 		days := 7
@@ -246,7 +250,7 @@ func registerSSRProgressRoutes(mux *http.ServeMux, d Deps) {
 		msg := langText(lang, fmt.Sprintf("Cleaned %d progress history entries", deleted), koMsg)
 		r.Form.Set("page", "1")
 		renderProgressAfterMutation(w, r, d, lang, msg, r.Form)
-	}))
+	})))
 
 	mux.HandleFunc("/ui/progress/sync", postHX(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)

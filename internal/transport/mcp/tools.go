@@ -96,13 +96,15 @@ func mcpResult(text string, err error) (*mcp.CallToolResult, error) {
 }
 
 func resolveMCPRequest(ctx context.Context, req mcp.CallToolRequest, resolver *ScopeResolver, prog *progress.Service, rememberRepo bool) (context.Context, string, string, string) {
-	if acc := trimmedArg(req, "account"); acc != "" {
-		ctx = domain.WithAccount(ctx, acc)
+	if !domain.IsServerMode(ctx) {
+		if acc := trimmedArg(req, "account"); acc != "" {
+			ctx = domain.WithAccount(ctx, acc)
+		}
 	}
-	sid := sessionIDFrom(ctx)
+	sid := domain.ScopedSessionID(ctx, sessionIDFrom(ctx))
 	ctx = domain.WithSessionID(ctx, sid)
 	sc, repoDir := resolver.Resolve(ctx, mcp.ParseString(req, "scope", ""), trimmedArg(req, "repo_path"))
-	if rememberRepo && repoDir != "" && prog != nil {
+	if rememberRepo && repoDir != "" && prog != nil && !domain.IsServerMode(ctx) {
 		prog.RememberRepoPath(ctx, sc, repoDir)
 	}
 	return ctx, sid, sc, repoDir

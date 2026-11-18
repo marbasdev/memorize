@@ -26,32 +26,43 @@ func scopeAndRepoFromPath(rawPath string) (string, string) {
 	if info, err := os.Stat(p); err == nil && !info.IsDir() {
 		dir = filepath.Dir(p)
 	}
-	repoDir := git.ResolveRoot(dir)
-	if repoDir != "" {
-		base := strings.ToLower(strings.TrimSpace(filepath.Base(repoDir)))
-		if base != "" && base != "." && base != "/" {
-			return "project:" + base, repoDir
-		}
+	if sc, repoDir := git.CanonicalScope(context.Background(), dir); sc != "" {
+		return sc, repoDir
 	}
 	clean := filepath.Clean(dir)
 	home, _ := os.UserHomeDir()
 	if clean != "." && clean != filepath.Dir(clean) && filepath.VolumeName(clean) != clean && clean != filepath.Clean(home) {
-		base := strings.ToLower(strings.TrimSpace(filepath.Base(clean)))
+		base := strings.ToLower(domain.CanonicalPathBase(p))
 		if base != "" {
-			return "project:" + base, repoDir
+			return "project:" + base, ""
 		}
 	}
-	return "", repoDir
+	return "", ""
 }
 
-func resolveHookSessionID(ev NormalizedHookEvent, primaryScope string) string {
-	if ev.SessionID != "" {
-		return ev.SessionID
+func resolveHookSessionID(ctx context.Context, ev NormalizedHookEvent, primaryScope string) string {
+	raw := ev.SessionID
+	if raw == "" {
+		raw = "hook-session:" + primaryScope
 	}
-	return "hook-session:" + primaryScope
+	return domain.ScopedSessionID(ctx, raw)
 }
 
-func resolveHookWorkspaces(ev NormalizedHookEvent, fallbackCwd string) ([]hookWorkspaceTarget, string) {
+func resolveHookWorkspaces(ctx context.Context, ev NormalizedHookEvent, fallbackCwd string) ([]hookWorkspaceTarget, string) {
+	if ev.ClientCtx != nil && len(ev.ClientCtx.CanonicalScopes) > 0 {
+		seen := make(map[string]bool)
+		var targets []hookWorkspaceTarget
+		for _, raw := range ev.ClientCtx.CanonicalScopes {
+			sc := domain.NormalizeScope(raw)
+			if sc != "" && !seen[sc] {
+				seen[sc] = true
+				targets = append(targets, hookWorkspaceTarget{Scope: sc})
+			}
+		}
+		if len(targets) > 0 {
+			return targets, resolveHookSessionID(ctx, ev, targets[0].Scope)
+		}
+	}
 	if ev.Scope != "" {
 		sc := domain.NormalizeScope(ev.Scope)
 		cwd := domain.FirstNonEmpty(ev.Cwd, fallbackCwd)
@@ -59,12 +70,12 @@ func resolveHookWorkspaces(ev NormalizedHookEvent, fallbackCwd string) ([]hookWo
 			for _, wp := range ev.Raw.WorkspacePaths {
 				wsc, wrepo := scopeAndRepoFromPath(wp)
 				if wsc == sc {
-					return []hookWorkspaceTarget{{Scope: sc, RepoDir: wrepo}}, resolveHookSessionID(ev, sc)
+					return []hookWorkspaceTarget{{Scope: sc, RepoDir: wrepo}}, resolveHookSessionID(ctx, ev, sc)
 				}
 			}
 			cwd = ev.Raw.WorkspacePaths[0]
 		}
-		return []hookWorkspaceTarget{{Scope: sc, RepoDir: git.ResolveRoot(cwd)}}, resolveHookSessionID(ev, sc)
+		return []hookWorkspaceTarget{{Scope: sc, RepoDir: git.ResolveRoot(cwd)}}, resolveHookSessionID(ctx, ev, sc)
 	}
 
 	seen := make(map[string]bool)
@@ -83,20 +94,25 @@ func resolveHookWorkspaces(ev NormalizedHookEvent, fallbackCwd string) ([]hookWo
 	}
 	if len(targets) == 0 {
 		cwd := domain.FirstNonEmpty(ev.Cwd, fallbackCwd)
-		if cwd == "" {
+		if cwd == "" && !domain.IsServerMode(ctx) {
 			if wd, err := os.Getwd(); err == nil {
 				cwd = wd
 			}
 		}
-		addPath(cwd)
+		if cwd != "" {
+			addPath(cwd)
+		}
 	}
 	if len(targets) == 0 {
 		targets = append(targets, hookWorkspaceTarget{Scope: domain.DefaultScope()})
 	}
-	return targets, resolveHookSessionID(ev, targets[0].Scope)
+	return targets, resolveHookSessionID(ctx, ev, targets[0].Scope)
 }
 
 func resolveGuardrailTarget(ev NormalizedHookEvent, targets []hookWorkspaceTarget) hookWorkspaceTarget {
+	if ev.ClientCtx != nil && strings.TrimSpace(ev.ClientCtx.TargetScope) != "" {
+		return hookWorkspaceTarget{Scope: domain.NormalizeScope(ev.ClientCtx.TargetScope)}
+	}
 	if ev.TargetPath != "" {
 		cleanTool := filepath.Clean(ev.TargetPath)
 		for _, wp := range ev.Raw.WorkspacePaths {
@@ -114,6 +130,10 @@ func resolveGuardrailTarget(ev NormalizedHookEvent, targets []hookWorkspaceTarge
 	return targets[0]
 }
 
+type teamRuleDocIngester interface {
+	IngestTeamRuleDoc(ctx context.Context, rawScope, rawMarkdown string) error
+}
+
 // ExecuteHook executes zero-touch context injection (start/turn) or PreToolUse plan verification
 // directly from lifecycle hooks without requiring an extra MCP tool-call roundtrip.
 func (s *Service) ExecuteHook(ctx context.Context, mode string, rawStdin []byte, fallbackCwd string) (string, int, error) {
@@ -121,10 +141,22 @@ func (s *Service) ExecuteHook(ctx context.Context, mode string, rawStdin []byte,
 	if !ev.Valid {
 		return "{}", 0, nil
 	}
-	if ev.Account != "" {
+	if ev.ClientCtx == nil {
+		if cc, ok := domain.ClientHookContextFromContext(ctx); ok {
+			ev.ClientCtx = cc
+		}
+	}
+	if ev.Account != "" && !domain.IsServerMode(ctx) {
 		ctx = domain.WithAccount(ctx, ev.Account)
 	}
-	targets, sid := resolveHookWorkspaces(ev, fallbackCwd)
+	if ev.ClientCtx != nil && len(ev.ClientCtx.TeamRuleDocs) > 0 && s.rp != nil {
+		if ing, ok := s.rp.(teamRuleDocIngester); ok {
+			for sc, md := range ev.ClientCtx.TeamRuleDocs {
+				_ = ing.IngestTeamRuleDoc(ctx, sc, md)
+			}
+		}
+	}
+	targets, sid := resolveHookWorkspaces(ctx, ev, fallbackCwd)
 	codec := codecForAgent(ev.Agent)
 
 	switch ev.Phase {
@@ -169,7 +201,7 @@ func (s *Service) runContextHook(ctx context.Context, ev NormalizedHookEvent, co
 
 	for idx, t := range targets {
 		scopeNames = append(scopeNames, t.Scope)
-		parts, hasNew, hasSync := s.collectTargetContext(ctx, sid, idx, len(targets), t, ev.SessionID, ev.Prompt, combinedTask, isStart, engineReady, refreshSession)
+		parts, hasNew, hasSync := s.collectTargetContext(ctx, sid, idx, len(targets), t, ev.SessionID, ev.Prompt, combinedTask, isStart, engineReady, refreshSession, ev.ClientCtx)
 		if hasNew {
 			anyNewFacts = true
 		}
@@ -218,6 +250,7 @@ func (s *Service) collectTargetContext(
 	t hookWorkspaceTarget,
 	explicitSID, rawUserPrompt, combinedTask string,
 	isStart, engineReady, refreshSession bool,
+	clientCtx *domain.ClientHookContext,
 ) ([]string, bool, bool) {
 	localCtx, localCancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	s.rememberRepo(localCtx, t.Scope, t.RepoDir)
@@ -237,8 +270,12 @@ func (s *Service) collectTargetContext(
 		rpConflictMsg = strings.TrimSpace(rpConflictMsg)
 	}
 	autoGitSync := s.mem.IsAutoGitSyncEnabled()
-	if !autoGitSync && t.RepoDir != "" && s.prog != nil {
-		_ = s.prog.AutoSyncProgressCommits(ctx, t.Scope, t.RepoDir)
+	if !autoGitSync && s.prog != nil {
+		if clientCtx != nil && len(clientCtx.GitCommitsByScope[t.Scope]) > 0 {
+			_ = s.prog.AutoSyncProgressCommitsFromPayload(ctx, t.Scope, clientCtx.GitHeadByScope[t.Scope], clientCtx.GitCommitsByScope[t.Scope])
+		} else if t.RepoDir != "" {
+			_ = s.prog.AutoSyncProgressCommits(ctx, t.Scope, t.RepoDir)
+		}
 	}
 	qTask := ""
 	if engineReady {

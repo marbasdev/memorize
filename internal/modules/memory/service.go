@@ -191,7 +191,11 @@ func (s *Service) IncludePersonalInProject(ctx context.Context) bool {
 }
 
 // CurrentAccount resolves the effective user account identifier for personal scope isolation.
+// In authenticated team server mode, the verified AuthPrincipal account overrides headers/env/defaults.
 func (s *Service) CurrentAccount(ctx context.Context) string {
+	if p, ok := domain.AuthPrincipalFromContext(ctx); ok && p.ServerMode && p.Authenticated && p.Account != "" {
+		return p.Account
+	}
 	if acc := domain.AccountFromContext(ctx); acc != "" {
 		return acc
 	}
@@ -206,29 +210,54 @@ func (s *Service) CurrentAccount(ctx context.Context) string {
 	return domain.DefaultAccount()
 }
 
+func (s *Service) canBypassPersonal(ctx context.Context) bool {
+	return !domain.IsServerMode(ctx) && domain.IsAdminContext(ctx)
+}
+
+func (s *Service) enforceStrictPersonalVisibility(ctx context.Context) bool {
+	return domain.IsServerMode(ctx)
+}
+
+func (s *Service) memoryVisibilitySQL(ctx context.Context, alias string) (string, []any) {
+	if !s.enforceStrictPersonalVisibility(ctx) {
+		return "1 = 1", nil
+	}
+	scCol, accCol := "scope", "account"
+	if alias != "" {
+		scCol = alias + ".scope"
+		accCol = alias + ".account"
+	}
+	return fmt.Sprintf("(%s != 'personal' OR %s = ?)", scCol, accCol), []any{s.CurrentAccount(ctx)}
+}
+
 // ResolveEffectiveSessionID resolves the active conversation/session ID:
 // explicit input wins, followed by non-generic context session IDs, active IDE hook turn_state
 // conversation IDs for the scope, and finally generic MCP stdio/bridge session IDs.
 func (s *Service) ResolveEffectiveSessionID(ctx context.Context, rawScope, explicit string) string {
 	if exp := strings.TrimSpace(explicit); exp != "" {
-		return exp
+		return domain.ScopedSessionID(ctx, exp)
 	}
 	ctxSID := domain.SessionIDFromContext(ctx)
 	if ctxSID != "" && !strings.HasPrefix(ctxSID, "stdio-") && !strings.HasPrefix(ctxSID, "bridge-") {
-		return ctxSID
+		return domain.ScopedSessionID(ctx, ctxSID)
 	}
 	sc := domain.NormalizeScope(rawScope)
 	var turnSID string
 	cutoff := time.Now().Add(-2 * time.Hour).Unix()
+	userPrefix := ""
+	if p, ok := domain.AuthPrincipalFromContext(ctx); ok && p.ServerMode && p.Account != "" {
+		userPrefix = "u:" + p.Account + ":%"
+	}
 	_ = s.db.QueryRowContext(ctx, `
 		SELECT session_id FROM turn_state
 		WHERE scope = ? AND updated_at >= ? AND COALESCE(session_id, '') != ''
+		  AND (? = '' OR session_id LIKE ?)
 		ORDER BY updated_at DESC LIMIT 1
-	`, sc, cutoff).Scan(&turnSID)
+	`, sc, cutoff, userPrefix, userPrefix).Scan(&turnSID)
 	if strings.TrimSpace(turnSID) != "" {
-		return strings.TrimSpace(turnSID)
+		return domain.ScopedSessionID(ctx, strings.TrimSpace(turnSID))
 	}
-	return ctxSID
+	return domain.ScopedSessionID(ctx, ctxSID)
 }
 
 // ScopesFor expands project:* scopes to include global when includeGlobal is true.
@@ -337,7 +366,9 @@ func (s *Service) FactsByIDs(ctx context.Context, ids []int64) (map[int64]domain
 	if len(ph) == 0 {
 		return out, nil
 	}
-	q := fmt.Sprintf(`SELECT %s FROM memories WHERE id IN (%s)`, factSelectColumns, strings.Join(ph, ","))
+	visSQL, visArgs := s.memoryVisibilitySQL(ctx, "")
+	args = append(args, visArgs...)
+	q := fmt.Sprintf(`SELECT %s FROM memories WHERE id IN (%s) AND %s`, factSelectColumns, strings.Join(ph, ","), visSQL)
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
@@ -453,6 +484,9 @@ func (s *Service) CommitMemoryFull(ctx context.Context, candidateFact, category,
 		return "", fmt.Errorf("candidate_fact cannot be empty")
 	}
 	targetScope := domain.NormalizeScope(rawScope)
+	if err := domain.CanModifyScope(ctx, targetScope); err != nil {
+		return "", err
+	}
 	if reason := domain.CheckSecurityGuard(candidateFact); reason != "" {
 		return fmt.Sprintf("REJECTED (security guard: %s)", reason), nil
 	}
@@ -522,13 +556,13 @@ func (s *Service) applyEvaluatedCommit(ctx context.Context, targetScope, candida
 			}
 			return nil
 		})
-		s.MarkTurnScopeMutated(targetScope)
+		s.MarkTurnScopeMutatedCtx(ctx, targetScope)
 		return fmt.Sprintf("SKIPPED (duplicate confirmed in %s; boosted confidence of %v)", targetScope, targetIDs), nil
 	}
 
 	th := s.GetThresholds(ctx)
 	if dec.IsPermanent < th.MinPermanent || dec.Confidence < th.MinConfidence || dec.Action == "IGNORE" {
-		s.MarkTurnScopeMutated(targetScope)
+		s.MarkTurnScopeMutatedCtx(ctx, targetScope)
 		return fmt.Sprintf("SKIPPED (scope=%s, perm=%.2f, conf=%.2f, action=%s)", targetScope, dec.IsPermanent, dec.Confidence, dec.Action), nil
 	}
 
@@ -573,7 +607,7 @@ func (s *Service) applyEvaluatedCommit(ctx context.Context, targetScope, candida
 	}); err != nil {
 		return "", err
 	}
-	s.MarkTurnScopeMutated(targetScope)
+	s.MarkTurnScopeMutatedCtx(ctx, targetScope)
 	if dec.Action == "OVERWRITE" && len(targetIDs) > 0 {
 		// Keep SQLite session_sent rows intact so sessions that previously saw targetIDs get a 1-time (Replaces: ...) notice.
 		s.clearInMemorySessionIDs(targetIDs...)

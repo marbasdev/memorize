@@ -2,10 +2,12 @@ package localdaemon
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -17,6 +19,7 @@ import (
 	"memorize/internal/inference/localmodel"
 	"memorize/internal/inference/router"
 	"memorize/internal/infra/config"
+	"memorize/internal/infra/sqlite"
 	"memorize/internal/modules/guardrail"
 	"memorize/internal/modules/memory"
 	"memorize/internal/modules/progress"
@@ -303,6 +306,73 @@ func RunServer(version, explicitAddr, dbPath, modelsDir string) int {
 	return RunDaemonWithBundle(version, explicitAddr, dbPath, modelsDir, b)
 }
 
+// RunTeamServer starts an authenticated multi-user team server listening on explicitAddr (default 0.0.0.0:18095).
+func RunTeamServer(version, explicitAddr, dbPath, modelsDir string) int {
+	b, err := openRuntime(dbPath, modelsDir, true)
+	if err != nil {
+		log.Printf("failed to initialize memory service: %v", err)
+		return 1
+	}
+	defer b.close()
+
+	listenAddr := strings.TrimSpace(explicitAddr)
+	if listenAddr == "" {
+		listenAddr = domain.DefaultServeAddr
+	}
+	ln, err := net.Listen("tcp", listenAddr)
+	if err != nil {
+		log.Printf("memorize team server listen error on %s: %v", listenAddr, err)
+		return 1
+	}
+
+	issued, created, err := sqlite.EnsureBootstrapAdmin(
+		context.Background(),
+		b.mem.DB(),
+		os.Getenv("MEMORY_BOOTSTRAP_ACCOUNT"),
+		os.Getenv("MEMORY_BOOTSTRAP_TOKEN"),
+	)
+	if err != nil {
+		_ = ln.Close()
+		log.Printf("bootstrap admin initialization failed: %v", err)
+		return 1
+	}
+
+	lc := newDaemonLifecycle(version, dbPath, modelsDir, ln.Addr().String(), b)
+	lc.serverMode = true
+	lc.skipStateRemove.Store(true)
+	b.mgr.SetExcludePortFunc(func() int { return lc.boundPort })
+	b.mgr.SetDashboardURLFunc(func() string { return "http://" + lc.boundAddr })
+
+	if created {
+		hintHost := lc.boundAddr
+		if h, p, ok := domain.ParseHostPort(lc.boundAddr); ok && (h == "" || h == "0.0.0.0" || h == "::") {
+			hintHost = net.JoinHostPort("<server-host>", strconv.Itoa(p))
+		}
+		fmt.Fprintf(os.Stderr, "\n====================================================================\n")
+		fmt.Fprintf(os.Stderr, "[memorize team server] Initial admin account created: @%s\n", issued.User.Account)
+		fmt.Fprintf(os.Stderr, "Access Token (shown ONCE — save now): %s\n", issued.PlainToken)
+		fmt.Fprintf(os.Stderr, "Web Console:  http://%s/login\n", hintHost)
+		fmt.Fprintf(os.Stderr, "Client Bind:  memorize connect --url http://%s --token %s\n", hintHost, issued.PlainToken)
+		fmt.Fprintf(os.Stderr, "Add Users:    memorize user add <account> --role member\n")
+		fmt.Fprintf(os.Stderr, "====================================================================\n\n")
+	}
+
+	sigCh := make(chan os.Signal, 2)
+	signal.Notify(sigCh, os.Interrupt)
+	defer signal.Stop(sigCh)
+	go func() {
+		if _, ok := <-sigCh; ok {
+			select {
+			case lc.stopRequested <- struct{}{}:
+			default:
+			}
+			_ = lc.close()
+		}
+	}()
+
+	return lc.serve(ln)
+}
+
 // RunInlineHook executes a lifecycle hook directly against SQLite when daemon delegation is disabled or unavailable.
 func RunInlineHook(ctx context.Context, dbPath, modelsDir, mode string, rawStdin []byte) (string, int) {
 	b, err := openRuntime(dbPath, modelsDir, false)
@@ -349,6 +419,9 @@ func Hooks(version string) cli.RuntimeHooks {
 		EnsureDaemonRunning: EnsureRunning,
 		RunDaemonServer: func(explicitAddr, dbPath, modelsDir string) int {
 			return RunServer(version, explicitAddr, dbPath, modelsDir)
+		},
+		RunTeamServer: func(explicitAddr, dbPath, modelsDir string) int {
+			return RunTeamServer(version, explicitAddr, dbPath, modelsDir)
 		},
 		ServeInlineStdio: func(dbPath, modelsDir string, withDashboard bool, dashAddr string) int {
 			return ServeInlineStdio(version, dbPath, modelsDir, withDashboard, dashAddr)

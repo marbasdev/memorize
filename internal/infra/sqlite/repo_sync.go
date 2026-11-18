@@ -11,20 +11,34 @@ import (
 	"memorize/internal/infra/git"
 )
 
-// GetSyncedCommit returns the recorded last_commit cursor for rawScope in repo_sync.
+// GetSyncedCommit returns the recorded last_commit cursor for rawScope (and account in server mode).
 func GetSyncedCommit(ctx context.Context, db *sql.DB, rawScope string) string {
 	sc := domain.NormalizeScope(rawScope)
 	var sha string
+	if p, ok := domain.AuthPrincipalFromContext(ctx); ok && p.ServerMode && p.Account != "" {
+		_ = db.QueryRowContext(ctx, `SELECT last_commit FROM user_repo_sync WHERE scope = ? AND account = ?`, sc, p.Account).Scan(&sha)
+		if strings.TrimSpace(sha) != "" {
+			return strings.TrimSpace(sha)
+		}
+	}
 	_ = db.QueryRowContext(ctx, `SELECT last_commit FROM repo_sync WHERE scope = ?`, sc).Scan(&sha)
 	return strings.TrimSpace(sha)
 }
 
-// SetSyncedCommit upserts the synced commit cursor for rawScope in repo_sync.
+// SetSyncedCommit upserts the synced commit cursor for rawScope (per account in server mode).
 func SetSyncedCommit(ctx context.Context, db *sql.DB, rawScope, sha string) error {
 	sc := domain.NormalizeScope(rawScope)
 	sha = strings.TrimSpace(sha)
 	if sha == "" {
 		return nil
+	}
+	if p, ok := domain.AuthPrincipalFromContext(ctx); ok && p.ServerMode && p.Account != "" {
+		_, err := db.ExecContext(ctx, `
+			INSERT INTO user_repo_sync (scope, account, last_commit, updated_at)
+			VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+			ON CONFLICT(scope, account) DO UPDATE SET last_commit = excluded.last_commit, updated_at = CURRENT_TIMESTAMP
+		`, sc, p.Account, sha)
+		return err
 	}
 	_, err := db.ExecContext(ctx, `
 		INSERT INTO repo_sync (scope, last_commit, updated_at)
@@ -36,6 +50,10 @@ func SetSyncedCommit(ctx context.Context, db *sql.DB, rawScope, sha string) erro
 
 // RememberRepoPath records the resolved Git repository root for a project:* scope.
 func RememberRepoPath(ctx context.Context, db *sql.DB, rawScope, repoDir string) {
+	if domain.IsServerMode(ctx) {
+		// In multi-user server mode, teammate repo paths live on client machines rather than the host DB.
+		return
+	}
 	sc := domain.NormalizeScope(rawScope)
 	if !strings.HasPrefix(sc, "project:") {
 		return

@@ -51,21 +51,27 @@
     </div>
 
     <div style="display:flex;gap:0.4rem;flex-wrap:wrap;align-items:center;">
-      <label style="display:inline-flex;align-items:center;gap:0.35rem;font-size:0.76rem;color:var(--muted);cursor:pointer;margin-right:0.3rem;"
-        title="Include personal scope memories automatically when querying project:* scopes">
-        <input type="checkbox" id="chkPersonalInProject" name="enabled" value="1"
-          {{if .IncludePersonal}}checked{{end}}
-          hx-post="/ui/personal-toggle" hx-trigger="change" hx-swap="none">
-        <span>{{t .Lang "lbl_inc_personal"}}</span>
-      </label>
+      {{if .CanAdmin}}
+        <label style="display:inline-flex;align-items:center;gap:0.35rem;font-size:0.76rem;color:var(--muted);cursor:pointer;margin-right:0.3rem;"
+          title="Include personal scope memories automatically when querying project:* scopes">
+          <input type="checkbox" id="chkPersonalInProject" name="enabled" value="1"
+            {{if .IncludePersonal}}checked{{end}}
+            hx-post="/ui/personal-toggle" hx-trigger="change" hx-swap="none">
+          <span>{{t .Lang "lbl_inc_personal"}}</span>
+        </label>
+      {{end}}
       <button type="button" class="btn btn-primary btn-sm" id="btnToggleAdd" @click="addOpen = !addOpen">{{t .Lang "btn_add"}}</button>
-      <button type="button" class="btn btn-sm" id="btnOpenCatPresets"
-        hx-get="/ui/modal/categories" hx-target="#modalHost" hx-swap="innerHTML">{{t .Lang "btn_cat_presets"}}</button>
+      {{if .CanAdmin}}
+        <button type="button" class="btn btn-sm" id="btnOpenCatPresets"
+          hx-get="/ui/modal/categories" hx-target="#modalHost" hx-swap="innerHTML">{{t .Lang "btn_cat_presets"}}</button>
+      {{end}}
       <button type="button" class="btn btn-sm" id="btnOpenCountMerge"
         hx-get="/ui/modal/consolidate" hx-include="#filterScope" hx-target="#modalHost" hx-swap="innerHTML">{{t .Lang "btn_consolidate"}}</button>
-      <button type="button" class="btn btn-sm" id="btnPurge"
-        hx-post="/ui/memories/purge" hx-include="#memoryFilterForm" hx-target="#memoriesSection" hx-swap="innerHTML"
-        hx-confirm="{{t .Lang "confirm_purge"}}">{{t .Lang "btn_purge"}}</button>
+      {{if or .CanAdmin (eq .Query.Scope "personal")}}
+        <button type="button" class="btn btn-sm" id="btnPurge"
+          hx-post="/ui/memories/purge" hx-include="#memoryFilterForm" hx-target="#memoriesSection" hx-swap="innerHTML"
+          hx-confirm="{{t .Lang "confirm_purge"}}">{{t .Lang "btn_purge"}}</button>
+      {{end}}
     </div>
   </div>
 
@@ -143,7 +149,9 @@
         </template>
       </div>
     </div>
-    <input name="new_account" class="input" style="width:120px;" value="{{.CurrentAccount}}" placeholder="{{t .Lang "ph_new_account"}}" aria-label="Account">
+    {{if not .ServerMode}}
+      <input name="new_account" class="input" style="width:120px;" value="{{.CurrentAccount}}" placeholder="{{t .Lang "ph_new_account"}}" aria-label="Account">
+    {{end}}
     <div class="combo-box" style="width:140px;" x-data='comboBox({{jsonAttr .Categories}}, "", false)'>
       <input name="new_category" class="input" autocomplete="off" x-model="val" @input="catVal = val" @click="open = true" @click.outside="open = false" placeholder="{{t .Lang "ph_new_cat"}}" aria-label="Category">
       <button type="button" class="combo-btn" @click.stop="open = !open" tabindex="-1" aria-label="Toggle Category List">▾</button>

@@ -22,8 +22,19 @@ import (
 type RuntimeHooks struct {
 	EnsureDaemonRunning func(explicitAddr, dbPath, modelsDir string) (*thttp.DaemonStatus, bool)
 	RunDaemonServer     func(explicitAddr, dbPath, modelsDir string) int
+	RunTeamServer       func(explicitAddr, dbPath, modelsDir string) int
 	ServeInlineStdio    func(dbPath, modelsDir string, withDashboard bool, dashAddr string) int
 	RunInlineHook       func(ctx context.Context, dbPath, modelsDir, mode string, rawStdin []byte) (string, int)
+}
+
+func resolveClientDataDir(dbPath string) string {
+	if envDir := strings.TrimSpace(os.Getenv("MEMORY_DATA_DIR")); envDir != "" {
+		return envDir
+	}
+	if dbPath != "" && dbPath != ":memory:" && !strings.HasPrefix(dbPath, "file::memory:") {
+		return filepath.Dir(dbPath)
+	}
+	return config.DefaultDataDir()
 }
 
 func readHookStdin() []byte {
@@ -96,12 +107,24 @@ func parseDaemonCtlAction(explicit string, args []string) string {
 }
 
 func runHookCommand(mode, explicitAddr, dbPath, modelsDir string, rawStdin []byte, procStart time.Time, hooks RuntimeHooks) int {
-	if !isInlineModeForced(dbPath) && hooks.EnsureDaemonRunning != nil {
-		if out, code, ok := runHookViaDaemon(explicitAddr, dbPath, modelsDir, mode, rawStdin, procStart, hooks.EnsureDaemonRunning); ok {
-			if strings.TrimSpace(out) != "" {
-				fmt.Println(out)
+	if !isInlineModeForced(dbPath) {
+		dataDir := resolveClientDataDir(dbPath)
+		if remote, ok := resolveRemoteTargetForHook(dataDir, rawStdin); ok {
+			out, code, handled := runHookViaRemote(remote, dataDir, mode, rawStdin, procStart)
+			if handled {
+				if strings.TrimSpace(out) != "" {
+					fmt.Println(out)
+				}
+				return code
 			}
-			return code
+		}
+		if hooks.EnsureDaemonRunning != nil {
+			if out, code, ok := runHookViaDaemon(explicitAddr, dbPath, modelsDir, mode, rawStdin, procStart, hooks.EnsureDaemonRunning); ok {
+				if strings.TrimSpace(out) != "" {
+					fmt.Println(out)
+				}
+				return code
+			}
 		}
 	}
 	if hooks.RunInlineHook == nil {
@@ -127,11 +150,27 @@ func runHookCommand(mode, explicitAddr, dbPath, modelsDir string, rawStdin []byt
 
 func executeArgs(args []string, version string, hooks RuntimeHooks) int {
 	procStart := effectiveProcStart(time.Now())
+	dbPath, modelsDir := resolveStoragePaths()
+
+	if len(args) > 0 {
+		switch strings.ToLower(strings.TrimSpace(args[0])) {
+		case "serve":
+			return runServeCLI(args[1:], dbPath, modelsDir, hooks)
+		case "user", "users":
+			return runUserCLI(args[1:], dbPath)
+		case "connect":
+			return runConnectCLI(args[1:], dbPath)
+		case "disconnect":
+			return runDisconnectCLI(args[1:], dbPath)
+		}
+	}
+
 	fs := flag.NewFlagSet("memorize", flag.ContinueOnError)
 	showVersion := fs.Bool("version", false, "print memorize version and exit")
 	installMode := fs.String("install", "", "install Git pre-commit guardrail hook ('git-hook')")
 	daemonMode := fs.Bool("daemon", false, "run single unified background daemon (SQLite + Dashboard + MCP + Hooks)")
-	daemonAddr := fs.String("addr", "", "daemon listen address (default 127.0.0.1:18095)")
+	serveMode := fs.Bool("serve", false, "run authenticated team server mode (default 0.0.0.0:18095)")
+	daemonAddr := fs.String("addr", "", "daemon or team server listen address (default 127.0.0.1:18095 / 0.0.0.0:18095)")
 	daemonCtl := fs.String("daemon-ctl", "", "control background daemon: status, start, stop, restart, logs, port")
 	dashAddr := fs.String("dashboard", "", "alias to run unified daemon/dashboard on explicit listen address (e.g. 127.0.0.1:18095)")
 	hookMode := fs.String("hook", "", "execute zero-touch lifecycle hook mode (claude-start, claude-turn, claude-pretool, claude-stop, claude-end, antigravity-start, antigravity-turn, antigravity-pretool, antigravity-stop, git-precommit)")
@@ -154,9 +193,20 @@ func executeArgs(args []string, version string, hooks RuntimeHooks) int {
 		return 0
 	}
 
-	dbPath, modelsDir := resolveStoragePaths()
 	explicitAddr := domain.FirstNonEmpty(*daemonAddr, *dashAddr)
 	posArgs := fs.Args()
+
+	if *serveMode {
+		if hooks.RunTeamServer == nil {
+			fmt.Fprintln(os.Stderr, "team server handler not configured")
+			return 1
+		}
+		listenAddr := strings.TrimSpace(explicitAddr)
+		if listenAddr == "" {
+			listenAddr = domain.DefaultServeAddr
+		}
+		return hooks.RunTeamServer(listenAddr, dbPath, modelsDir)
+	}
 
 	if ctlAction := parseDaemonCtlAction(*daemonCtl, posArgs); ctlAction != "" {
 		return runDaemonControlCLI(ctlAction, posArgs, explicitAddr, dbPath, modelsDir, hooks)
@@ -167,9 +217,11 @@ func executeArgs(args []string, version string, hooks RuntimeHooks) int {
 	}
 
 	// Default MCP stdio mode runs as a lightweight stateless bridge to the unified daemon
-	// (auto-spawning if needed), so all sessions share 1 daemon & hot-reload transparently.
-	if !*daemonMode && strings.TrimSpace(*dashAddr) == "" && !isInlineModeForced(dbPath) && hooks.EnsureDaemonRunning != nil {
-		if _, ok := hooks.EnsureDaemonRunning(explicitAddr, dbPath, modelsDir); ok {
+	// (or configured remote team server), so all sessions stay consistent transparently.
+	cwd, _ := os.Getwd()
+	_, hasRemote := config.ResolveRemoteTarget(resolveClientDataDir(dbPath), cwd)
+	if !*daemonMode && strings.TrimSpace(*dashAddr) == "" && !isInlineModeForced(dbPath) && (hasRemote || hooks.EnsureDaemonRunning != nil) {
+		if hasRemote || func() bool { _, ok := hooks.EnsureDaemonRunning(explicitAddr, dbPath, modelsDir); return ok }() {
 			if err := runStdioDaemonBridge(explicitAddr, dbPath, modelsDir, hooks.EnsureDaemonRunning); err != nil {
 				fmt.Fprintf(os.Stderr, "stdio bridge error: %v\n", err)
 				return 1

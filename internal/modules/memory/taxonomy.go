@@ -280,6 +280,11 @@ func (s *Service) ApplyTaxonomyRebalance(ctx context.Context, rawScope string, i
 		return 0, fmt.Errorf("select at least 1 taxonomy adjustment to apply")
 	}
 	targetScope := domain.NormalizeScope(rawScope)
+	if err := domain.CanModifyScope(ctx, targetScope); err != nil {
+		return 0, err
+	}
+	isAdmin := s.canBypassPersonal(ctx)
+	curAcc := s.CurrentAccount(ctx)
 	updated := 0
 	var taxPairs [][2]string
 	if err := s.withTx(ctx, func(tx *sql.Tx) error {
@@ -295,7 +300,8 @@ func (s *Service) ApplyTaxonomyRebalance(ctx context.Context, rawScope string, i
 				UPDATE memories
 				SET category = ?, sub_category = ?
 				WHERE id = ? AND scope = ? AND active = 1
-			`, newCat, newSub, it.ID, targetScope)
+				  AND (? = 1 OR scope != 'personal' OR account = ?)
+			`, newCat, newSub, it.ID, targetScope, boolToInt(isAdmin), curAcc)
 			if err != nil {
 				return err
 			}
@@ -312,7 +318,7 @@ func (s *Service) ApplyTaxonomyRebalance(ctx context.Context, rawScope string, i
 		s.RegisterTaxonomyAppendOnly(ctx, targetScope, pair[0], pair[1])
 	}
 	if updated > 0 {
-		s.MarkTurnScopeMutated(targetScope)
+		s.MarkTurnScopeMutatedCtx(ctx, targetScope)
 	}
 	return updated, nil
 }

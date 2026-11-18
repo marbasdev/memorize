@@ -19,7 +19,7 @@ import (
 // preventing drive-by Simple-POST form CSRF against localhost without requiring client JSON assembly.
 func postHX(fn http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !thttp.IsAllowedLocalOrigin(r) {
+		if !thttp.IsAllowedOrigin(r, domain.IsServerMode(r.Context())) {
 			thttp.WriteJSON(w, http.StatusForbidden, map[string]any{"error": "cross-origin request blocked"})
 			return
 		}
@@ -39,7 +39,7 @@ func postHX(fn http.HandlerFunc) http.HandlerFunc {
 
 func getHX(fn http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !thttp.IsAllowedLocalOrigin(r) {
+		if !thttp.IsAllowedOrigin(r, domain.IsServerMode(r.Context())) {
 			thttp.WriteJSON(w, http.StatusForbidden, map[string]any{"error": "cross-origin request blocked"})
 			return
 		}
@@ -177,12 +177,14 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 			http.NotFound(w, r)
 			return
 		}
-		if !thttp.IsAllowedLocalOrigin(r) {
+		if !thttp.IsAllowedOrigin(r, d.ServerMode) {
 			thttp.WriteJSON(w, http.StatusForbidden, map[string]any{"error": "non-local host blocked"})
 			return
 		}
 		ctx := r.Context()
 		lang := requestLang(r)
+		canAdmin := domain.CanAccessAdminFeatures(ctx)
+		p, _ := domain.AuthPrincipalFromContext(ctx)
 		memView, err := buildMemoriesView(ctx, d, lang, r.URL.Query(), false)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -191,16 +193,27 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 		progView, _ := buildProgressView(ctx, d, lang, r.URL.Query())
 		teamView := buildTeamView(ctx, d, lang, r.URL.Query())
 		grView := buildGuardrailsView(ctx, d, lang, r.URL.Query(), memView.Scopes)
-		engView := buildEnginesView(ctx, d, lang, r.URL.Query(), "", "")
-		calView := buildCalibrateView(ctx, d, lang, r.URL.Query(), memView.Scopes)
+		var engView ssrEnginesData
+		var calView ssrCalibrateData
+		if canAdmin {
+			engView = buildEnginesView(ctx, d, lang, r.URL.Query(), "", "")
+			calView = buildCalibrateView(ctx, d, lang, r.URL.Query(), memView.Scopes)
+		} else {
+			engView = ssrEnginesData{Lang: lang}
+			calView = ssrCalibrateData{Lang: lang}
+		}
 		writeHTMLTemplate(w, "layout", ssrPageData{
-			Lang:       lang,
-			Memories:   memView,
-			Team:       teamView,
-			Progress:   progView,
-			Guardrails: grView,
-			Engines:    engView,
-			Calibrate:  calView,
+			Lang:        lang,
+			ServerMode:  d.ServerMode,
+			CanAdmin:    canAdmin,
+			AuthAccount: p.Account,
+			AuthRole:    p.Role,
+			Memories:    memView,
+			Team:        teamView,
+			Progress:    progView,
+			Guardrails:  grView,
+			Engines:     engView,
+			Calibrate:   calView,
 		})
 	})
 
@@ -213,6 +226,7 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 			MaxAge:   365 * 24 * 3600,
 			HttpOnly: true,
 			SameSite: http.SameSiteLaxMode,
+			Secure:   thttp.IsSecureRequest(r),
 		})
 		w.Header().Set("HX-Refresh", "true")
 		w.WriteHeader(http.StatusOK)
@@ -228,7 +242,7 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 		writeHTMLTemplate(w, "memories_section", memView)
 	}))
 
-	mux.HandleFunc("/ui/personal-toggle", postHX(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ui/personal-toggle", postHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		val := "0"
 		msg := "Personal memories isolated from projects"
 		if r.FormValue("enabled") == "1" {
@@ -241,7 +255,7 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 		}
 		setHXTriggers(w, msg, false, false)
 		w.WriteHeader(http.StatusOK)
-	}))
+	})))
 
 	mux.HandleFunc("/ui/memories/commit", postHX(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
@@ -251,8 +265,10 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 			return
 		}
 		ctx := r.Context()
-		if acc := strings.TrimSpace(r.FormValue("new_account")); acc != "" {
-			ctx = domain.WithAccount(ctx, acc)
+		if !domain.IsServerMode(ctx) {
+			if acc := strings.TrimSpace(r.FormValue("new_account")); acc != "" {
+				ctx = domain.WithAccount(ctx, acc)
+			}
 		}
 		out, err := d.Memory.CommitMemoryFull(ctx, cand, r.FormValue("new_category"), r.FormValue("new_sub_category"), r.FormValue("new_tags"), r.FormValue("new_scope"))
 		if err != nil {
@@ -298,9 +314,11 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if err := d.Memory.UpdateMemoryAccount(ctx, id, r.FormValue("account")); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+		if !domain.IsServerMode(ctx) {
+			if err := d.Memory.UpdateMemoryAccount(ctx, id, r.FormValue("account")); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 		}
 		if err := d.Memory.UpdateMemoryTags(ctx, id, r.FormValue("tags")); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -336,6 +354,8 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 		}
 		writeHTMLTemplate(w, "modal_detail", ssrDetailModalData{
 			Lang:             lang,
+			ServerMode:       d.ServerMode,
+			CanAdmin:         domain.CanAccessAdminFeatures(ctx),
 			Record:           recs[0],
 			Scopes:           scopes,
 			Categories:       cats,
@@ -347,16 +367,16 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 	registerSSRProgressRoutes(mux, d)
 	registerSSRPortRoutes(mux, d)
 
-	mux.HandleFunc("/ui/modal/categories", getHX(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ui/modal/categories", getHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
 		presets := discovery.NormalizePresetCategoriesJSON(d.Memory.GetConfigMap(r.Context())["preset_categories"])
 		writeHTMLTemplate(w, "modal_categories", ssrCategoriesModalData{
 			Lang:        lang,
 			PresetsJSON: presets,
 		})
-	}))
+	})))
 
-	mux.HandleFunc("/ui/categories/save", postHX(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ui/categories/save", postHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
 		val := discovery.NormalizePresetCategoriesJSON(r.FormValue("preset_categories"))
 		if err := d.Memory.SaveConfig(domain.WithAdminBypass(r.Context()), map[string]string{"preset_categories": val}); err != nil {
@@ -364,13 +384,13 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 			return
 		}
 		renderMemoriesAfterMutation(w, r, d, lang, "Category presets saved", true, false)
-	}))
+	})))
 
-	mux.HandleFunc("/ui/engines", getHX(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ui/engines", getHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		renderEnginesSection(w, r, d, requestLang(r), r.URL.Query(), "", "")
-	}))
+	})))
 
-	mux.HandleFunc("/ui/engines/download-box", getHX(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ui/engines/download-box", getHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
 		view := buildEnginesView(r.Context(), d, lang, r.URL.Query(), "", "")
 		if !view.LocalModels.Download.Active {
@@ -379,9 +399,9 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 			}
 		}
 		writeHTMLTemplate(w, "engine_download_box", view)
-	}))
+	})))
 
-	mux.HandleFunc("/ui/engines/discover-gemini", postHX(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ui/engines/discover-gemini", postHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
 		q := url.Values{"view": {"gemini"}, "discover_gemini": {"1"}, "gtier": {r.FormValue("tier")}}
 		_, _, apiErr := discovery.DiscoverGeminiModels(r.Context(), d.Memory.GetConfigMap(r.Context()), r.FormValue("gemini_api_key"))
@@ -389,9 +409,9 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 			setHXTriggers(w, apiErr, false, false)
 		}
 		renderEnginesSection(w, r, d, lang, q, r.FormValue("gemini_api_key"), "")
-	}))
+	})))
 
-	mux.HandleFunc("/ui/engines/discover-jev", postHX(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ui/engines/discover-jev", postHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
 		q := url.Values{"view": {"jev"}, "discover_jev": {"1"}}
 		disc := discovery.DiscoverSystemOneEndpoint(r.Context(), d.Memory.GetConfigMap(r.Context()), r.FormValue("jev_api_url"), r.FormValue("typesafe_api_key"))
@@ -399,9 +419,9 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 			setHXTriggers(w, disc.APIError, false, false)
 		}
 		renderEnginesSection(w, r, d, lang, q, r.FormValue("typesafe_api_key"), r.FormValue("jev_api_url"))
-	}))
+	})))
 
-	mux.HandleFunc("/ui/engines/save", postHX(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ui/engines/save", postHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
 		prov := strings.ToLower(strings.TrimSpace(r.FormValue("provider")))
 		pairs := map[string]string{"active_provider": prov}
@@ -430,9 +450,9 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 			fmt.Sprintf("추론 엔진 저장 완료: %s", strings.ToUpper(prov)),
 		)
 		renderEnginesToast(w, r, d, lang, msg, prov)
-	}))
+	})))
 
-	mux.HandleFunc("/ui/engines/routing", postHX(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ui/engines/routing", postHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
 		_ = r.ParseForm()
 		mode := strings.TrimSpace(r.FormValue("mode"))
@@ -469,18 +489,18 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 			msg = langText(lang, "All features reset to bulk default engine", "모든 기능을 일괄 기본 엔진으로 되돌렸습니다")
 		}
 		renderEnginesToast(w, r, d, lang, msg, r.FormValue("view"))
-	}))
+	})))
 
-	mux.HandleFunc("/ui/engines/telemetry/reset", postHX(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ui/engines/telemetry/reset", postHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
 		if err := d.Memory.Router().ResetTelemetry(r.Context()); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		renderEnginesToast(w, r, d, lang, langText(lang, "Evaluator telemetry reset", "추론 엔진 텔레메트리를 초기화했습니다"), r.FormValue("view"))
-	}))
+	})))
 
-	mux.HandleFunc("/ui/models/download", postHX(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ui/models/download", postHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
 		action := strings.TrimSpace(r.FormValue("action"))
 		var toast string
@@ -503,9 +523,9 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 			toast = "Downloading " + fname
 		}
 		renderEnginesToast(w, r, d, lang, toast, "gguf")
-	}))
+	})))
 
-	mux.HandleFunc("/ui/models/server", postHX(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ui/models/server", postHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
 		action := strings.TrimSpace(r.FormValue("action"))
 		model := strings.TrimSpace(r.FormValue("model"))
@@ -551,7 +571,7 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 			return
 		}
 		renderEnginesToast(w, r, d, lang, toast, "gguf")
-	}))
+	})))
 
 	registerSSRCalibrateRoutes(mux, d)
 	registerSSRTeamRoutes(mux, d)

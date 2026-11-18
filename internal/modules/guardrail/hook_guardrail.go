@@ -12,59 +12,6 @@ import (
 	"memorize/internal/infra/sqlite"
 )
 
-func formatDiffLines(prefix string, lines []string) string {
-	var sb strings.Builder
-	for i, l := range lines {
-		if i > 0 {
-			sb.WriteByte('\n')
-		}
-		sb.WriteString(prefix)
-		sb.WriteString(domain.CompactDiffLine(l, domain.MaxDiffSingleLineBytes))
-	}
-	return sb.String()
-}
-
-func trimChangedLineEdges(oldRaw, newRaw string) (oldMid, newMid []string) {
-	oldLines := strings.Split(oldRaw, "\n")
-	newLines := strings.Split(newRaw, "\n")
-	p := 0
-	for p < len(oldLines) && p < len(newLines) && oldLines[p] == newLines[p] {
-		p++
-	}
-	oldRem := oldLines[p:]
-	newRem := newLines[p:]
-	s := 0
-	for s < len(oldRem) && s < len(newRem) && oldRem[len(oldRem)-1-s] == newRem[len(newRem)-1-s] {
-		s++
-	}
-	return oldRem[:len(oldRem)-s], newRem[:len(newRem)-s]
-}
-
-func formatEdgeDiff(oldMid, newMid []string, addPrefix string, maxBytes int) string {
-	if len(oldMid) == 0 && len(newMid) == 0 {
-		return ""
-	}
-	if len(oldMid) > 0 && len(newMid) > 0 {
-		removed := formatDiffLines("- ", oldMid)
-		added := formatDiffLines("+ ", newMid)
-		combined := removed + "\n" + added
-		if maxBytes > 0 && len(combined) > maxBytes {
-			half := max(64, (maxBytes-50)/2)
-			combined = domain.TruncateUTF8Bytes(removed, half) + "\n" + domain.TruncateUTF8Bytes(added, half)
-		}
-		return combined
-	}
-	if len(newMid) > 0 {
-		return domain.TruncateUTF8Bytes(formatDiffLines(addPrefix, newMid), maxBytes)
-	}
-	return domain.TruncateUTF8Bytes("Removed:\n"+formatDiffLines("", oldMid), maxBytes)
-}
-
-func diffEditSnippet(oldRaw, newRaw string) string {
-	oldMid, newMid := trimChangedLineEdges(oldRaw, newRaw)
-	return formatEdgeDiff(oldMid, newMid, "", 950)
-}
-
 func (s *Service) activeOverrideTurnInput(ctx context.Context, ev NormalizedHookEvent, scopeKey string) string {
 	if ev.SessionID == "" || s.mem.IsTurnMutated(ctx, ev.SessionID, scopeKey) {
 		return ""
@@ -104,21 +51,28 @@ func (s *Service) runGuardrailHook(ctx context.Context, ev NormalizedHookEvent, 
 		s.mem.TouchTurnSession(ctx, ev.SessionID, scope)
 	}
 	var stagedSections []fileDiffSection
-	if plan == "" && ev.Phase == domain.HookPhasePreCommit && repoDir != "" {
-		if stagedFiles, err := git.StagedDiffFiles(ctx, repoDir); err == nil && len(stagedFiles) > 0 {
-			stagedSections = make([]fileDiffSection, 0, len(stagedFiles))
-			for _, sf := range stagedFiles {
-				if sf.Binary || sf.Body == "(whitespace/formatting only)" {
+	if plan == "" && ev.Phase == domain.HookPhasePreCommit {
+		if ev.ClientCtx != nil && len(ev.ClientCtx.StagedDiffs) > 0 {
+			stagedSections = make([]fileDiffSection, 0, len(ev.ClientCtx.StagedDiffs))
+			for _, sf := range ev.ClientCtx.StagedDiffs {
+				stagedSections = append(stagedSections, fileDiffSection{Label: sf.Label, Body: sf.Body})
+			}
+		} else if repoDir != "" {
+			if stagedFiles, err := git.StagedDiffFiles(ctx, repoDir); err == nil && len(stagedFiles) > 0 {
+				stagedSections = make([]fileDiffSection, 0, len(stagedFiles))
+				for _, sf := range stagedFiles {
+					if sf.Binary || sf.Body == "(whitespace/formatting only)" {
+						stagedSections = append(stagedSections, fileDiffSection{
+							Label: sf.Path,
+							Body:  fmt.Sprintf("File: %s %s", sf.Path, sf.Body),
+						})
+						continue
+					}
 					stagedSections = append(stagedSections, fileDiffSection{
 						Label: sf.Path,
-						Body:  fmt.Sprintf("File: %s %s", sf.Path, sf.Body),
+						Body:  fmt.Sprintf("File: %s\n%s", sf.Path, sf.Body),
 					})
-					continue
 				}
-				stagedSections = append(stagedSections, fileDiffSection{
-					Label: sf.Path,
-					Body:  fmt.Sprintf("File: %s\n%s", sf.Path, sf.Body),
-				})
 			}
 		}
 	}
@@ -152,7 +106,9 @@ func (s *Service) runGuardrailHook(ctx context.Context, ev NormalizedHookEvent, 
 	// File edits pass PreToolUse after the pre-mutate gate and collect their pre-turn baseline
 	// so the Stop hook evaluates the net turn diff once and triggers self-correction on violations.
 	if ev.Phase == domain.HookPhasePreTool && strings.TrimSpace(ev.Raw.ProposedPlan) == "" && isFileEditTool(toolName) {
-		s.recordPendingTurnEdit(ctx, sid, scope, repoDir, toolName, ev, plan)
+		if ev.ClientCtx == nil || !ev.ClientCtx.RemoteManagedEdit {
+			s.recordPendingTurnEdit(ctx, sid, scope, repoDir, toolName, ev, plan)
+		}
 		return codec.FormatAllowPreTool()
 	}
 
@@ -226,6 +182,7 @@ func (s *Service) recordVerifyOutcomeLog(ctx context.Context, scope, source, too
 	vIDs, vDetails := formatViolationDetails(blocking)
 	_, _ = s.RecordGuardrailLog(ctx, domain.GuardrailLogInput{
 		Scope:       scope,
+		IsPrivate:   hasPersonalViolation(blocking),
 		Source:      source,
 		ToolName:    toolName,
 		Verdict:     domain.GuardrailVerdictRuleViolation,

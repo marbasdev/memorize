@@ -47,6 +47,9 @@ type hookPayload struct {
 
 	// Claude Code Stop loop guard
 	StopHookActive bool `json:"stop_hook_active"`
+
+	// Remote Thin Client resolved context/diffs
+	ClientCtx *domain.ClientHookContext `json:"client_ctx,omitempty"`
 }
 
 // NormalizedHookEvent is the canonical internal representation of any coding-agent
@@ -68,6 +71,7 @@ type NormalizedHookEvent struct {
 	ToolName   string
 	ToolInput  map[string]any
 	TargetPath string
+	ClientCtx  *domain.ClientHookContext
 }
 
 func decodeHookEvent(mode string, rawStdin []byte) NormalizedHookEvent {
@@ -98,15 +102,7 @@ func decodeHookEvent(mode string, rawStdin []byte) NormalizedHookEvent {
 		toolName = "git-commit"
 	}
 
-	var targetPath string
-	for _, k := range []string{"file_path", "Path", "path", "TargetFile", "target_file", "notebook_path"} {
-		if v, ok := toolIn[k]; ok {
-			if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
-				targetPath = strings.TrimSpace(s)
-				break
-			}
-		}
-	}
+	targetPath := domain.ExtractTargetFilePath(toolIn)
 
 	return NormalizedHookEvent{
 		Mode:       m,
@@ -125,6 +121,7 @@ func decodeHookEvent(mode string, rawStdin []byte) NormalizedHookEvent {
 		ToolName:   toolName,
 		ToolInput:  toolIn,
 		TargetPath: targetPath,
+		ClientCtx:  p.ClientCtx,
 	}
 }
 

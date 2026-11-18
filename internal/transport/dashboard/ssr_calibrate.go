@@ -15,6 +15,8 @@ import (
 type ssrGuardrailLogsData struct {
 	Lang       string
 	OOB        bool
+	ServerMode bool
+	CanAdmin   bool
 	Query      domain.GuardrailLogQuery
 	Scopes     []string
 	Page       domain.GuardrailLogPage
@@ -121,6 +123,8 @@ func buildGuardrailLogsView(ctx context.Context, d Deps, lang string, q url.Valu
 	return ssrGuardrailLogsData{
 		Lang:       lang,
 		OOB:        oob,
+		ServerMode: domain.IsServerMode(ctx),
+		CanAdmin:   domain.CanAccessAdminFeatures(ctx),
 		Query:      gq,
 		Scopes:     scopes,
 		Page:       pageRes,
@@ -183,13 +187,13 @@ func registerSSRCalibrateRoutes(mux *http.ServeMux, d Deps) {
 		writeHTMLTemplate(w, "guardrails_section", view)
 	}))
 
-	mux.HandleFunc("/ui/calibrate", getHX(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ui/calibrate", getHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
 		view := buildCalibrateView(r.Context(), d, lang, r.URL.Query(), nil)
 		writeHTMLTemplate(w, "calibrate_section", view)
-	}))
+	})))
 
-	mux.HandleFunc("/ui/calibrate/histogram", getHX(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ui/calibrate/histogram", getHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
 		q := r.URL.Query()
 		calScope := q.Get("cal_scope")
@@ -198,7 +202,7 @@ func registerSSRCalibrateRoutes(mux *http.ServeMux, d Deps) {
 		}
 		view := buildConfHistSectionData(r.Context(), d, lang, calScope, nil)
 		writeHTMLTemplate(w, "conf_hist_section", view)
-	}))
+	})))
 
 	mux.HandleFunc("/ui/guardrail-logs", getHX(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
@@ -221,7 +225,7 @@ func registerSSRCalibrateRoutes(mux *http.ServeMux, d Deps) {
 		writeHTMLTemplate(w, "guardrail_logs_section", view)
 	}
 
-	mux.HandleFunc("/ui/guardrail-logs/retention", postHX(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ui/guardrail-logs/retention", postHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
 		days, err := strconv.Atoi(strings.TrimSpace(r.FormValue("retention_days")))
 		if err != nil {
@@ -235,9 +239,9 @@ func registerSSRCalibrateRoutes(mux *http.ServeMux, d Deps) {
 		}
 		msg := formatRetentionToast(lang, "Guardrail log policy saved", "가드레일 기록 보관 정책 저장", pol.GuardrailDays, deleted)
 		renderGuardrailLogsAfterMutation(w, r, lang, msg)
-	}))
+	})))
 
-	mux.HandleFunc("/ui/guardrail-logs/cleanup", postHX(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ui/guardrail-logs/cleanup", postHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
 		sc := strings.TrimSpace(r.FormValue("gr_scope"))
 		if _, has := r.Form["gr_scope"]; !has {
@@ -272,9 +276,9 @@ func registerSSRCalibrateRoutes(mux *http.ServeMux, d Deps) {
 			koMsg = fmt.Sprintf("가드레일 통과(PASS) 기록 %d건 정리 완료 (위반 · 차단 이력 보존)", deleted)
 		}
 		renderGuardrailLogsAfterMutation(w, r, lang, langText(lang, enMsg, koMsg))
-	}))
+	})))
 
-	mux.HandleFunc("/ui/thresholds", postHX(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ui/thresholds", postHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
 		ctx := r.Context()
 		var target domain.Thresholds
@@ -308,9 +312,9 @@ func registerSSRCalibrateRoutes(mux *http.ServeMux, d Deps) {
 		view.Thresholds = saved
 		setHXTriggers(w, toast, false, false)
 		writeHTMLTemplate(w, "thresholds_card", view)
-	}))
+	})))
 
-	mux.HandleFunc("/ui/calibrate-confidence", postHX(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ui/calibrate-confidence", postHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		ctx := domain.WithAdminBypass(r.Context())
 		lang := requestLang(r)
 		calScope := r.FormValue("cal_scope")
@@ -347,9 +351,9 @@ func registerSSRCalibrateRoutes(mux *http.ServeMux, d Deps) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
 		_, _ = w.Write(body)
-	}))
+	})))
 
-	mux.HandleFunc("/ui/probe", postHX(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ui/probe", postHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
 		res, err := d.Memory.DiagnoseRelevance(r.Context(), r.FormValue("scope"), r.FormValue("query"))
 		if err != nil {
@@ -381,7 +385,7 @@ func registerSSRCalibrateRoutes(mux *http.ServeMux, d Deps) {
 			Pinned:     res.Pinned,
 			Scored:     scored,
 		})
-	}))
+	})))
 
 	mux.HandleFunc("/ui/verify", postHX(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)

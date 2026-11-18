@@ -62,6 +62,50 @@ func ResolveRoot(dir string) string {
 	return ""
 }
 
+// RemoteOriginURL returns the trimmed origin remote URL for repoRoot, or empty if unconfigured.
+func RemoteOriginURL(ctx context.Context, repoRoot string) string {
+	if strings.TrimSpace(repoRoot) == "" {
+		return ""
+	}
+	out, err := Run(ctx, repoRoot, "remote", "get-url", "origin")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
+// CanonicalScope resolves the canonical "project:<slug>" and Git repository root for dir.
+// When dir is a git repository or worktree, origin remote name (or common-dir name) takes precedence
+// over arbitrary local clone/worktree folder names so teammates share one canonical scope.
+func CanonicalScope(ctx context.Context, dir string) (string, string) {
+	root := ResolveRoot(dir)
+	if root == "" {
+		return "", ""
+	}
+	if origin := RemoteOriginURL(ctx, root); origin != "" {
+		if slug := domain.CanonicalProjectSlugFromRemote(origin); slug != "" {
+			return "project:" + slug, root
+		}
+	}
+	if common, err := Run(ctx, root, "rev-parse", "--git-common-dir"); err == nil && strings.TrimSpace(common) != "" {
+		c := strings.TrimSpace(common)
+		if !filepath.IsAbs(c) {
+			c = filepath.Join(root, c)
+		}
+		c = filepath.Clean(c)
+		if strings.EqualFold(filepath.Base(c), ".git") {
+			if base := strings.ToLower(strings.TrimSpace(filepath.Base(filepath.Dir(c)))); base != "" && base != "." && base != "/" {
+				return "project:" + base, root
+			}
+		}
+	}
+	base := strings.ToLower(strings.TrimSpace(filepath.Base(root)))
+	if base != "" && base != "." && base != "/" {
+		return "project:" + base, root
+	}
+	return "", root
+}
+
 // FastHead resolves the 12-char HEAD commit hash quickly by reading .git/HEAD directly before invoking git.
 func FastHead(ctx context.Context, root string) string {
 	raw, err := os.ReadFile(filepath.Join(root, ".git", "HEAD"))

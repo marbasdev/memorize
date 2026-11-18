@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"sort"
 	"strings"
 	"unicode/utf8"
 )
@@ -136,4 +137,185 @@ func CompactUnifiedDiffBody(raw string) (body string, whitespaceOnly bool) {
 		return "(whitespace/formatting only)", true
 	}
 	return strings.TrimSpace(strings.Join(out, "\n")), false
+}
+
+func formatDiffLines(prefix string, lines []string) string {
+	var sb strings.Builder
+	for i, l := range lines {
+		if i > 0 {
+			sb.WriteByte('\n')
+		}
+		sb.WriteString(prefix)
+		sb.WriteString(CompactDiffLine(l, MaxDiffSingleLineBytes))
+	}
+	return sb.String()
+}
+
+func trimChangedLineEdges(oldRaw, newRaw string) (oldMid, newMid []string) {
+	oldLines := strings.Split(oldRaw, "\n")
+	newLines := strings.Split(newRaw, "\n")
+	p := 0
+	for p < len(oldLines) && p < len(newLines) && oldLines[p] == newLines[p] {
+		p++
+	}
+	oldRem := oldLines[p:]
+	newRem := newLines[p:]
+	s := 0
+	for s < len(oldRem) && s < len(newRem) && oldRem[len(oldRem)-1-s] == newRem[len(newRem)-1-s] {
+		s++
+	}
+	return oldRem[:len(oldRem)-s], newRem[:len(newRem)-s]
+}
+
+func formatEdgeDiff(oldMid, newMid []string, addPrefix string, maxBytes int) string {
+	if len(oldMid) == 0 && len(newMid) == 0 {
+		return ""
+	}
+	if len(oldMid) > 0 && len(newMid) > 0 {
+		removed := formatDiffLines("- ", oldMid)
+		added := formatDiffLines("+ ", newMid)
+		combined := removed + "\n" + added
+		if maxBytes > 0 && len(combined) > maxBytes {
+			half := max(64, (maxBytes-50)/2)
+			combined = TruncateUTF8Bytes(removed, half) + "\n" + TruncateUTF8Bytes(added, half)
+		}
+		return combined
+	}
+	if len(newMid) > 0 {
+		return TruncateUTF8Bytes(formatDiffLines(addPrefix, newMid), maxBytes)
+	}
+	return TruncateUTF8Bytes("Removed:\n"+formatDiffLines("", oldMid), maxBytes)
+}
+
+// DiffEditSnippet builds a bounded changed-line summary between oldRaw and newRaw for tool fallback snippets.
+func DiffEditSnippet(oldRaw, newRaw string) string {
+	oldMid, newMid := trimChangedLineEdges(oldRaw, newRaw)
+	return formatEdgeDiff(oldMid, newMid, "", 950)
+}
+
+// FormatChangedLineHunks emits only added/removed line hunks between oldRaw and newRaw
+// using unique matching anchors (patience LIS) in O(m+n) time and space, collapsing
+// pure whitespace-only formatting hunks.
+func FormatChangedLineHunks(oldRaw, newRaw string, maxBytes int) string {
+	oldMid, newMid := trimChangedLineEdges(oldRaw, newRaw)
+	m, n := len(oldMid), len(newMid)
+	if m == 0 || n == 0 {
+		if IsWhitespaceOnlyDiffHunk(oldMid, newMid) {
+			return "(whitespace/formatting only)"
+		}
+		return formatEdgeDiff(oldMid, newMid, "+ ", maxBytes)
+	}
+
+	cntO, cntN, posN := make(map[string]int, m), make(map[string]int, n), make(map[string]int, n)
+	for _, l := range oldMid {
+		cntO[l]++
+	}
+	for j, l := range newMid {
+		cntN[l]++
+		posN[l] = j
+	}
+	type anchor struct{ o, n int }
+	var anchors []anchor
+	for i, l := range oldMid {
+		if cntO[l] == 1 && cntN[l] == 1 {
+			anchors = append(anchors, anchor{i, posN[l]})
+		}
+	}
+	if len(anchors) == 0 {
+		if IsWhitespaceOnlyDiffHunk(oldMid, newMid) {
+			return "(whitespace/formatting only)"
+		}
+		return formatEdgeDiff(oldMid, newMid, "+ ", maxBytes)
+	}
+
+	tails := make([]int, 0, len(anchors))
+	prev := make([]int, len(anchors))
+	for i, a := range anchors {
+		pos := sort.Search(len(tails), func(k int) bool { return anchors[tails[k]].n >= a.n })
+		prev[i] = -1
+		if pos > 0 {
+			prev[i] = tails[pos-1]
+		}
+		if pos == len(tails) {
+			tails = append(tails, i)
+		} else {
+			tails[pos] = i
+		}
+	}
+	var kept []anchor
+	for idx := tails[len(tails)-1]; idx >= 0; idx = prev[idx] {
+		kept = append(kept, anchors[idx])
+	}
+	for l, r := 0, len(kept)-1; l < r; l, r = l+1, r-1 {
+		kept[l], kept[r] = kept[r], kept[l]
+	}
+
+	type hunk struct{ oldLines, newLines []string }
+	var hunks []hunk
+	prevO, prevN := 0, 0
+	for _, a := range kept {
+		if a.o < prevO || a.n < prevN {
+			continue
+		}
+		aO, aN := a.o, a.n
+		for aO > prevO && aN > prevN && oldMid[aO-1] == newMid[aN-1] {
+			aO--
+			aN--
+		}
+		if prevO < aO || prevN < aN {
+			hunks = append(hunks, hunk{oldMid[prevO:aO], newMid[prevN:aN]})
+		}
+		bO, bN := a.o+1, a.n+1
+		for bO < m && bN < n && oldMid[bO] == newMid[bN] {
+			bO++
+			bN++
+		}
+		prevO, prevN = bO, bN
+	}
+	if prevO < m || prevN < n {
+		hunks = append(hunks, hunk{oldMid[prevO:], newMid[prevN:]})
+	}
+	if len(hunks) == 0 {
+		return ""
+	}
+
+	var semantic []hunk
+	wsHunks := 0
+	for _, h := range hunks {
+		if IsWhitespaceOnlyDiffHunk(h.oldLines, h.newLines) {
+			wsHunks++
+			continue
+		}
+		semantic = append(semantic, h)
+	}
+	if len(semantic) == 0 && wsHunks > 0 {
+		return "(whitespace/formatting only)"
+	}
+	hunks = semantic
+
+	perCap := maxBytes
+	if len(hunks) > 1 && maxBytes > 0 {
+		perCap = max(200, (maxBytes-len(hunks)*8)/len(hunks))
+	}
+	var sb strings.Builder
+	for i, h := range hunks {
+		rem, add := formatDiffLines("- ", h.oldLines), formatDiffLines("+ ", h.newLines)
+		if perCap > 0 && len(rem)+len(add)+1 > perCap {
+			if rem != "" && add != "" {
+				rem = TruncateUTF8Bytes(rem, max(64, (perCap-8)/2))
+				add = TruncateUTF8Bytes(add, perCap-len(rem)-4)
+			} else {
+				rem, add = TruncateUTF8Bytes(rem, perCap), TruncateUTF8Bytes(add, perCap)
+			}
+		}
+		if i > 0 {
+			sb.WriteString("\n...\n")
+		}
+		sb.WriteString(rem)
+		if rem != "" && add != "" {
+			sb.WriteByte('\n')
+		}
+		sb.WriteString(add)
+	}
+	return TruncateUTF8Bytes(sb.String(), maxBytes)
 }

@@ -31,14 +31,15 @@ type diffPlanChunk struct {
 }
 
 type chunkedVerifyOutcome struct {
-	RuleCount       int
-	TotalChunks     int
-	EvaluatedChunks int
-	Blocking        []domain.PlanViolation
-	Partial         bool
-	UnverifiedFiles []string
-	CombinedSnippet string
-	VerifyErr       error
+	RuleCount            int
+	TotalChunks          int
+	EvaluatedChunks      int
+	Blocking             []domain.PlanViolation
+	HasPersonalViolation bool
+	Partial              bool
+	UnverifiedFiles      []string
+	CombinedSnippet      string
+	VerifyErr            error
 }
 
 func estimateMaxRuleBatchBytes(rules []domain.Fact, batchSize int) int {
@@ -444,5 +445,11 @@ func (s *Service) evaluateGuardrailPlanChunks(
 		merged = append(merged, v)
 	}
 	out.Blocking = filterAndSortViolations(merged, minProb)
+	for _, v := range out.Blocking {
+		if domain.NormalizeScope(v.Scope) == "personal" {
+			out.HasPersonalViolation = true
+			break
+		}
+	}
 	return out
 }

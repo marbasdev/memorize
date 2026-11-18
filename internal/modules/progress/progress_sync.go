@@ -138,14 +138,16 @@ func (s *Service) RecordMemoryMutationProgress(ctx context.Context, rawScope, ca
 
 	var recentID int64
 	var recentMems string
+	accFilter := domain.EffectivePrincipalAccount(ctx)
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, COALESCE(memory_ids, '')
 		FROM project_progress
 		WHERE scope = ? AND category = ? AND COALESCE(sub_category, '') = ?
 		  AND source = 'memory'
+		  AND (? = '' OR account = ?)
 		  AND updated_at >= datetime('now', '-15 minutes')
 		ORDER BY id DESC LIMIT 1
-	`, sc, cat, sub).Scan(&recentID, &recentMems)
+	`, sc, cat, sub, accFilter, accFilter).Scan(&recentID, &recentMems)
 	if err == nil && recentID > 0 {
 		mergedMems := ParseMemoryIDsStr(recentMems)
 		hasNew := false
@@ -202,30 +204,7 @@ func (s *Service) RecordMemoryMutationProgress(ctx context.Context, rawScope, ca
 }
 
 func (s *Service) collectPendingGitCommits(ctx context.Context, scope, repoRoot, lastCommit string, maxInitial int) (string, []domain.GitCommitBrief) {
-	existingSHAs := make(map[string]bool)
-	if rows, err := s.db.QueryContext(ctx, `SELECT COALESCE(commit_sha, ''), COALESCE(details, '') FROM project_progress WHERE scope = ?`, scope); err == nil {
-		for rows.Next() {
-			var sha, det string
-			if rows.Scan(&sha, &det) == nil {
-				if clean := strings.TrimSpace(sha); len(clean) >= 7 {
-					existingSHAs[clean[:7]] = true
-				}
-				for _, line := range strings.Split(det, "\n") {
-					line = strings.TrimSpace(line)
-					if strings.HasPrefix(line, "[git:") {
-						if r := strings.Index(line, "]"); r > 5 {
-							s7 := strings.TrimSpace(line[5:r])
-							if len(s7) >= 7 {
-								existingSHAs[s7[:7]] = true
-							}
-						}
-					}
-				}
-			}
-		}
-		rows.Close()
-	}
-	return git.CollectPendingCommits(ctx, repoRoot, lastCommit, maxInitial, existingSHAs)
+	return git.CollectPendingCommits(ctx, repoRoot, lastCommit, maxInitial, s.loadExistingCommitSHAs(ctx, scope))
 }
 
 func (s *Service) unlinkedActiveMemories(ctx context.Context, scope string) ([]domain.Fact, error) {

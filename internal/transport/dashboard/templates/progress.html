@@ -135,6 +135,7 @@
                       <button type="button" class="prog-track-chip {{if eq $.TrackFilter .Track}}active{{end}}"
                         hx-get="/ui/progress" hx-include="#progressFilterForm" hx-vals="{{trackToggleJSON $.TrackFilter .Track}}"
                         hx-target="#progressSection" hx-swap="innerHTML">{{.Track}}</button>
+                      {{if .Account}}<span class="tag-chip">@{{.Account}}</span>{{end}}
                       {{if .CommitSHA}}<span class="tag-chip">git:{{.CommitSHA}}</span>{{end}}
                     </div>
                     <span style="font-family:var(--mono);font-size:0.68rem;color:var(--subtle);" title="{{fmtLocalTimestamp .UpdatedAt}}">{{fmtDoneItemStamp $.Lang .}}</span>
@@ -153,6 +154,7 @@
 
   <div class="prog-sec-head">
     <span>{{t .Lang "prog_history_title"}} ({{.Overview.FilteredCount}})</span>
+    {{if .CanAdmin}}
     <div class="ret-header-actions">
       <label class="ret-inline-ctl" for="progRetentionDays">
         <span>{{t .Lang "ret_auto_lbl"}}</span>
@@ -190,6 +192,7 @@
           @click="progCleanConfirm = false; flushPendingLive()">{{t .Lang "btn_cancel"}}</button>
       </div>
     </div>
+    {{end}}
   </div>
 
   {{if not .Overview.Timeline}}
@@ -211,6 +214,7 @@
                     <button type="button" class="prog-track-chip {{if eq $.TrackFilter .Track}}active{{end}}"
                       hx-get="/ui/progress" hx-include="#progressFilterForm" hx-vals="{{trackToggleJSON $.TrackFilter .Track}}"
                       hx-target="#progressSection" hx-swap="innerHTML">{{.Track}}</button>
+                    {{if .Account}}<span class="tag-chip">@{{.Account}}</span>{{end}}
                   </div>
                   <div style="display:flex;align-items:center;gap:0.35rem;flex-wrap:wrap;">
                     <span style="font-family:var(--mono);font-size:0.7rem;color:var(--subtle);" title="{{fmtLocalTimestamp .UpdatedAt}}">#{{.ID}} · {{fmtProgressStamp $.Lang .UpdatedAt}}</span>

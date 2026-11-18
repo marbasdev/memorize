@@ -85,13 +85,17 @@ func setHXPortTriggers(w http.ResponseWriter, toast, redirectURL string, closeMo
 }
 
 func registerSSRPortRoutes(mux *http.ServeMux, d Deps) {
-	mux.HandleFunc("/ui/modal/ports", getHX(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ui/modal/ports", getHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
 		data := buildPortsModalData(r, d, lang)
 		writeHTMLTemplate(w, "modal_ports", data)
-	}))
+	})))
 
-	mux.HandleFunc("/ui/ports/save", postHX(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ui/ports/save", postHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
+		if domain.IsServerMode(r.Context()) && d.Hooks.ApplyDaemonPortFn == nil {
+			http.Error(w, "ports are configured via memorize serve --addr in team server mode", http.StatusBadRequest)
+			return
+		}
 		lang := requestLang(r)
 		var dp, gp int
 		if r.FormValue("reset") == "1" {
@@ -163,5 +167,5 @@ func registerSSRPortRoutes(mux *http.ServeMux, d Deps) {
 		)
 		setHXPortTriggers(w, toast, "", true)
 		renderEnginesSection(w, r, d, lang, url.Values{"view": {"gguf"}}, "", "")
-	}))
+	})))
 }

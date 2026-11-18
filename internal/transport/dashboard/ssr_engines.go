@@ -320,6 +320,9 @@ func buildTaskRouteRows(ctx context.Context, d Deps, lang string, cfg map[string
 }
 
 func buildEnginesView(ctx context.Context, d Deps, lang string, q url.Values, overrideKey, overrideURL string) ssrEnginesData {
+	if !domain.CanAccessAdminFeatures(ctx) {
+		return ssrEnginesData{Lang: lang}
+	}
 	provName := d.Memory.ProviderName()
 	rawCfg := d.Memory.GetConfigMap(ctx)
 	portCfg := config.LoadPortConfig(d.Memory.DBPath())

@@ -1,10 +1,17 @@
 package http
 
-import "context"
+import (
+	"context"
+
+	"memorize/internal/domain"
+)
 
 // DaemonStatus describes the runtime state returned by /api/daemon/status.
 type DaemonStatus struct {
 	Running              bool   `json:"running"`
+	ServerMode           bool   `json:"server_mode,omitempty"`
+	Account              string `json:"account,omitempty"`
+	Role                 string `json:"role,omitempty"`
 	PID                  int    `json:"pid"`
 	Version              string `json:"version"`
 	StartedAt            string `json:"started_at"`
@@ -78,4 +85,14 @@ type DashboardHooks struct {
 	BinMtimeFn        func() int64
 	DaemonStatusFn    func() DaemonPortState
 	ApplyDaemonPortFn func(ctx context.Context, daemonPort, ggufPort int) (DaemonPortApplyResult, error)
+}
+
+// DaemonHookRequest carries one hook execution payload from CLI bridge to daemon /api/daemon/hook.
+type DaemonHookRequest struct {
+	Mode      string                    `json:"mode"`
+	Stdin     string                    `json:"stdin"`
+	Cwd       string                    `json:"cwd"`
+	Account   string                    `json:"account"`
+	TimeoutMs int64                     `json:"timeout_ms,omitempty"`
+	ClientCtx *domain.ClientHookContext `json:"client_ctx,omitempty"`
 }

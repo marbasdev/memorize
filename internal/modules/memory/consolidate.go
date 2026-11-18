@@ -14,7 +14,7 @@ import (
 
 // TopActiveScope returns the scope with the highest number of active memories, or "" if none exist.
 func (s *Service) TopActiveScope(ctx context.Context) string {
-	isAdmin := domain.IsAdminContext(ctx)
+	isAdmin := s.canBypassPersonal(ctx)
 	curAcc := s.CurrentAccount(ctx)
 	var sc string
 	_ = s.db.QueryRowContext(ctx, `
@@ -306,6 +306,9 @@ func (s *Service) ConsolidateMemories(ctx context.Context, rawScope, category st
 		return 0, fmt.Errorf("security guard: %s", reason)
 	}
 	targetScope := domain.NormalizeScope(rawScope)
+	if err := domain.CanModifyScope(ctx, targetScope); err != nil {
+		return 0, err
+	}
 	cat, subCat := domain.SplitCategoryAndSub(targetScope, category, "")
 	pin := boolToInt(pinned)
 
@@ -371,7 +374,7 @@ func (s *Service) ConsolidateMemories(ctx context.Context, rawScope, category st
 	}
 	// Keep SQLite session_sent rows intact so sessions that previously saw sourceIDs get a 1-time (Replaces: ...) notice.
 	s.clearInMemorySessionIDs(sourceIDs...)
-	s.MarkTurnScopeMutated(targetScope)
+	s.MarkTurnScopeMutatedCtx(ctx, targetScope)
 	s.RegisterTaxonomyAppendOnly(ctx, targetScope, cat, subCat)
 	s.emitMutation(ctx, MutationEvent{
 		Scope:       targetScope,

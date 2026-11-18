@@ -18,6 +18,9 @@ func (s *Service) GetRetentionPolicy(ctx context.Context) domain.RetentionPolicy
 
 // SetGuardrailRetentionPolicy updates automatic TTL for guardrail audit logs and immediately sweeps expired entries.
 func (s *Service) SetGuardrailRetentionPolicy(ctx context.Context, days int, includeBlocked *bool) (domain.RetentionPolicy, int, error) {
+	if err := domain.RequireAdmin(ctx); err != nil {
+		return s.GetRetentionPolicy(ctx), 0, err
+	}
 	norm := domain.NormalizeRetentionDays(days)
 	pairs := map[string]string{
 		config.CfgGuardrailRetentionDays: strconv.Itoa(norm),
@@ -44,6 +47,9 @@ func (s *Service) SetGuardrailRetentionPolicy(ctx context.Context, days int, inc
 // (olderThanDays == 0 deletes all ages; >0 deletes entries older than N days).
 // When includeBlocked is false, only PASS entries (blocked = 0) are removed and violation/blocked audit logs are preserved.
 func (s *Service) CleanupGuardrailLogs(ctx context.Context, rawScope string, olderThanDays int, includeBlocked bool) (int, error) {
+	if err := domain.RequireAdmin(ctx); err != nil {
+		return 0, err
+	}
 	if olderThanDays < 0 {
 		return 0, fmt.Errorf("older_than_days must be >= 0")
 	}

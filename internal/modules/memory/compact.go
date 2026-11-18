@@ -10,6 +10,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"memorize/internal/domain"
 )
 
 const (
@@ -197,6 +199,7 @@ func (s *Service) upsertSessionCompactState(ctx context.Context, sessionID strin
 // RecordPostCompact records a compaction summary from an explicit compact hook (e.g. Claude Code PostCompact)
 // and clears session_sent immediately so the next SessionStart or turn restores active rules cleanly.
 func (s *Service) RecordPostCompact(ctx context.Context, sessionID, rawSummary, transcriptPath string) {
+	sessionID = domain.ScopedSessionID(ctx, sessionID)
 	if s == nil || sessionID == "" {
 		return
 	}
@@ -238,6 +241,7 @@ func (s *Service) shouldRefreshInitialCheckpoint(ctx context.Context, sessionID,
 // InspectCompactionForHook detects or consumes session compaction state for both start and turn hooks.
 // On compaction, it returns compacted=true along with an optional compacted summary snippet for relevance scoring.
 func (s *Service) InspectCompactionForHook(ctx context.Context, sessionID, transcriptPath, source string, isStart bool) (compacted bool, summary string) {
+	sessionID = domain.ScopedSessionID(ctx, sessionID)
 	if s == nil || s.db == nil || sessionID == "" {
 		return false, ""
 	}

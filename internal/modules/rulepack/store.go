@@ -254,6 +254,36 @@ func (s *Service) ensureLoaded(ctx context.Context, sc string) *cachedRulePack {
 	return entry
 }
 
+// IngestTeamRuleDoc caches a client-provided .memorize/TEAM_RULES.md snapshot for rawScope
+// so remote team server verification honors local repository team rules without host disk access.
+func (s *Service) IngestTeamRuleDoc(ctx context.Context, rawScope, rawMarkdown string) error {
+	if s == nil {
+		return nil
+	}
+	sc := domain.NormalizeScope(rawScope)
+	if !strings.HasPrefix(sc, "project:") {
+		return nil
+	}
+	raw := []byte(rawMarkdown)
+	if len(strings.TrimSpace(rawMarkdown)) == 0 {
+		s.setCache(sc, &cachedRulePack{})
+		return nil
+	}
+	hash := CanonicalHash(raw)
+	if prev := s.getCache(sc); prev != nil && prev.hash == hash {
+		return nil
+	}
+	doc, err := ParseDocument(raw, sc)
+	if err != nil {
+		return err
+	}
+	s.setCache(sc, &cachedRulePack{
+		rules: cloneTeamRules(doc.Rules, hash),
+		hash:  hash,
+	})
+	return nil
+}
+
 func (s *Service) applyMirrorTx(ctx context.Context, sc string, doc *Document, hash, remoteBranch, diskBaselineHash string) ([]string, error) {
 	if s == nil || s.db == nil {
 		return nil, nil

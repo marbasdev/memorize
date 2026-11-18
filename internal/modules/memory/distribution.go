@@ -13,6 +13,8 @@ import (
 // memory proportions (including unclassified items) directly in SQLite without hardcoded cleanup heuristics.
 func (s *Service) GetCategoryDistribution(ctx context.Context, scopeFilter string) (domain.ScopeDistribution, error) {
 	sc := strings.TrimSpace(scopeFilter)
+	visSQL, visArgs := s.memoryVisibilitySQL(ctx, "")
+	args := append([]any{sc, sc}, visArgs...)
 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
@@ -22,9 +24,9 @@ func (s *Service) GetCategoryDistribution(ctx context.Context, scopeFilter strin
 			COALESCE(SUM(CASE WHEN active = 1 AND pinned = 1 THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN active = 0 THEN 1 ELSE 0 END), 0)
 		FROM memories
-		WHERE (? = '' OR scope = ?)
+		WHERE (? = '' OR scope = ?) AND `+visSQL+`
 		GROUP BY 1, 2
-	`, sc, sc)
+	`, args...)
 	if err != nil {
 		return domain.ScopeDistribution{Scope: sc}, err
 	}

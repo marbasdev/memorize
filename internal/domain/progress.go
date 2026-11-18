@@ -101,6 +101,7 @@ type GitMilestoneSummary struct {
 type ProgressRecord struct {
 	ID           int64    `json:"id"`
 	Scope        string   `json:"scope"`
+	Account      string   `json:"account,omitempty"`
 	ProjectName  string   `json:"project_name"`
 	SessionID    string   `json:"session_id,omitempty"`
 	Kind         string   `json:"kind"`
@@ -123,6 +124,7 @@ type ProgressRecord struct {
 // ProgressInput captures fields to insert or update in project_progress.
 type ProgressInput struct {
 	Scope       string
+	Account     string
 	SessionID   string
 	Track       string
 	Category    string
@@ -203,6 +205,7 @@ type ProgressProjectSummary struct {
 // ProgressQuery filters progress activity board and timeline queries.
 type ProgressQuery struct {
 	Scope        string
+	Account      string
 	Kind         string
 	SessionID    string
 	Track        string

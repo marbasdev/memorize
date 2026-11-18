@@ -143,11 +143,19 @@ func (s *Service) RecordProgress(ctx context.Context, in domain.ProgressInput) (
 		sid = s.mem.ResolveEffectiveSessionID(ctx, sc, "")
 	}
 	memStr := formatMemoryIDsStr(in.MemoryIDs)
+	acc := strings.TrimSpace(in.Account)
+	if domain.IsServerMode(ctx) || acc == "" {
+		if s.mem != nil {
+			acc = s.mem.CurrentAccount(ctx)
+		} else {
+			acc = domain.EffectivePrincipalAccount(ctx)
+		}
+	}
 
 	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO project_progress (scope, session_id, track, category, sub_category, summary, details, next_step, memory_ids, commit_sha, source, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-	`, sc, sid, track, cat, sub, summary, details, nextStep, memStr, sha, src)
+		INSERT INTO project_progress (scope, account, session_id, track, category, sub_category, summary, details, next_step, memory_ids, commit_sha, source, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, sc, acc, sid, track, cat, sub, summary, details, nextStep, memStr, sha, src)
 	if err != nil {
 		return domain.ProgressRecord{}, err
 	}
@@ -161,12 +169,12 @@ func (s *Service) GetProgressByID(ctx context.Context, id int64) (domain.Progres
 	var r domain.ProgressRecord
 	var memStr string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, scope, COALESCE(session_id, ''), COALESCE(track, ''), category, COALESCE(sub_category, ''),
+		SELECT id, scope, COALESCE(account, ''), COALESCE(session_id, ''), COALESCE(track, ''), category, COALESCE(sub_category, ''),
 		       summary, COALESCE(details, ''), COALESCE(next_step, ''),
 		       COALESCE(memory_ids, ''), COALESCE(commit_sha, ''), COALESCE(source, 'manual'),
 		       COALESCE(created_at, ''), COALESCE(updated_at, '')
 		FROM project_progress WHERE id = ?
-	`, id).Scan(&r.ID, &r.Scope, &r.SessionID, &r.Track, &r.Category, &r.SubCategory,
+	`, id).Scan(&r.ID, &r.Scope, &r.Account, &r.SessionID, &r.Track, &r.Category, &r.SubCategory,
 		&r.Summary, &r.Details, &r.NextStep, &memStr, &r.CommitSHA, &r.Source, &r.CreatedAt, &r.UpdatedAt)
 	if err != nil {
 		return domain.ProgressRecord{}, fmt.Errorf("progress #%d not found", id)
@@ -251,6 +259,17 @@ func (s *Service) UpdateProgress(ctx context.Context, id int64, in domain.Progre
 
 // DeleteProgress removes one project_progress entry by ID.
 func (s *Service) DeleteProgress(ctx context.Context, id int64) error {
+	if domain.IsServerMode(ctx) {
+		cur, err := s.GetProgressByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if curAcc := domain.EffectivePrincipalAccount(ctx); cur.Account == "" || cur.Account != curAcc {
+			if err := domain.RequireAdmin(ctx); err != nil {
+				return err
+			}
+		}
+	}
 	res, err := s.db.ExecContext(ctx, `DELETE FROM project_progress WHERE id = ?`, id)
 	if err != nil {
 		return err

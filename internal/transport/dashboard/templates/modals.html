@@ -39,7 +39,7 @@
         </div>
         <div class="field-col">
           <label>{{t .Lang "lbl_account"}}</label>
-          <input name="account" class="input" value="{{.Record.Account}}" {{if not .Record.Active}}disabled{{end}}>
+          <input name="account" class="input" value="{{.Record.Account}}" {{if or (not .Record.Active) .ServerMode}}disabled{{end}}>
         </div>
         <div class="field-col">
           <label>{{t .Lang "lbl_category"}}</label>

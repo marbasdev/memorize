@@ -62,6 +62,9 @@ func (s *Service) GetThresholds(ctx context.Context) domain.Thresholds {
 
 // SaveThresholds validates, clamps, and persists admission and retrieval thresholds into SQLite.
 func (s *Service) SaveThresholds(ctx context.Context, th domain.Thresholds) (domain.Thresholds, error) {
+	if err := domain.RequireAdmin(ctx); err != nil {
+		return th, err
+	}
 	th.MinPermanent = domain.Clamp(th.MinPermanent, 0.10, 0.99)
 	th.MinConfidence = domain.Clamp(th.MinConfidence, 0.10, 0.99)
 	th.PinInvariant = domain.Clamp(th.PinInvariant, 0.50, 0.99)
@@ -96,6 +99,8 @@ func (s *Service) GetDashboardStats(ctx context.Context) (domain.DashboardStats,
 func (s *Service) GetDashboardStatsForScope(ctx context.Context, scopeFilter string) (domain.DashboardStats, error) {
 	sc := strings.TrimSpace(scopeFilter)
 	st := domain.DashboardStats{ConfidenceBins: make([]int, 5)}
+	visSQL, visArgs := s.memoryVisibilitySQL(ctx, "")
+	args := append([]any{sc, sc}, visArgs...)
 	err := s.db.QueryRowContext(ctx, `
 		SELECT
 			COUNT(*),
@@ -108,8 +113,8 @@ func (s *Service) GetDashboardStatsForScope(ctx context.Context, scopeFilter str
 			COALESCE(SUM(CASE WHEN active = 1 AND confidence >= 0.90 AND confidence < 0.95 THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN active = 1 AND confidence >= 0.95 THEN 1 ELSE 0 END), 0)
 		FROM memories
-		WHERE (? = '' OR scope = ?)
-	`, sc, sc).Scan(
+		WHERE (? = '' OR scope = ?) AND `+visSQL+`
+	`, args...).Scan(
 		&st.TotalCount, &st.ActiveCount, &st.PinnedCount, &st.TombCount,
 		&st.ConfidenceBins[0], &st.ConfidenceBins[1], &st.ConfidenceBins[2], &st.ConfidenceBins[3], &st.ConfidenceBins[4],
 	)
@@ -118,9 +123,10 @@ func (s *Service) GetDashboardStatsForScope(ctx context.Context, scopeFilter str
 
 // GetDashboardFacets collects sorted distinct scopes, accounts, categories, sub-categories, and recent sessions.
 func (s *Service) GetDashboardFacets(ctx context.Context) (domain.DashboardFacets, error) {
+	visSQL, visArgs := s.memoryVisibilitySQL(ctx, "")
 	scopeSet := map[string]bool{"global": true, "personal": true}
 	if rows, err := s.db.QueryContext(ctx, `
-		SELECT DISTINCT scope FROM memories WHERE COALESCE(scope, '') != ''
+		SELECT DISTINCT scope FROM memories WHERE COALESCE(scope, '') != '' AND `+visSQL+`
 		UNION
 		SELECT DISTINCT scope FROM project_progress WHERE COALESCE(scope, '') != ''
 		UNION
@@ -128,7 +134,7 @@ func (s *Service) GetDashboardFacets(ctx context.Context) (domain.DashboardFacet
 		UNION
 		SELECT DISTINCT scope FROM team_rule_states WHERE COALESCE(scope, '') != ''
 		UNION
-		SELECT DISTINCT scope FROM team_rule_sync WHERE COALESCE(scope, '') != ''`); err == nil {
+		SELECT DISTINCT scope FROM team_rule_sync WHERE COALESCE(scope, '') != ''`, visArgs...); err == nil {
 		for rows.Next() {
 			var sc string
 			if rows.Scan(&sc) == nil && strings.TrimSpace(sc) != "" {
@@ -142,7 +148,7 @@ func (s *Service) GetDashboardFacets(ctx context.Context) (domain.DashboardFacet
 	if curAcc := s.CurrentAccount(ctx); curAcc != "" {
 		accSet[curAcc] = true
 	}
-	if rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT account FROM memories WHERE COALESCE(account, '') != ''`); err == nil {
+	if rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT account FROM memories WHERE COALESCE(account, '') != '' AND `+visSQL, visArgs...); err == nil {
 		for rows.Next() {
 			var ac string
 			if rows.Scan(&ac) == nil && strings.TrimSpace(ac) != "" {
@@ -154,7 +160,7 @@ func (s *Service) GetDashboardFacets(ctx context.Context) (domain.DashboardFacet
 
 	catSet := map[string]bool{}
 	subMap := map[string]map[string]bool{}
-	if rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT category, COALESCE(sub_category, '') FROM memories WHERE COALESCE(category, '') != ''`); err == nil {
+	if rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT category, COALESCE(sub_category, '') FROM memories WHERE COALESCE(category, '') != '' AND `+visSQL, visArgs...); err == nil {
 		for rows.Next() {
 			var cat, sub string
 			if rows.Scan(&cat, &sub) == nil {
@@ -204,6 +210,10 @@ func (s *Service) GetDashboardFacets(ctx context.Context) (domain.DashboardFacet
 	}
 
 	sessions := make([]domain.SessionSummary, 0)
+	sessFilter := ""
+	if domain.IsServerMode(ctx) {
+		sessFilter = "u:" + s.CurrentAccount(ctx) + ":%"
+	}
 	if rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			ss.session_id,
@@ -219,10 +229,12 @@ func (s *Service) GetDashboardFacets(ctx context.Context) (domain.DashboardFacet
 		FROM session_sent ss
 		JOIN memories m ON m.id = ss.memory_id
 		WHERE COALESCE(ss.session_id, '') != ''
+		  AND (? = '' OR ss.session_id LIKE ?)
+		  AND `+visSQL+`
 		GROUP BY ss.session_id
 		ORDER BY MAX(ss.updated_at) DESC, ss.session_id ASC
 		LIMIT 50
-	`); err == nil {
+	`, append([]any{sessFilter, sessFilter}, visArgs...)...); err == nil {
 		for rows.Next() {
 			var sid, sc, updatedAt string
 			var activeCnt, totalCnt int

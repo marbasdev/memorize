@@ -12,6 +12,8 @@ const (
 // GuardrailLogInput records a single guardrail or plan verification audit event.
 type GuardrailLogInput struct {
 	Scope       string
+	Account     string
+	IsPrivate   bool
 	Source      string
 	ToolName    string
 	Verdict     string
@@ -27,6 +29,8 @@ type GuardrailLogInput struct {
 type GuardrailLogRecord struct {
 	ID          int64   `json:"id"`
 	Scope       string  `json:"scope"`
+	Account     string  `json:"account,omitempty"`
+	IsPrivate   bool    `json:"is_private,omitempty"`
 	Source      string  `json:"source"`
 	ToolName    string  `json:"tool_name"`
 	Verdict     string  `json:"verdict"`
@@ -41,11 +45,13 @@ type GuardrailLogRecord struct {
 
 // GuardrailLogQuery filters guardrail audit logs.
 type GuardrailLogQuery struct {
-	Scope    string
-	State    string // "all", "blocked", "pass"
-	Source   string // "", "pretool", "git-precommit", "verify"
-	Page     int
-	PageSize int
+	Scope          string
+	Account        string
+	IncludePrivate bool
+	State          string // "all", "blocked", "pass"
+	Source         string // "", "pretool", "git-precommit", "verify"
+	Page           int
+	PageSize       int
 }
 
 // GuardrailLogPage returns a paginated guardrail audit log result set.

@@ -26,9 +26,10 @@ const ServerInstructions = `Memorize Protocol:
 
 // BridgeReqMeta carries per-request metadata forwarded by the stateless stdio HTTP bridge.
 type BridgeReqMeta struct {
-	SessionID string
-	Cwd       string
-	Roots     []string
+	SessionID  string
+	Cwd        string
+	Roots      []string
+	ScopeHints map[string]string
 }
 
 type bridgeMetaCtxKey struct{}

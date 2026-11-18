@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -59,6 +58,7 @@ func captureFileBaseline(path string) (exists int, content string) {
 }
 
 func (s *Service) recordPendingTurnEdit(ctx context.Context, sid, scope, repoDir, toolName string, ev NormalizedHookEvent, snippet string) {
+	sid = domain.ScopedSessionID(ctx, sid)
 	if strings.TrimSpace(sid) == "" || s.db == nil {
 		return
 	}
@@ -110,6 +110,7 @@ func (s *Service) recordPendingTurnEdit(ctx context.Context, sid, scope, repoDir
 }
 
 func (s *Service) clearPendingTurnEdits(ctx context.Context, sid string) {
+	sid = domain.ScopedSessionID(ctx, sid)
 	if strings.TrimSpace(sid) == "" || s.db == nil {
 		return
 	}
@@ -117,6 +118,7 @@ func (s *Service) clearPendingTurnEdits(ctx context.Context, sid string) {
 }
 
 func (s *Service) loadPendingTurnEdits(ctx context.Context, sid string) ([]pendingTurnEdit, error) {
+	sid = domain.ScopedSessionID(ctx, sid)
 	if strings.TrimSpace(sid) == "" || s.db == nil {
 		return nil, nil
 	}
@@ -140,134 +142,6 @@ func (s *Service) loadPendingTurnEdits(ctx context.Context, sid string) ([]pendi
 		out = append(out, e)
 	}
 	return out, rows.Err()
-}
-
-// formatChangedHunks emits only added/removed line hunks between oldRaw and newRaw
-// using unique matching anchors (patience LIS) in O(m+n) time and space, separating
-// disjoint edited regions with "...", and collapsing pure whitespace-only formatting hunks.
-func formatChangedHunks(oldRaw, newRaw string, maxBytes int) string {
-	oldMid, newMid := trimChangedLineEdges(oldRaw, newRaw)
-	m, n := len(oldMid), len(newMid)
-	if m == 0 || n == 0 {
-		if domain.IsWhitespaceOnlyDiffHunk(oldMid, newMid) {
-			return "(whitespace/formatting only)"
-		}
-		return formatEdgeDiff(oldMid, newMid, "+ ", maxBytes)
-	}
-
-	cntO, cntN, posN := make(map[string]int, m), make(map[string]int, n), make(map[string]int, n)
-	for _, l := range oldMid {
-		cntO[l]++
-	}
-	for j, l := range newMid {
-		cntN[l]++
-		posN[l] = j
-	}
-	type anchor struct{ o, n int }
-	var anchors []anchor
-	for i, l := range oldMid {
-		if cntO[l] == 1 && cntN[l] == 1 {
-			anchors = append(anchors, anchor{i, posN[l]})
-		}
-	}
-	if len(anchors) == 0 {
-		if domain.IsWhitespaceOnlyDiffHunk(oldMid, newMid) {
-			return "(whitespace/formatting only)"
-		}
-		return formatEdgeDiff(oldMid, newMid, "+ ", maxBytes)
-	}
-
-	// Longest strictly increasing anchor chain so a single moved line cannot collapse surrounding matches.
-	tails := make([]int, 0, len(anchors))
-	prev := make([]int, len(anchors))
-	for i, a := range anchors {
-		pos := sort.Search(len(tails), func(k int) bool { return anchors[tails[k]].n >= a.n })
-		prev[i] = -1
-		if pos > 0 {
-			prev[i] = tails[pos-1]
-		}
-		if pos == len(tails) {
-			tails = append(tails, i)
-		} else {
-			tails[pos] = i
-		}
-	}
-	var kept []anchor
-	for idx := tails[len(tails)-1]; idx >= 0; idx = prev[idx] {
-		kept = append(kept, anchors[idx])
-	}
-	for l, r := 0, len(kept)-1; l < r; l, r = l+1, r-1 {
-		kept[l], kept[r] = kept[r], kept[l]
-	}
-
-	type hunk struct{ oldLines, newLines []string }
-	var hunks []hunk
-	prevO, prevN := 0, 0
-	for _, a := range kept {
-		if a.o < prevO || a.n < prevN {
-			continue
-		}
-		aO, aN := a.o, a.n
-		for aO > prevO && aN > prevN && oldMid[aO-1] == newMid[aN-1] {
-			aO--
-			aN--
-		}
-		if prevO < aO || prevN < aN {
-			hunks = append(hunks, hunk{oldMid[prevO:aO], newMid[prevN:aN]})
-		}
-		bO, bN := a.o+1, a.n+1
-		for bO < m && bN < n && oldMid[bO] == newMid[bN] {
-			bO++
-			bN++
-		}
-		prevO, prevN = bO, bN
-	}
-	if prevO < m || prevN < n {
-		hunks = append(hunks, hunk{oldMid[prevO:], newMid[prevN:]})
-	}
-	if len(hunks) == 0 {
-		return ""
-	}
-
-	var semantic []hunk
-	wsHunks := 0
-	for _, h := range hunks {
-		if domain.IsWhitespaceOnlyDiffHunk(h.oldLines, h.newLines) {
-			wsHunks++
-			continue
-		}
-		semantic = append(semantic, h)
-	}
-	if len(semantic) == 0 && wsHunks > 0 {
-		return "(whitespace/formatting only)"
-	}
-	hunks = semantic
-
-	perCap := maxBytes
-	if len(hunks) > 1 && maxBytes > 0 {
-		perCap = max(200, (maxBytes-len(hunks)*8)/len(hunks))
-	}
-	var sb strings.Builder
-	for i, h := range hunks {
-		rem, add := formatDiffLines("- ", h.oldLines), formatDiffLines("+ ", h.newLines)
-		if perCap > 0 && len(rem)+len(add)+1 > perCap {
-			if rem != "" && add != "" {
-				rem = domain.TruncateUTF8Bytes(rem, max(64, (perCap-8)/2))
-				add = domain.TruncateUTF8Bytes(add, perCap-len(rem)-4)
-			} else {
-				rem, add = domain.TruncateUTF8Bytes(rem, perCap), domain.TruncateUTF8Bytes(add, perCap)
-			}
-		}
-		if i > 0 {
-			sb.WriteString("\n...\n")
-		}
-		sb.WriteString(rem)
-		if rem != "" && add != "" {
-			sb.WriteByte('\n')
-		}
-		sb.WriteString(add)
-	}
-	return domain.TruncateUTF8Bytes(sb.String(), maxBytes)
 }
 
 func displayEditPath(filePath, repoDir, fallbackCwd string) string {
@@ -331,7 +205,7 @@ func diffPendingTurnEdit(ctx context.Context, e pendingTurnEdit, displayPath str
 	if e.BaselineExists == 0 {
 		oldText = ""
 	}
-	diff := formatChangedHunks(oldText, cur, 0)
+	diff := domain.FormatChangedLineHunks(oldText, cur, 0)
 	if strings.TrimSpace(diff) == "" {
 		return ""
 	}
@@ -378,8 +252,67 @@ func (s *Service) runStopHook(ctx context.Context, ev NormalizedHookEvent, codec
 		return codec.FormatEmpty()
 	}
 
-	edits, err := s.loadPendingTurnEdits(ctx, sid)
-	if err != nil || len(edits) == 0 {
+	type stopDiffBatch struct {
+		scope     string
+		turnInput string
+		sections  []fileDiffSection
+	}
+	var diffBatches []stopDiffBatch
+	touchedFiles := []string{}
+	seenTouched := make(map[string]bool)
+	cwd := domain.FirstNonEmpty(ev.Cwd, fallbackCwd)
+
+	if ev.ClientCtx != nil && (ev.ClientCtx.RemoteManagedEdit || len(ev.ClientCtx.DiffSections) > 0) {
+		byScope := make(map[string]int)
+		defaultSc := domain.FirstNonEmpty(ev.ClientCtx.TargetScope, ev.Scope, "global")
+		for _, ds := range ev.ClientCtx.DiffSections {
+			if strings.TrimSpace(ds.Body) == "" {
+				continue
+			}
+			sc := domain.NormalizeScope(domain.FirstNonEmpty(ds.Scope, defaultSc))
+			idx, ok := byScope[sc]
+			if !ok {
+				idx = len(diffBatches)
+				byScope[sc] = idx
+				diffBatches = append(diffBatches, stopDiffBatch{scope: sc})
+			}
+			diffBatches[idx].sections = append(diffBatches[idx].sections, fileDiffSection{Label: ds.Label, Body: ds.Body})
+			if ds.Label != "" && !seenTouched[ds.Label] {
+				seenTouched[ds.Label] = true
+				touchedFiles = append(touchedFiles, ds.Label)
+			}
+		}
+	} else {
+		edits, err := s.loadPendingTurnEdits(ctx, sid)
+		if err != nil || len(edits) == 0 {
+			s.mem.ClearTurnStopRetries(persistCtx, sid)
+			return codec.FormatEmpty()
+		}
+		for _, b := range groupPendingEditsByScope(edits) {
+			var sections []fileDiffSection
+			scopeTurnInput := ""
+			for _, e := range b.edits {
+				if scopeTurnInput == "" && e.TurnInput != "" {
+					scopeTurnInput = e.TurnInput
+				}
+				label := displayEditPath(e.FilePath, e.RepoDir, cwd)
+				diff := diffPendingTurnEdit(ctx, e, label)
+				if diff == "" {
+					continue
+				}
+				sections = append(sections, fileDiffSection{Label: label, Body: diff})
+				if !seenTouched[label] {
+					seenTouched[label] = true
+					touchedFiles = append(touchedFiles, label)
+				}
+			}
+			if len(sections) > 0 {
+				diffBatches = append(diffBatches, stopDiffBatch{scope: b.scope, turnInput: scopeTurnInput, sections: sections})
+			}
+		}
+	}
+
+	if len(diffBatches) == 0 {
 		s.mem.ClearTurnStopRetries(persistCtx, sid)
 		return codec.FormatEmpty()
 	}
@@ -395,15 +328,11 @@ func (s *Service) runStopHook(ctx context.Context, ev NormalizedHookEvent, codec
 	var allBlocking []domain.PlanViolation
 	var failClosedScopes []string
 	var partialDetails []string
-	var touchedFiles []string
 	var evaluatedScopes []string
-	seenTouched := make(map[string]bool)
-	cwd := domain.FirstNonEmpty(ev.Cwd, fallbackCwd)
 
-	batches := groupPendingEditsByScope(edits)
-	for _, b := range batches {
+	for _, b := range diffBatches {
 		evaluatedScopes = append(evaluatedScopes, b.scope)
-		blocking, failClosed, partialMsg := s.evaluateStopScopeBatch(ctx, persistCtx, ev, sid, cwd, b, atRetryCap, seenTouched, &touchedFiles)
+		blocking, failClosed, partialMsg := s.verifyStopDiffSections(ctx, persistCtx, ev, sid, b.scope, b.turnInput, b.sections, atRetryCap)
 		allBlocking = append(allBlocking, blocking...)
 		if failClosed {
 			failClosedScopes = append(failClosedScopes, b.scope)
@@ -429,33 +358,14 @@ func (s *Service) runStopHook(ctx context.Context, ev NormalizedHookEvent, codec
 	return codec.FormatStopContinue(formatStopBlockingMessage(allBlocking, failClosedScopes, partialDetails, touchedFiles))
 }
 
-func (s *Service) evaluateStopScopeBatch(
+func (s *Service) verifyStopDiffSections(
 	ctx context.Context,
 	persistCtx context.Context,
 	ev NormalizedHookEvent,
-	sid, fallbackDir string,
-	b stopScopeBatch,
+	sid, scope, scopeTurnInput string,
+	sections []fileDiffSection,
 	atRetryCap bool,
-	seenTouched map[string]bool,
-	touchedFiles *[]string,
 ) ([]domain.PlanViolation, bool, string) {
-	var sections []fileDiffSection
-	scopeTurnInput := ""
-	for _, e := range b.edits {
-		if scopeTurnInput == "" && e.TurnInput != "" {
-			scopeTurnInput = e.TurnInput
-		}
-		label := displayEditPath(e.FilePath, e.RepoDir, fallbackDir)
-		diff := diffPendingTurnEdit(ctx, e, label)
-		if diff == "" {
-			continue
-		}
-		sections = append(sections, fileDiffSection{Label: label, Body: diff})
-		if !seenTouched[label] {
-			seenTouched[label] = true
-			*touchedFiles = append(*touchedFiles, label)
-		}
-	}
 	if len(sections) == 0 {
 		return nil, false, ""
 	}
@@ -476,14 +386,14 @@ func (s *Service) evaluateStopScopeBatch(
 	}
 	toolLabel := formatBatchToolLabel(len(sections))
 	start := time.Now()
-	res := s.evaluateGuardrailPlanChunks(ctx, buildChunks, evalEvent, b.scope, 0.80, true)
+	res := s.evaluateGuardrailPlanChunks(ctx, buildChunks, evalEvent, scope, 0.80, true)
 	elapsedMs := domain.ElapsedMsSince(start)
 
 	if res.VerifyErr != nil {
 		if atRetryCap {
 			failClosed := os.Getenv("MEMORY_GUARDRAIL_FAIL_CLOSED") == "1"
 			_, _ = s.RecordGuardrailLog(persistCtx, domain.GuardrailLogInput{
-				Scope:       b.scope,
+				Scope:       scope,
 				Source:      ev.Mode,
 				ToolName:    toolLabel,
 				Verdict:     domain.GuardrailVerdictError,
@@ -494,7 +404,7 @@ func (s *Service) evaluateStopScopeBatch(
 				ElapsedMs:   elapsedMs,
 			})
 			if failClosed {
-				s.mem.SetTurnPartialNotice(persistCtx, sid, b.scope, fmt.Sprintf(
+				s.mem.SetTurnPartialNotice(persistCtx, sid, scope, fmt.Sprintf(
 					"[MEMORIZE GUARDRAIL NOTICE] Stop re-verification limit reached (%d retries) with evaluation error (%s); run verify_plan_against_memory or git pre-commit before committing.",
 					maxStopReverifyAttempts, res.VerifyErr.Error(),
 				))
@@ -502,14 +412,15 @@ func (s *Service) evaluateStopScopeBatch(
 			}
 			return nil, false, ""
 		}
-		failClosed := s.recordVerifyOutcomeLog(persistCtx, b.scope, ev.Mode, toolLabel, res.RuleCount, res.CombinedSnippet, nil, res.VerifyErr, elapsedMs)
+		failClosed := s.recordVerifyOutcomeLog(persistCtx, scope, ev.Mode, toolLabel, res.RuleCount, res.CombinedSnippet, nil, res.VerifyErr, elapsedMs)
 		return nil, failClosed, ""
 	}
 	if len(res.Blocking) > 0 {
 		if atRetryCap {
 			vIDs, vDetails := formatViolationDetails(res.Blocking)
 			_, _ = s.RecordGuardrailLog(persistCtx, domain.GuardrailLogInput{
-				Scope:       b.scope,
+				Scope:       scope,
+				IsPrivate:   res.HasPersonalViolation,
 				Source:      ev.Mode,
 				ToolName:    toolLabel,
 				Verdict:     domain.GuardrailVerdictRuleViolation,
@@ -520,16 +431,16 @@ func (s *Service) evaluateStopScopeBatch(
 				Details:     vDetails + "\n[Stop retry cap reached — yielded to prevent loop]",
 				ElapsedMs:   elapsedMs,
 			})
-			s.mem.SetTurnPartialNotice(persistCtx, sid, b.scope, fmt.Sprintf(
+			s.mem.SetTurnPartialNotice(persistCtx, sid, scope, fmt.Sprintf(
 				"[MEMORIZE GUARDRAIL NOTICE] Stop re-verification limit reached (%d retries) with unresolved rule violations — resolve before committing:\n%s",
 				maxStopReverifyAttempts, vDetails,
 			))
 			return res.Blocking, false, ""
 		}
-		s.recordVerifyOutcomeLog(persistCtx, b.scope, ev.Mode, toolLabel, res.RuleCount, res.CombinedSnippet, res.Blocking, nil, elapsedMs)
+		s.recordVerifyOutcomeLog(persistCtx, scope, ev.Mode, toolLabel, res.RuleCount, res.CombinedSnippet, res.Blocking, nil, elapsedMs)
 		partialNote := ""
 		if res.Partial && len(res.UnverifiedFiles) > 0 {
-			partialNote = fmt.Sprintf("%s (%d/%d chunks verified; unreached: %s)", b.scope, res.EvaluatedChunks, res.TotalChunks, strings.Join(res.UnverifiedFiles, ", "))
+			partialNote = fmt.Sprintf("%s (%d/%d chunks verified; unreached: %s)", scope, res.EvaluatedChunks, res.TotalChunks, strings.Join(res.UnverifiedFiles, ", "))
 		}
 		return res.Blocking, false, partialNote
 	}
@@ -538,7 +449,7 @@ func (s *Service) evaluateStopScopeBatch(
 		detail := fmt.Sprintf("Evaluated %d/%d diff chunks within Stop hook budget; unverified files: %s",
 			res.EvaluatedChunks, res.TotalChunks, strings.Join(res.UnverifiedFiles, ", "))
 		_, _ = s.RecordGuardrailLog(persistCtx, domain.GuardrailLogInput{
-			Scope:       b.scope,
+			Scope:       scope,
 			Source:      ev.Mode,
 			ToolName:    toolLabel,
 			Verdict:     domain.GuardrailVerdictPartial,
@@ -550,15 +461,15 @@ func (s *Service) evaluateStopScopeBatch(
 		})
 		if failClosed && !atRetryCap {
 			return nil, true, fmt.Sprintf("%s (%d/%d chunks verified; unverified: %s)",
-				b.scope, res.EvaluatedChunks, res.TotalChunks, strings.Join(res.UnverifiedFiles, ", "))
+				scope, res.EvaluatedChunks, res.TotalChunks, strings.Join(res.UnverifiedFiles, ", "))
 		}
-		s.mem.SetTurnPartialNotice(persistCtx, sid, b.scope, fmt.Sprintf(
+		s.mem.SetTurnPartialNotice(persistCtx, sid, scope, fmt.Sprintf(
 			"[MEMORIZE GUARDRAIL NOTICE] Previous turn diff exceeded Stop hook time budget (%d/%d chunks verified). Unverified files: %s — keep changes in smaller units or run verify_plan_against_memory / git pre-commit.",
 			res.EvaluatedChunks, res.TotalChunks, strings.Join(res.UnverifiedFiles, ", "),
 		))
 		return nil, false, ""
 	}
-	s.recordVerifyOutcomeLog(persistCtx, b.scope, ev.Mode, toolLabel, res.RuleCount, res.CombinedSnippet, nil, nil, elapsedMs)
+	s.recordVerifyOutcomeLog(persistCtx, scope, ev.Mode, toolLabel, res.RuleCount, res.CombinedSnippet, nil, nil, elapsedMs)
 	return nil, false, ""
 }
 

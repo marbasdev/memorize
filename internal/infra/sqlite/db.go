@@ -233,11 +233,32 @@ func InitSchema(db *sql.DB) error {
 			updated_at INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (session_id, scope, file_path)
 		);
+		CREATE TABLE IF NOT EXISTS users (
+			account TEXT PRIMARY KEY,
+			role TEXT NOT NULL DEFAULT 'member',
+			token_hash TEXT NOT NULL UNIQUE,
+			token_hint TEXT NOT NULL DEFAULT '',
+			active INTEGER NOT NULL DEFAULT 1,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			last_seen_at DATETIME
+		);
+		CREATE TABLE IF NOT EXISTS user_repo_sync (
+			scope TEXT NOT NULL,
+			account TEXT NOT NULL,
+			last_commit TEXT NOT NULL DEFAULT '',
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (scope, account)
+		);
 	`)
 	_, _ = db.Exec(`ALTER TABLE guardrail_logs ADD COLUMN elapsed_ms REAL NOT NULL DEFAULT 0`)
+	_, _ = db.Exec(`ALTER TABLE guardrail_logs ADD COLUMN account TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE guardrail_logs ADD COLUMN is_private INTEGER NOT NULL DEFAULT 0`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_guardrail_logs_account_id ON guardrail_logs(account, id DESC)`)
 	_, _ = db.Exec(`ALTER TABLE project_progress ADD COLUMN track TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE project_progress ADD COLUMN details TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE project_progress ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE project_progress ADD COLUMN account TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE eval_telemetry ADD COLUMN account TEXT NOT NULL DEFAULT ''`)
 	dropProgressStatusColumnIfPresent(db)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_progress_scope_cat ON project_progress(scope, category, id DESC)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_progress_scope_track ON project_progress(scope, track, id DESC)`)

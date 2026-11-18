@@ -32,6 +32,7 @@
       <div style="font-size:0.76rem;color:var(--muted);">{{t .Lang "gr_desc"}}</div>
     </div>
 
+    {{if .CanAdmin}}
     <div class="ret-header-actions">
       <label class="ret-inline-ctl" for="guardrailRetentionDays">
         <span>{{t .Lang "ret_auto_lbl"}}</span>
@@ -75,6 +76,7 @@
           @click="grCleanConfirm = false; flushPendingLive()">{{t .Lang "btn_cancel"}}</button>
       </div>
     </div>
+    {{end}}
   </div>
 
   <form id="guardrailFilterForm" class="toolbar" style="margin-bottom:0.6rem;"
@@ -133,6 +135,8 @@
                 {{if .Blocked}}🚫 {{else if eq .Verdict "partial"}}⚠️ {{else}}✓ {{end}}{{guardrailVerdictLabel $.Lang .Verdict}}
               </span>
               <span class="badge b-accent">{{.Scope}}</span>
+              {{if .Account}}<span class="tag-chip">@{{.Account}}</span>{{end}}
+              {{if .IsPrivate}}<span class="tag-chip">personal</span>{{end}}
               <span class="tag-chip">{{guardrailSourceLabel $.Lang .Source}}{{if .ToolName}} · {{.ToolName}}{{end}}</span>
               {{if gt .RuleCount 0}}
                 <span class="tag-chip">{{.RuleCount}} {{t $.Lang "gr_rules_checked"}}</span>

@@ -258,6 +258,7 @@ func (s *Service) consumeSessionUpdates(ctx context.Context, sessionID string, i
 
 // QuerySessionMemory returns unseen relevant/pinned facts and revocation/update deltas for sessionID.
 func (s *Service) QuerySessionMemory(ctx context.Context, sessionID, currentTask, category, rawScope string, refresh bool) (string, error) {
+	sessionID = domain.ScopedSessionID(ctx, sessionID)
 	revokedNotice := s.collectRevokedSessionItems(ctx, sessionID, refresh)
 	scA, scB := ScopesFor(rawScope, true)
 	var extraScopes []string
@@ -386,7 +387,7 @@ func (s *Service) QuerySessionMemory(ctx context.Context, sessionID, currentTask
 
 // RecordTurnState stores the latest user prompt for sessionID/scope to power pre-mutation reminders and session ID discovery.
 func (s *Service) RecordTurnState(ctx context.Context, sessionID, rawScope, userInput string) {
-	sid := strings.TrimSpace(sessionID)
+	sid := domain.ScopedSessionID(ctx, sessionID)
 	inp := strings.TrimSpace(userInput)
 	if sid == "" || inp == "" {
 		return
@@ -409,7 +410,7 @@ func (s *Service) RecordTurnState(ctx context.Context, sessionID, rawScope, user
 
 // TouchTurnSession registers or refreshes an active session in turn_state without clobbering existing last_input.
 func (s *Service) TouchTurnSession(ctx context.Context, sessionID, rawScope string) {
-	sid := strings.TrimSpace(sessionID)
+	sid := domain.ScopedSessionID(ctx, sessionID)
 	if sid == "" {
 		return
 	}
@@ -426,20 +427,38 @@ func (s *Service) TouchTurnSession(ctx context.Context, sessionID, rawScope stri
 
 // MarkTurnScopeMutated marks active turns in rawScope (and publishes a "memories" event) after a commit/mutation.
 func (s *Service) MarkTurnScopeMutated(rawScope string) {
+	s.MarkTurnScopeMutatedCtx(context.Background(), rawScope)
+}
+
+// MarkTurnScopeMutatedCtx marks active turns in rawScope for the active principal (isolating personal scope in server mode).
+func (s *Service) MarkTurnScopeMutatedCtx(ctx context.Context, rawScope string) {
 	sc := domain.NormalizeScope(rawScope)
-	_, _ = s.db.Exec(`UPDATE turn_state SET mutated = 1 WHERE scope = ? OR ? = 'global'`, sc, sc)
+	if p, ok := domain.AuthPrincipalFromContext(ctx); ok && p.ServerMode && p.Account != "" && sc == "personal" {
+		_, _ = s.db.ExecContext(ctx, `UPDATE turn_state SET mutated = 1 WHERE scope = ? AND session_id LIKE ?`, sc, "u:"+p.Account+":%")
+	} else {
+		_, _ = s.db.ExecContext(ctx, `UPDATE turn_state SET mutated = 1 WHERE scope = ? OR ? = 'global'`, sc, sc)
+	}
 	s.bus.Publish("memories")
 }
 
 // MarkAllTurnsMutated marks all active turns as mutated and publishes a "memories" change event.
 func (s *Service) MarkAllTurnsMutated() {
-	_, _ = s.db.Exec(`UPDATE turn_state SET mutated = 1`)
+	s.MarkAllTurnsMutatedCtx(context.Background())
+}
+
+// MarkAllTurnsMutatedCtx marks active turns mutated (scoped to the active user in server mode).
+func (s *Service) MarkAllTurnsMutatedCtx(ctx context.Context) {
+	if p, ok := domain.AuthPrincipalFromContext(ctx); ok && p.ServerMode && p.Account != "" {
+		_, _ = s.db.ExecContext(ctx, `UPDATE turn_state SET mutated = 1 WHERE session_id LIKE ?`, "u:"+p.Account+":%")
+	} else {
+		_, _ = s.db.ExecContext(ctx, `UPDATE turn_state SET mutated = 1`)
+	}
 	s.bus.Publish("memories")
 }
 
 // ConsumeTurnPreMutateCandidate returns an un-checked active turn input once for pre-mutation guardrail gating.
 func (s *Service) ConsumeTurnPreMutateCandidate(ctx context.Context, sessionID, rawScope, fallbackInput string) string {
-	sid := strings.TrimSpace(sessionID)
+	sid := domain.ScopedSessionID(ctx, sessionID)
 	if sid == "" {
 		return ""
 	}
@@ -452,7 +471,7 @@ func (s *Service) ConsumeTurnPreMutateCandidate(ctx context.Context, sessionID, 
 		sid, sc, cutoff).Scan(&lastInput, &mutated, &gateChecked)
 	if err != nil || strings.TrimSpace(lastInput) == "" {
 		if fb := strings.TrimSpace(fallbackInput); fb != "" {
-			s.RecordTurnState(ctx, sid, sc, fb)
+			s.RecordTurnState(ctx, sessionID, sc, fb)
 			lastInput = fb
 			mutated = 0
 			gateChecked = 0
@@ -469,7 +488,7 @@ func (s *Service) ConsumeTurnPreMutateCandidate(ctx context.Context, sessionID, 
 
 // ResetTurnGateChecked clears gate_checked when pre-mutate evaluation fails transiently so the check can retry.
 func (s *Service) ResetTurnGateChecked(ctx context.Context, sessionID, rawScope string) {
-	sid := strings.TrimSpace(sessionID)
+	sid := domain.ScopedSessionID(ctx, sessionID)
 	if sid == "" {
 		return
 	}
@@ -479,7 +498,7 @@ func (s *Service) ResetTurnGateChecked(ctx context.Context, sessionID, rawScope 
 
 // IsTurnMutated reports whether commit_memory/manage_memory already mutated state in the current turn.
 func (s *Service) IsTurnMutated(ctx context.Context, sessionID, rawScope string) bool {
-	sid := strings.TrimSpace(sessionID)
+	sid := domain.ScopedSessionID(ctx, sessionID)
 	if sid == "" {
 		return false
 	}
@@ -493,7 +512,7 @@ func (s *Service) IsTurnMutated(ctx context.Context, sessionID, rawScope string)
 
 // ActiveTurnInput returns the active turn's last user prompt if recorded within the last 15 minutes.
 func (s *Service) ActiveTurnInput(ctx context.Context, sessionID, rawScope string) string {
-	sid := strings.TrimSpace(sessionID)
+	sid := domain.ScopedSessionID(ctx, sessionID)
 	if sid == "" {
 		return ""
 	}
@@ -513,7 +532,7 @@ func (s *Service) SetTurnPartialNotice(ctx context.Context, sessionID, rawScope,
 	if s == nil || s.db == nil {
 		return
 	}
-	sid := strings.TrimSpace(sessionID)
+	sid := domain.ScopedSessionID(ctx, sessionID)
 	msg := strings.TrimSpace(notice)
 	if sid == "" || msg == "" {
 		return
@@ -534,7 +553,7 @@ func (s *Service) ConsumeTurnPartialNotice(ctx context.Context, sessionID, rawSc
 	if s == nil || s.db == nil {
 		return ""
 	}
-	sid := strings.TrimSpace(sessionID)
+	sid := domain.ScopedSessionID(ctx, sessionID)
 	if sid == "" {
 		return ""
 	}
@@ -560,7 +579,7 @@ func (s *Service) MaxTurnStopRetry(ctx context.Context, sessionID string) int {
 	if s == nil || s.db == nil {
 		return 0
 	}
-	sid := strings.TrimSpace(sessionID)
+	sid := domain.ScopedSessionID(ctx, sessionID)
 	if sid == "" {
 		return 0
 	}
@@ -579,7 +598,7 @@ func (s *Service) SetTurnStopRetry(ctx context.Context, sessionID, rawScope stri
 	if s == nil || s.db == nil {
 		return
 	}
-	sid := strings.TrimSpace(sessionID)
+	sid := domain.ScopedSessionID(ctx, sessionID)
 	if sid == "" {
 		return
 	}
@@ -602,7 +621,7 @@ func (s *Service) ClearTurnStopRetries(ctx context.Context, sessionID string) {
 	if s == nil || s.db == nil {
 		return
 	}
-	sid := strings.TrimSpace(sessionID)
+	sid := domain.ScopedSessionID(ctx, sessionID)
 	if sid == "" {
 		return
 	}

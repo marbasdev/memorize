@@ -122,7 +122,11 @@ func filterAndSortViolations(violations []domain.PlanViolation, minProb float64)
 }
 
 func (s *Service) loadEnforceableFacts(ctx context.Context, scA, scB string) ([]domain.Fact, error) {
-	loaded, err := s.mem.LoadActiveFacts(ctx, scA, scB, "")
+	var extraScopes []string
+	if strings.HasPrefix(scA, "project:") && s.mem.IncludePersonalInProject(ctx) {
+		extraScopes = append(extraScopes, "personal")
+	}
+	loaded, err := s.mem.LoadActiveFacts(ctx, scA, scB, "", extraScopes...)
 	if err != nil {
 		return nil, err
 	}
@@ -136,6 +140,15 @@ func (s *Service) loadEnforceableFacts(ctx context.Context, scA, scB string) ([]
 		}
 	}
 	return filterEnforceableRules(loaded), nil
+}
+
+func hasPersonalViolation(violations []domain.PlanViolation) bool {
+	for _, v := range violations {
+		if domain.NormalizeScope(v.Scope) == "personal" {
+			return true
+		}
+	}
+	return false
 }
 
 func formatViolationRef(f domain.Fact) string {
@@ -191,6 +204,7 @@ func (s *Service) VerifyPlan(ctx context.Context, proposedPlan string, scope ...
 	vIDs, vDetails := formatViolationDetails(violations)
 	_, _ = s.RecordGuardrailLog(ctx, domain.GuardrailLogInput{
 		Scope:       scA,
+		IsPrivate:   hasPersonalViolation(violations),
 		Source:      src,
 		ToolName:    "verify_plan",
 		Verdict:     domain.GuardrailVerdictPlanViolation,

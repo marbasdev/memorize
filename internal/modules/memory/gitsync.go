@@ -126,6 +126,11 @@ func (s *Service) CommitBatch(ctx context.Context, facts []string, category, raw
 			clean = append(clean, t)
 		}
 	}
+	if len(clean) > 0 {
+		if err := domain.CanModifyScope(ctx, targetScope); err != nil {
+			return "", err
+		}
+	}
 	sha := strings.TrimSpace(syncedCommit)
 	if root := git.ResolveRoot(repoDir); root != "" {
 		sqlite.RememberRepoPath(ctx, s.db, targetScope, root)

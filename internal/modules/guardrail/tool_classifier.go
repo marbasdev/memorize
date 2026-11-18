@@ -32,13 +32,7 @@ func isGuardrailExemptTool(name string) bool {
 }
 
 func isFileEditTool(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "edit_file", "write_file", "write_to_file",
-		"replace_file_content", "multi_replace_file_content",
-		"edit", "write", "multiedit", "notebookedit":
-		return true
-	}
-	return false
+	return domain.IsFileEditTool(name)
 }
 
 var (
@@ -182,11 +176,11 @@ func extractPlanFromEvent(ev NormalizedHookEvent) string {
 			if s, ok := v.(string); ok {
 				if k == "Replacement" {
 					if oldStr, okOld := in["Target"].(string); okOld {
-						s = diffEditSnippet(oldStr, s)
+						s = domain.DiffEditSnippet(oldStr, s)
 					}
 				} else if k == "new_string" {
 					if oldStr, okOld := in["old_string"].(string); okOld {
-						s = diffEditSnippet(oldStr, s)
+						s = domain.DiffEditSnippet(oldStr, s)
 					}
 				}
 				s = strings.TrimSpace(s)

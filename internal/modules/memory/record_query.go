@@ -15,11 +15,13 @@ const recordSelectColumns = `m.id, m.scope, COALESCE(m.account, ''), m.category,
 // ListRecords returns all memory records matching scopeFilter (or all scopes if empty).
 func (s *Service) ListRecords(ctx context.Context, scopeFilter string) ([]domain.MemoryRecord, error) {
 	sc := strings.TrimSpace(scopeFilter)
+	visSQL, visArgs := s.memoryVisibilitySQL(ctx, "m")
+	args := append([]any{sc, sc}, visArgs...)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT `+recordSelectColumns+`
 		FROM memories m
-		WHERE (? = '' OR m.scope = ?)
-		ORDER BY active DESC, pinned DESC, id DESC`, sc, sc)
+		WHERE (? = '' OR m.scope = ?) AND `+visSQL+`
+		ORDER BY active DESC, pinned DESC, id DESC`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -239,12 +241,15 @@ func (s *Service) attachRecordReplaces(ctx context.Context, out []domain.MemoryR
 
 // QueryRecordsPage returns a paginated, filtered slice of memory records for the dashboard table.
 func (s *Service) QueryRecordsPage(ctx context.Context, q domain.RecordQuery) (domain.RecordPage, error) {
+	visSQL, visArgs := s.memoryVisibilitySQL(ctx, "m")
 	var totalAll int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM memories`).Scan(&totalAll); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM memories m WHERE `+visSQL, visArgs...).Scan(&totalAll); err != nil {
 		return domain.RecordPage{}, err
 	}
 
 	whereSQL, whereArgs := buildRecordWhereClause(q)
+	whereSQL = `(` + whereSQL + `) AND ` + visSQL
+	whereArgs = append(whereArgs, visArgs...)
 	var totalFiltered, totalFilteredActive int
 	countSQL := `SELECT COUNT(*), COALESCE(SUM(CASE WHEN m.active = 1 THEN 1 ELSE 0 END), 0) FROM memories m WHERE ` + whereSQL
 	if err := s.db.QueryRowContext(ctx, countSQL, whereArgs...).Scan(&totalFiltered, &totalFilteredActive); err != nil {
@@ -318,7 +323,10 @@ func (s *Service) QueryMatchingActiveIDs(ctx context.Context, q domain.RecordQue
 	if limit <= 0 || limit > 10000 {
 		limit = 5000
 	}
+	visSQL, visArgs := s.memoryVisibilitySQL(ctx, "m")
 	whereSQL, whereArgs := buildRecordWhereClause(q)
+	whereSQL = `(` + whereSQL + `) AND ` + visSQL
+	whereArgs = append(whereArgs, visArgs...)
 	selSQL := `SELECT m.id FROM memories m WHERE (` + whereSQL + `) AND m.active = 1 ORDER BY m.id DESC LIMIT ?`
 	args := append(append([]any{}, whereArgs...), limit)
 	rows, err := s.db.QueryContext(ctx, selSQL, args...)
@@ -355,10 +363,12 @@ func (s *Service) GetRecordsByIDs(ctx context.Context, ids []int64) ([]domain.Me
 	if len(ph) == 0 {
 		return []domain.MemoryRecord{}, nil
 	}
+	visSQL, visArgs := s.memoryVisibilitySQL(ctx, "m")
+	args = append(args, visArgs...)
 	selSQL := fmt.Sprintf(`
 		SELECT `+recordSelectColumns+`
 		FROM memories m
-		WHERE m.id IN (%s)
+		WHERE m.id IN (%s) AND `+visSQL+`
 		ORDER BY m.id ASC`, strings.Join(ph, ","))
 	rows, err := s.db.QueryContext(ctx, selSQL, args...)
 	if err != nil {

@@ -64,9 +64,33 @@ func SameDBPath(a, b string) bool {
 	return config.SamePathClean(a, b)
 }
 
+func buildEndpointURL(addrOrURL, path string) string {
+	s := strings.TrimRight(strings.TrimSpace(addrOrURL), "/")
+	if !strings.HasPrefix(s, "http://") && !strings.HasPrefix(s, "https://") {
+		s = "http://" + s
+	}
+	return s + path
+}
+
 // QueryDaemonStatus fetches live runtime status from the daemon at addr.
 func QueryDaemonStatus(addr string) (*DaemonStatus, error) {
-	resp, err := daemonProbeHTTP.Get("http://" + addr + "/api/daemon/status")
+	return QueryDaemonStatusWithAuth(addr, "")
+}
+
+// QueryDaemonStatusWithAuth fetches live runtime status from a local daemon or remote team server.
+func QueryDaemonStatusWithAuth(addrOrURL, bearerToken string) (*DaemonStatus, error) {
+	req, err := http.NewRequest(http.MethodGet, buildEndpointURL(addrOrURL, "/api/daemon/status"), nil)
+	if err != nil {
+		return nil, err
+	}
+	if tok := strings.TrimSpace(bearerToken); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	client := daemonProbeHTTP
+	if strings.HasPrefix(strings.TrimSpace(addrOrURL), "http://") || strings.HasPrefix(strings.TrimSpace(addrOrURL), "https://") {
+		client = daemonRPCClient
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -238,46 +262,62 @@ func WaitDaemonPortHealthy(expectedAddr, excludeOldAddr, dbPath string, timeout 
 
 // PostDaemonHook delivers a lifecycle hook execution RPC to addr.
 func PostDaemonHook(ctx context.Context, addr, mode string, rawStdin []byte, cwd, account string, timeoutMs int64) (string, int, bool) {
-	payload := map[string]any{
-		"mode":    mode,
-		"stdin":   string(rawStdin),
-		"cwd":     cwd,
-		"account": account,
-	}
-	if timeoutMs > 0 {
-		payload["timeout_ms"] = timeoutMs
+	out, code, err := PostDaemonHookWithAuth(ctx, addr, "", mode, rawStdin, cwd, account, timeoutMs, nil)
+	return out, code, err == nil
+}
+
+// PostDaemonHookWithAuth delivers a lifecycle hook execution RPC with optional Bearer token and Thin Client context.
+func PostDaemonHookWithAuth(ctx context.Context, addrOrURL, bearerToken, mode string, rawStdin []byte, cwd, account string, timeoutMs int64, clientCtx *domain.ClientHookContext) (string, int, error) {
+	payload := DaemonHookRequest{
+		Mode:      mode,
+		Stdin:     string(rawStdin),
+		Cwd:       cwd,
+		Account:   account,
+		TimeoutMs: timeoutMs,
+		ClientCtx: clientCtx,
 	}
 	body, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+addr+"/api/daemon/hook", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, buildEndpointURL(addrOrURL, "/api/daemon/hook"), bytes.NewReader(body))
 	if err != nil {
-		return "", 0, false
+		return "", 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if tok := strings.TrimSpace(bearerToken); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
 	resp, err := daemonHookHTTP.Do(req)
 	if err != nil {
-		return "", 0, false
+		return "", 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", 0, false
+		return "", 0, fmt.Errorf("daemon hook HTTP %d", resp.StatusCode)
 	}
 	var out struct {
 		Output   string `json:"output"`
 		ExitCode int    `json:"exit_code"`
 	}
-	if json.NewDecoder(resp.Body).Decode(&out) != nil {
-		return "", 0, false
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", 0, err
 	}
-	return out.Output, out.ExitCode, true
+	return out.Output, out.ExitCode, nil
 }
 
 // PostDaemonMCP forwards one JSON-RPC request from the stdio bridge to /api/daemon/mcp.
 func PostDaemonMCP(addr, sid, cwd, account string, roots []string, payload []byte) ([]byte, bool, error) {
-	req, err := http.NewRequest(http.MethodPost, "http://"+addr+"/api/daemon/mcp", bytes.NewReader(payload))
+	return PostDaemonMCPWithAuth(addr, "", sid, cwd, account, roots, nil, payload)
+}
+
+// PostDaemonMCPWithAuth forwards one JSON-RPC request with optional Bearer token and client scope hints.
+func PostDaemonMCPWithAuth(addrOrURL, bearerToken, sid, cwd, account string, roots []string, scopeHints map[string]string, payload []byte) ([]byte, bool, error) {
+	req, err := http.NewRequest(http.MethodPost, buildEndpointURL(addrOrURL, "/api/daemon/mcp"), bytes.NewReader(payload))
 	if err != nil {
 		return nil, false, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if tok := strings.TrimSpace(bearerToken); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
 	req.Header.Set("X-Memorize-Session", sid)
 	if cwd != "" {
 		req.Header.Set("X-Memorize-Cwd", cwd)
@@ -287,6 +327,11 @@ func PostDaemonMCP(addr, sid, cwd, account string, roots []string, payload []byt
 	}
 	if len(roots) > 0 {
 		req.Header.Set("X-Memorize-Roots", strings.Join(roots, "\t"))
+	}
+	if len(scopeHints) > 0 {
+		if rawHints, err := json.Marshal(scopeHints); err == nil {
+			req.Header.Set("X-Memorize-Scope-Hints", string(rawHints))
+		}
 	}
 
 	resp, err := daemonRPCClient.Do(req)

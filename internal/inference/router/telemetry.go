@@ -60,9 +60,9 @@ func (r *Router) RecordTelemetry(ctx context.Context, task domain.EvalTask, ev d
 	defer cancel()
 
 	if _, err := r.db.ExecContext(wCtx, `
-		INSERT INTO eval_telemetry (task, engine, elapsed_ms, item_count, status)
-		VALUES (?, ?, ?, ?, ?)`,
-		string(task), engine, elapsedMs, items, status); err != nil {
+		INSERT INTO eval_telemetry (task, engine, elapsed_ms, item_count, status, account)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		string(task), engine, elapsedMs, items, status, domain.EffectivePrincipalAccount(ctx)); err != nil {
 		return
 	}
 	_, _ = r.db.ExecContext(wCtx, `

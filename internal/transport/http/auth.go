@@ -1,0 +1,84 @@
+package http
+
+import (
+	"database/sql"
+	"net/http"
+	"strings"
+	"time"
+
+	"memorize/internal/domain"
+	"memorize/internal/infra/sqlite"
+)
+
+// ExtractBearerToken extracts a Bearer token from the Authorization header if present.
+func ExtractBearerToken(r *http.Request) (string, bool) {
+	if r == nil {
+		return "", false
+	}
+	authz := strings.TrimSpace(r.Header.Get("Authorization"))
+	if authz == "" {
+		return "", false
+	}
+	parts := strings.SplitN(authz, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(strings.TrimSpace(parts[0]), "Bearer") {
+		return "", true
+	}
+	return strings.TrimSpace(parts[1]), true
+}
+
+// IsSecureRequest reports whether the request arrived over TLS directly or via an HTTPS proxy.
+func IsSecureRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if r.TLS != nil {
+		return true
+	}
+	xfp := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0])
+	return strings.EqualFold(xfp, "https")
+}
+
+// SetSessionCookie writes the HttpOnly signed team session cookie to w.
+func SetSessionCookie(w http.ResponseWriter, r *http.Request, value string, maxAgeSec int) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     domain.SessionCookieName,
+		Value:    value,
+		Path:     "/",
+		MaxAge:   maxAgeSec,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   IsSecureRequest(r),
+	})
+}
+
+// ClearSessionCookie expires the team session cookie immediately.
+func ClearSessionCookie(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     domain.SessionCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0),
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   IsSecureRequest(r),
+	})
+}
+
+// AuthenticateHTTPRequest authenticates an HTTP caller using Bearer token or signed session cookie.
+func AuthenticateHTTPRequest(db *sql.DB, r *http.Request) (domain.AuthPrincipal, bool) {
+	if db == nil || r == nil {
+		return domain.AuthPrincipal{}, false
+	}
+	if tok, hasAuthz := ExtractBearerToken(r); hasAuthz {
+		if tok == "" {
+			return domain.AuthPrincipal{}, false
+		}
+		return sqlite.AuthenticateToken(r.Context(), db, tok)
+	}
+	c, err := r.Cookie(domain.SessionCookieName)
+	if err != nil || strings.TrimSpace(c.Value) == "" {
+		return domain.AuthPrincipal{}, false
+	}
+	return sqlite.AuthenticateSessionCookie(r.Context(), db, c.Value)
+}

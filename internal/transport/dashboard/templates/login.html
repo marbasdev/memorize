@@ -1,0 +1,54 @@
+{{define "login"}}<!DOCTYPE html>
+<html lang="{{.Lang}}" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>memorize — {{t .Lang "login_title"}}</title>
+<link rel="stylesheet" href="/assets/styles.css">
+<script src="/assets/theme.js"></script>
+</head>
+<body>
+<div class="wrap" style="max-width:460px;min-height:100vh;display:flex;flex-direction:column;justify-content:center;">
+  <div class="card" style="padding:1.4rem;">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;margin-bottom:0.9rem;">
+      <div style="display:flex;align-items:center;gap:0.5rem;">
+        <h1 style="margin:0;font-size:1.25rem;">memorize</h1>
+        <span class="badge b-accent">{{t .Lang "login_server_badge"}}</span>
+      </div>
+      <div style="display:flex;gap:0.35rem;align-items:center;">
+        <a class="btn btn-sm" href="/login?lang={{if eq .Lang "ko"}}en{{else}}ko{{end}}">{{if eq .Lang "ko"}}English{{else}}한국어{{end}}</a>
+      </div>
+    </div>
+
+    <p style="margin:0 0 1rem;font-size:0.84rem;color:var(--muted);line-height:1.45;">
+      {{t .Lang "login_desc"}}
+    </p>
+
+    {{if .Error}}
+      <div style="margin-bottom:0.9rem;padding:0.65rem 0.8rem;border-radius:var(--radius-sm);border:1px solid var(--danger);background:rgba(239,68,68,0.12);color:var(--danger);font-size:0.82rem;font-weight:600;" role="alert">
+        {{.Error}}
+      </div>
+    {{end}}
+
+    <form method="post" action="/login" style="display:flex;flex-direction:column;gap:0.75rem;">
+      <div class="field-col">
+        <label for="loginTokenInput">{{t .Lang "login_token_lbl"}}</label>
+        <input id="loginTokenInput" name="token" type="password" class="input"
+          style="font-family:var(--mono);"
+          placeholder="mem_..." autocomplete="current-password" autofocus required>
+      </div>
+      <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;">
+        {{t .Lang "login_btn"}}
+      </button>
+    </form>
+
+    <div style="margin-top:1rem;padding-top:0.8rem;border-top:1px solid var(--border);font-size:0.75rem;color:var(--subtle);line-height:1.45;">
+      {{t .Lang "login_cli_hint"}}
+      <div style="margin-top:0.35rem;font-family:var(--mono);background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.45rem 0.6rem;overflow-x:auto;">
+        memorize connect --url &lt;server-url&gt; --token mem_...
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>{{end}}

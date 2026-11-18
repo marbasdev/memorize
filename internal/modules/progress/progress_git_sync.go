@@ -188,10 +188,59 @@ func (s *Service) AutoSyncProgressCommits(ctx context.Context, rawScope, repoDir
 	}
 	lastCommit := s.mem.GetSyncedCommit(ctx, sc)
 	head, pending := s.collectPendingGitCommits(ctx, sc, root, lastCommit, 10)
+	return s.recordAutoProgressCommits(ctx, sc, head, pending)
+}
+
+// AutoSyncProgressCommitsFromPayload ingests client-collected Git commits into project_progress
+// and advances the caller's per-user commit cursor without touching host server disk.
+func (s *Service) AutoSyncProgressCommitsFromPayload(ctx context.Context, rawScope, head string, commits []domain.GitCommitBrief) int {
+	sc := domain.NormalizeScope(rawScope)
+	if !strings.HasPrefix(sc, "project:") || len(commits) == 0 {
+		return 0
+	}
+	existingSHAs := s.loadExistingCommitSHAs(ctx, sc)
+	var pending []domain.GitCommitBrief
+	for _, c := range commits {
+		sha := strings.TrimSpace(c.SHA)
+		if len(sha) >= 7 && existingSHAs[sha[:7]] {
+			continue
+		}
+		pending = append(pending, c)
+	}
+	return s.recordAutoProgressCommits(ctx, sc, strings.TrimSpace(head), pending)
+}
+
+func (s *Service) loadExistingCommitSHAs(ctx context.Context, scope string) map[string]bool {
+	existingSHAs := make(map[string]bool)
+	if rows, err := s.db.QueryContext(ctx, `SELECT COALESCE(commit_sha, ''), COALESCE(details, '') FROM project_progress WHERE scope = ?`, scope); err == nil {
+		for rows.Next() {
+			var sha, det string
+			if rows.Scan(&sha, &det) == nil {
+				if clean := strings.TrimSpace(sha); len(clean) >= 7 {
+					existingSHAs[clean[:7]] = true
+				}
+				for _, line := range strings.Split(det, "\n") {
+					line = strings.TrimSpace(line)
+					if strings.HasPrefix(line, "[git:") {
+						if end := strings.IndexByte(line[5:], ']'); end > 0 {
+							tok := strings.TrimSpace(line[5 : 5+end])
+							if len(tok) >= 7 {
+								existingSHAs[tok[:7]] = true
+							}
+						}
+					}
+				}
+			}
+		}
+		_ = rows.Close()
+	}
+	return existingSHAs
+}
+
+func (s *Service) recordAutoProgressCommits(ctx context.Context, sc, head string, pending []domain.GitCommitBrief) int {
 	if head == "" || len(pending) == 0 {
 		return 0
 	}
-
 	synced := s.coalesceAndRecordCommitMilestones(ctx, sc, "", pending, nil)
 	if synced > 0 {
 		_ = s.mem.SetSyncedCommit(ctx, sc, head)

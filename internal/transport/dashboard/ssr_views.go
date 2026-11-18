@@ -53,6 +53,8 @@ func toggleFilterJSON(key, cur, target string, extra map[string]string) string {
 type ssrMemoriesData struct {
 	Lang             string
 	OOB              bool
+	ServerMode       bool
+	CanAdmin         bool
 	Stats            domain.DashboardStats
 	GeneralCount     int
 	Histogram        ssrHistogramData
@@ -91,17 +93,23 @@ type ssrCalibrateData struct {
 }
 
 type ssrPageData struct {
-	Lang       string
-	Memories   ssrMemoriesData
-	Team       ssrTeamData
-	Progress   ssrProgressData
-	Guardrails ssrGuardrailsData
-	Engines    ssrEnginesData
-	Calibrate  ssrCalibrateData
+	Lang        string
+	ServerMode  bool
+	CanAdmin    bool
+	AuthAccount string
+	AuthRole    string
+	Memories    ssrMemoriesData
+	Team        ssrTeamData
+	Progress    ssrProgressData
+	Guardrails  ssrGuardrailsData
+	Engines     ssrEnginesData
+	Calibrate   ssrCalibrateData
 }
 
 type ssrDetailModalData struct {
 	Lang             string
+	ServerMode       bool
+	CanAdmin         bool
 	Record           domain.MemoryRecord
 	Scopes           []string
 	Categories       []string
@@ -196,6 +204,7 @@ type ssrVerifyResultsData struct {
 
 var ssrTemplateFiles = []string{
 	"templates/layout.html",
+	"templates/login.html",
 	"templates/memories.html",
 	"templates/team.html",
 	"templates/team_modals.html",
@@ -205,6 +214,7 @@ var ssrTemplateFiles = []string{
 	"templates/telemetry.html",
 	"templates/calibrate.html",
 	"templates/modals.html",
+	"templates/users_modals.html",
 }
 
 func ssrFuncMap() template.FuncMap {
