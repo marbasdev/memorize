@@ -2,13 +2,16 @@ package dashboard_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"memorize/internal/domain"
+	"memorize/internal/infra/config"
 	"memorize/internal/infra/sqlite"
 	"memorize/internal/transport/dashboard"
 	thttp "memorize/internal/transport/http"
@@ -108,8 +111,8 @@ func TestDashboardServerModeAuthRBACAndPersonalIsolation(t *testing.T) {
 	reqCreate.Header.Set("HX-Request", "true")
 	reqCreate.AddCookie(adminCookie)
 	h.ServeHTTP(recCreate, reqCreate)
-	if recCreate.Code != http.StatusOK || !strings.Contains(recCreate.Body.String(), "mem_") || !strings.Contains(recCreate.Body.String(), "alice") {
-		t.Fatalf("admin user create failed: %d %s", recCreate.Code, recCreate.Body.String())
+	if recCreate.Code != http.StatusOK || !strings.Contains(recCreate.Body.String(), "mem_") || !strings.Contains(recCreate.Body.String(), "alice") || !strings.Contains(recCreate.Body.String(), "/mcp") {
+		t.Fatalf("admin user create failed (expected token and MCP snippet): %d %s", recCreate.Code, recCreate.Body.String())
 	}
 
 	// Admin sees Accounts button and admin tabs.
@@ -222,5 +225,94 @@ func TestDashboardServerModeAuthRBACAndPersonalIsolation(t *testing.T) {
 	h.ServeHTTP(recRevoked, reqRevoked)
 	if recRevoked.Code != http.StatusUnauthorized {
 		t.Fatalf("expected rotated member cookie to fail 401 immediately, got %d", recRevoked.Code)
+	}
+
+	// /ui/modal/remotes is disabled in ServerMode (returns 404).
+	recRemSrv := httptest.NewRecorder()
+	reqRemSrv := httptest.NewRequest(http.MethodGet, "http://"+host+"/ui/modal/remotes", nil)
+	reqRemSrv.Host = host
+	reqRemSrv.AddCookie(adminCookie)
+	h.ServeHTTP(recRemSrv, reqRemSrv)
+	if recRemSrv.Code != http.StatusNotFound {
+		t.Fatalf("expected /ui/modal/remotes 404 in ServerMode, got %d", recRemSrv.Code)
+	}
+}
+
+func TestDashboardLocalRemoteConnectionsUI(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("MEMORY_DATA_DIR", tmp)
+	dbPath := filepath.Join(tmp, "memories.db")
+	d := newTestDeps(t, dbPath, noopMutEval{}, filepath.Join(tmp, "models"), thttp.DashboardHooks{})
+	h := dashboard.NewHandler(d)
+
+	// Start a mock verified team server for /api/daemon/status Bearer checks.
+	teamSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/daemon/status" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer mem_valid_team" {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(thttp.DaemonStatus{
+			Running:    true,
+			ServerMode: true,
+			Account:    "alice",
+			Role:       "member",
+		})
+	}))
+	defer teamSrv.Close()
+
+	// Solo dashboard shows Team Server button (#btnOpenRemotes).
+	recHome := httptest.NewRecorder()
+	reqHome := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:18095/", nil)
+	h.ServeHTTP(recHome, reqHome)
+	if recHome.Code != http.StatusOK || !strings.Contains(recHome.Body.String(), "btnOpenRemotes") {
+		t.Fatalf("expected solo dashboard to render btnOpenRemotes, code=%d", recHome.Code)
+	}
+
+	// Reject bad token on /ui/remotes/connect cleanly (400).
+	badForm := url.Values{"mode": {"global"}, "url": {teamSrv.URL}, "token": {"wrong"}}.Encode()
+	recBad := httptest.NewRecorder()
+	reqBad := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:18095/ui/remotes/connect", strings.NewReader(badForm))
+	reqBad.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqBad.Header.Set("HX-Request", "true")
+	h.ServeHTTP(recBad, reqBad)
+	if recBad.Code != http.StatusBadRequest {
+		t.Fatalf("expected bad token connect to return 400, got %d", recBad.Code)
+	}
+
+	// Valid repo binding succeeds, omits plaintext token in HTML, updates OOB nav badge, and saves remotes.json.
+	teamRepo := filepath.Join(tmp, "team-project")
+	goodForm := url.Values{"mode": {"repo"}, "repo_path": {teamRepo}, "url": {teamSrv.URL}, "token": {"mem_valid_team"}}.Encode()
+	recGood := httptest.NewRecorder()
+	reqGood := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:18095/ui/remotes/connect", strings.NewReader(goodForm))
+	reqGood.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqGood.Header.Set("HX-Request", "true")
+	h.ServeHTTP(recGood, reqGood)
+	bodyGood := recGood.Body.String()
+	if recGood.Code != http.StatusOK || !strings.Contains(bodyGood, teamSrv.URL) || !strings.Contains(bodyGood, "@alice") || !strings.Contains(bodyGood, "hx-swap-oob=\"outerHTML\"") {
+		t.Fatalf("expected valid connect response with URL/@alice/OOB badge, got %d %s", recGood.Code, bodyGood)
+	}
+	if strings.Contains(bodyGood, "mem_valid_team") {
+		t.Fatalf("plaintext token must not be leaked into HTML modal")
+	}
+	if got, ok := config.ResolveRemoteTarget(tmp, teamRepo); !ok || got.URL != teamSrv.URL {
+		t.Fatalf("expected saved remote binding for %s, got ok=%v target=%+v", teamRepo, ok, got)
+	}
+
+	// Disconnect removes binding and updates OOB badge back to 0.
+	discForm := url.Values{"mode": {"repo"}, "repo_path": {teamRepo}}.Encode()
+	recDisc := httptest.NewRecorder()
+	reqDisc := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:18095/ui/remotes/disconnect", strings.NewReader(discForm))
+	reqDisc.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqDisc.Header.Set("HX-Request", "true")
+	h.ServeHTTP(recDisc, reqDisc)
+	if recDisc.Code != http.StatusOK || strings.Contains(recDisc.Body.String(), teamRepo) {
+		t.Fatalf("expected repo removed after disconnect: %d %s", recDisc.Code, recDisc.Body.String())
+	}
+	if _, ok := config.ResolveRemoteTarget(tmp, teamRepo); ok {
+		t.Fatalf("expected remote binding cleared after disconnect")
 	}
 }

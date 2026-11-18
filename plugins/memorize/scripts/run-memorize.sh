@@ -13,8 +13,18 @@ BIN_DIR="$DATA_DIR/bin"
 export MEMORY_DB_PATH="${MEMORY_DB_PATH:-$DATA_DIR/memories.db}"
 export MEMORY_MODELS_DIR="${MEMORY_MODELS_DIR:-$DATA_DIR/models}"
 
-mkdir -p "$BIN_DIR" "$MEMORY_MODELS_DIR" 2>/dev/null || true
-chmod 700 "$DATA_DIR" "$MEMORY_MODELS_DIR" 2>/dev/null || true
+mkdir -p "$BIN_DIR" 2>/dev/null || true
+chmod 700 "$DATA_DIR" 2>/dev/null || true
+GLOBAL_REMOTE=0
+if [ -n "${MEMORY_REMOTE_URL:-}" ]; then
+  GLOBAL_REMOTE=1
+elif [ -f "$DATA_DIR/remotes.json" ] && grep -q '"default"[[:space:]]*:' "$DATA_DIR/remotes.json" 2>/dev/null; then
+  GLOBAL_REMOTE=1
+fi
+if [ "$GLOBAL_REMOTE" -eq 0 ]; then
+  mkdir -p "$MEMORY_MODELS_DIR" 2>/dev/null || true
+  chmod 700 "$MEMORY_MODELS_DIR" 2>/dev/null || true
+fi
 
 # 1. If a self-installed binary exists directly in $PLUGIN_DIR/bin/memorize and no remote override is forced,
 # check manifest version first so plugin updates seamlessly upgrade the cached binary.

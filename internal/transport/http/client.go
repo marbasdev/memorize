@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -16,6 +17,9 @@ import (
 	"memorize/internal/domain"
 	"memorize/internal/infra/config"
 )
+
+// ErrDaemonAuthRequired indicates that a running memorize team server requires Bearer authentication.
+var ErrDaemonAuthRequired = errors.New("daemon authentication required")
 
 var (
 	daemonProbeHTTP = &http.Client{Timeout: 400 * time.Millisecond}
@@ -95,6 +99,9 @@ func QueryDaemonStatusWithAuth(addrOrURL, bearerToken string) (*DaemonStatus, er
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return nil, fmt.Errorf("%w (HTTP %d)", ErrDaemonAuthRequired, resp.StatusCode)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("daemon status HTTP %d", resp.StatusCode)
 	}
@@ -105,8 +112,9 @@ func QueryDaemonStatusWithAuth(addrOrURL, bearerToken string) (*DaemonStatus, er
 	return &st, nil
 }
 
-// DiscoverLiveDaemonStatus probes candidate daemon addresses and returns the running instance matching dbPath.
-func DiscoverLiveDaemonStatus(explicitAddr, dbPath string) (*DaemonStatus, string, bool) {
+// ProbeLiveDaemonState checks candidate daemon addresses for a live instance serving dbPath,
+// also reporting when an authenticated memorize team server is already occupying the target address/DB.
+func ProbeLiveDaemonState(explicitAddr, dbPath string) (*DaemonStatus, string, bool, bool) {
 	seen := make(map[string]bool)
 	var candidates []string
 	addCand := func(a string) {
@@ -120,26 +128,45 @@ func DiscoverLiveDaemonStatus(explicitAddr, dbPath string) (*DaemonStatus, strin
 		candidates = append(candidates, s)
 	}
 
+	rtState, hasRT := config.ReadDaemonState(dbPath)
 	if ov := ExplicitDaemonOverride(explicitAddr); ov != "" {
 		addCand(ov)
-		if st, ok := config.ReadDaemonState(dbPath); ok && st.ListenAddr != "" {
-			addCand(st.ListenAddr)
+		if hasRT && rtState.ListenAddr != "" {
+			addCand(rtState.ListenAddr)
 		}
 	} else {
-		if st, ok := config.ReadDaemonState(dbPath); ok && st.ListenAddr != "" {
-			addCand(st.ListenAddr)
+		if hasRT && rtState.ListenAddr != "" {
+			addCand(rtState.ListenAddr)
 		}
 		cfg := config.LoadPortConfig(dbPath)
 		addCand(net.JoinHostPort(domain.DefaultDaemonHost, strconv.Itoa(cfg.DaemonPort)))
 		addCand(domain.DefaultDaemonAddr)
 	}
 
+	authAddr := ""
 	for _, cand := range candidates {
-		if st, err := QueryDaemonStatus(cand); err == nil && st.Running && SameDBPath(st.DBPath, dbPath) {
-			return st, cand, true
+		st, err := QueryDaemonStatus(cand)
+		if err == nil && st.Running && SameDBPath(st.DBPath, dbPath) {
+			return st, cand, true, false
+		}
+		if errors.Is(err, ErrDaemonAuthRequired) && authAddr == "" {
+			authAddr = cand
 		}
 	}
-	return nil, "", false
+	if authAddr != "" {
+		return &DaemonStatus{
+			Running:    true,
+			ServerMode: true,
+			ListenAddr: authAddr,
+		}, authAddr, false, true
+	}
+	return nil, "", false, false
+}
+
+// DiscoverLiveDaemonStatus probes candidate daemon addresses and returns the running instance matching dbPath.
+func DiscoverLiveDaemonStatus(explicitAddr, dbPath string) (*DaemonStatus, string, bool) {
+	st, cand, ok, _ := ProbeLiveDaemonState(explicitAddr, dbPath)
+	return st, cand, ok
 }
 
 // ProbeDashboardMetaAlive checks whether a local dashboard server responds on /api/dashboard/meta.

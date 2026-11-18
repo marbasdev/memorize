@@ -213,8 +213,11 @@ func EnsureRunning(addr, dbPath, modelsDir string) (*thttp.DaemonStatus, bool) {
 	if !config.IsPersistentDBPath(dbPath) {
 		return nil, false
 	}
-	if st, _, ok := thttp.DiscoverLiveDaemonStatus(addr, dbPath); ok {
+	if st, _, ok, authReq := thttp.ProbeLiveDaemonState(addr, dbPath); ok {
 		return st, true
+	} else if authReq {
+		log.Printf("memorize team server already running with authentication on %s; skipping unauthenticated daemon spawn", st.ListenAddr)
+		return st, false
 	}
 
 	explicitOv := thttp.ExplicitDaemonOverride(addr)
@@ -269,8 +272,10 @@ func EnsureRunning(addr, dbPath, modelsDir string) (*thttp.DaemonStatus, bool) {
 	deadline := time.Now().Add(4 * time.Second)
 	for time.Now().Before(deadline) {
 		time.Sleep(40 * time.Millisecond)
-		if st, _, ok := thttp.DiscoverLiveDaemonStatus(addr, dbPath); ok {
+		if st, _, ok, authReq := thttp.ProbeLiveDaemonState(addr, dbPath); ok {
 			return st, true
+		} else if authReq {
+			return st, false
 		}
 	}
 	return nil, false
@@ -325,10 +330,11 @@ func RunTeamServer(version, explicitAddr, dbPath, modelsDir string) int {
 		return 1
 	}
 
+	bootstrapAccount := domain.FirstNonEmpty(os.Getenv("MEMORY_BOOTSTRAP_ACCOUNT"), b.mem.CurrentAccount(context.Background()))
 	issued, created, err := sqlite.EnsureBootstrapAdmin(
 		context.Background(),
 		b.mem.DB(),
-		os.Getenv("MEMORY_BOOTSTRAP_ACCOUNT"),
+		bootstrapAccount,
 		os.Getenv("MEMORY_BOOTSTRAP_TOKEN"),
 	)
 	if err != nil {
@@ -339,9 +345,22 @@ func RunTeamServer(version, explicitAddr, dbPath, modelsDir string) int {
 
 	lc := newDaemonLifecycle(version, dbPath, modelsDir, ln.Addr().String(), b)
 	lc.serverMode = true
-	lc.skipStateRemove.Store(true)
 	b.mgr.SetExcludePortFunc(func() int { return lc.boundPort })
 	b.mgr.SetDashboardURLFunc(func() string { return "http://" + lc.boundAddr })
+
+	localDiscoverAddr := lc.boundAddr
+	if h, p, ok := domain.ParseHostPort(lc.boundAddr); ok && p > 0 && (h == "" || h == "0.0.0.0" || h == "::") {
+		localDiscoverAddr = net.JoinHostPort(domain.DefaultDaemonHost, strconv.Itoa(p))
+	}
+	_ = config.WriteDaemonState(dbPath, domain.DaemonRuntimeState{
+		PID:        os.Getpid(),
+		ListenAddr: localDiscoverAddr,
+		ServerMode: true,
+		DBPath:     dbPath,
+		ModelsDir:  modelsDir,
+		StartedAt:  lc.startedAt.Format(time.RFC3339),
+	})
+	defer lc.cleanupState()
 
 	if created {
 		hintHost := lc.boundAddr

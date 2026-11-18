@@ -20,11 +20,34 @@ import (
 func runServeCLI(args []string, dbPath, modelsDir string, hooks RuntimeHooks) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	addr := fs.String("addr", domain.DefaultServeAddr, "team server listen address")
+	account := fs.String("account", "", "bootstrap admin account name on first run")
+	token := fs.String("token", "", "bootstrap admin token on first run (auto-generated if omitted)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
 		return 2
+	}
+	if strings.TrimSpace(*account) != "" || strings.TrimSpace(*token) != "" {
+		db, err := sqlite.Open(dbPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "open database failed: %v\n", err)
+			return 1
+		}
+		if err := sqlite.InitSchema(db); err != nil {
+			_ = db.Close()
+			fmt.Fprintf(os.Stderr, "init schema failed: %v\n", err)
+			return 1
+		}
+		issued, created, err := sqlite.EnsureBootstrapAdmin(context.Background(), db, *account, *token)
+		_ = db.Close()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "bootstrap admin initialization failed: %v\n", err)
+			return 1
+		}
+		if created && strings.TrimSpace(*token) == "" {
+			_ = printIssuedToken(issued, false, "Initialized admin account")
+		}
 	}
 	if hooks.RunTeamServer == nil {
 		fmt.Fprintln(os.Stderr, "team server handler not configured")

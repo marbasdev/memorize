@@ -202,18 +202,21 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 			engView = ssrEnginesData{Lang: lang}
 			calView = ssrCalibrateData{Lang: lang}
 		}
+		remSummary := buildRemotesModalData(d, lang)
 		writeHTMLTemplate(w, "layout", ssrPageData{
-			Lang:        lang,
-			ServerMode:  d.ServerMode,
-			CanAdmin:    canAdmin,
-			AuthAccount: p.Account,
-			AuthRole:    p.Role,
-			Memories:    memView,
-			Team:        teamView,
-			Progress:    progView,
-			Guardrails:  grView,
-			Engines:     engView,
-			Calibrate:   calView,
+			Lang:            lang,
+			ServerMode:      d.ServerMode,
+			CanAdmin:        canAdmin,
+			AuthAccount:     p.Account,
+			AuthRole:        p.Role,
+			RemoteConnected: remSummary.RemoteConnected,
+			RemoteCount:     remSummary.RemoteCount,
+			Memories:        memView,
+			Team:            teamView,
+			Progress:        progView,
+			Guardrails:      grView,
+			Engines:         engView,
+			Calibrate:       calView,
 		})
 	})
 

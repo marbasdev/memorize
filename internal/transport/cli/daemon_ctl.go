@@ -17,7 +17,11 @@ func runDaemonControlCLI(action string, posArgs []string, addr, dbPath, modelsDi
 		return runDaemonPortCLI(portCLIArgs(posArgs), addr, dbPath, modelsDir)
 
 	case "status":
-		st, targetAddr, ok := thttp.DiscoverLiveDaemonStatus(addr, dbPath)
+		st, targetAddr, ok, authReq := thttp.ProbeLiveDaemonState(addr, dbPath)
+		if authReq {
+			fmt.Printf("memorize team server: running on http://%s (authentication required; manage via 'memorize user' or 'memorize connect')\n", targetAddr)
+			return 0
+		}
 		if !ok || st == nil || !st.Running {
 			cfg := config.LoadPortConfig(dbPath)
 			cfgAddr, _ := thttp.ResolveDaemonTargetAddr(addr, dbPath)

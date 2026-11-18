@@ -1,12 +1,19 @@
 package dashboard
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"memorize/internal/domain"
+	"memorize/internal/infra/config"
+	"memorize/internal/infra/git"
 	"memorize/internal/infra/sqlite"
 	thttp "memorize/internal/transport/http"
 )
@@ -24,7 +31,29 @@ type ssrUsersModalData struct {
 	IssuedAccount  string
 	IssuedRole     string
 	IssuedToken    string
+	IssuedMCPJSON  string
 	ConnectHintURL string
+}
+
+type ssrRemoteRepoRow struct {
+	RepoPath  string
+	URL       string
+	Account   string
+	Role      string
+	TokenHint string
+}
+
+type ssrRemotesModalData struct {
+	Lang            string
+	RemoteConnected bool
+	RemoteCount     int
+	RemoteOOB       bool
+	HasDefault      bool
+	DefaultURL      string
+	DefaultAccount  string
+	DefaultRole     string
+	DefaultHint     string
+	Repos           []ssrRemoteRepoRow
 }
 
 func dashboardAuthMiddleware(d Deps, next http.Handler) http.Handler {
@@ -123,8 +152,105 @@ func buildUsersModalData(r *http.Request, d Deps, lang string, issued *domain.Us
 		data.IssuedAccount = issued.User.Account
 		data.IssuedRole = issued.User.Role
 		data.IssuedToken = issued.PlainToken
+		mcpCfg := map[string]any{
+			"mcpServers": map[string]any{
+				"memorize": map[string]any{
+					"url": strings.TrimRight(data.ConnectHintURL, "/") + "/mcp",
+					"headers": map[string]string{
+						"Authorization": "Bearer " + issued.PlainToken,
+					},
+				},
+			},
+		}
+		if b, merr := json.MarshalIndent(mcpCfg, "", "  "); merr == nil {
+			data.IssuedMCPJSON = string(b)
+		}
 	}
 	return data, nil
+}
+
+func safeRemoteHTTPURL(raw string) string {
+	norm := config.NormalizeRemoteURL(raw)
+	u, err := url.Parse(norm)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return ""
+	}
+	return strings.TrimRight(u.String(), "/")
+}
+
+func remoteBindingsDataDir(d Deps) string {
+	if envDir := strings.TrimSpace(os.Getenv("MEMORY_DATA_DIR")); envDir != "" {
+		return envDir
+	}
+	if d.Memory != nil {
+		dbPath := d.Memory.DBPath()
+		if dbPath != "" && dbPath != ":memory:" && !strings.HasPrefix(dbPath, "file::memory:") {
+			return config.DataDirForDBPath(dbPath)
+		}
+	}
+	return config.DefaultDataDir()
+}
+
+func buildRemotesModalData(d Deps, lang string) ssrRemotesModalData {
+	if d.ServerMode {
+		return ssrRemotesModalData{Lang: lang}
+	}
+	dataDir := remoteBindingsDataDir(d)
+	f := config.LoadRemoteBindings(dataDir)
+	out := ssrRemotesModalData{Lang: lang}
+	if f.Default != nil {
+		if safeURL := safeRemoteHTTPURL(f.Default.URL); safeURL != "" {
+			out.HasDefault = true
+			out.DefaultURL = safeURL
+			out.DefaultAccount = f.Default.Account
+			out.DefaultRole = f.Default.Role
+			out.DefaultHint = domain.FormatTokenHint(f.Default.Token)
+			out.RemoteCount++
+		}
+	}
+	var paths []string
+	for rp := range f.Repos {
+		paths = append(paths, rp)
+	}
+	sort.Strings(paths)
+	for _, rp := range paths {
+		t := f.Repos[rp]
+		safeURL := safeRemoteHTTPURL(t.URL)
+		if safeURL == "" {
+			continue
+		}
+		out.Repos = append(out.Repos, ssrRemoteRepoRow{
+			RepoPath:  rp,
+			URL:       safeURL,
+			Account:   t.Account,
+			Role:      t.Role,
+			TokenHint: domain.FormatTokenHint(t.Token),
+		})
+		out.RemoteCount++
+	}
+	out.RemoteConnected = out.RemoteCount > 0
+	return out
+}
+
+func renderRemotesModalWithToast(w http.ResponseWriter, d Deps, lang, toast string) {
+	data := buildRemotesModalData(d, lang)
+	body, err := renderSSRTemplate("modal_remotes", data)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	oobData := data
+	oobData.RemoteOOB = true
+	if navBytes, nErr := renderSSRTemplate("remotes_nav_btn", oobData); nErr == nil {
+		body = append(body, '\n')
+		body = append(body, navBytes...)
+	}
+	if strings.TrimSpace(toast) != "" {
+		setHXTriggers(w, toast, false, false)
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+	_, _ = w.Write(body)
 }
 
 func renderUsersModalWithToast(w http.ResponseWriter, r *http.Request, d Deps, lang, toast string, issued *domain.UserTokenIssue) {
@@ -311,5 +437,81 @@ func registerSSRAuthRoutes(mux *http.ServeMux, d Deps) {
 		}
 		msg := langText(lang, fmt.Sprintf("Removed account @%s", domain.NormalizeAccount(acc)), fmt.Sprintf("@%s 계정을 삭제했습니다", domain.NormalizeAccount(acc)))
 		renderUsersModalWithToast(w, r, d, lang, msg, nil)
+	})))
+
+	mux.HandleFunc("/ui/modal/remotes", getHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
+		if d.ServerMode {
+			http.Error(w, "remote client connections are configured on client machines", http.StatusNotFound)
+			return
+		}
+		renderRemotesModalWithToast(w, d, requestLang(r), "")
+	})))
+
+	mux.HandleFunc("/ui/remotes/connect", postHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
+		if d.ServerMode {
+			http.Error(w, "remote client connections are configured on client machines", http.StatusNotFound)
+			return
+		}
+		lang := requestLang(r)
+		mode := strings.ToLower(strings.TrimSpace(r.FormValue("mode")))
+		isGlobal := mode == "global"
+		repoPath := strings.TrimSpace(r.FormValue("repo_path"))
+		if !isGlobal && repoPath == "" {
+			http.Error(w, langText(lang, "enter a repository directory path or select Global Default", "저장소 디렉토리 경로를 입력하거나 전역 기본값을 선택하세요"), http.StatusBadRequest)
+			return
+		}
+		safeURL := safeRemoteHTTPURL(r.FormValue("url"))
+		tok := strings.TrimSpace(r.FormValue("token"))
+		if safeURL == "" || tok == "" {
+			http.Error(w, langText(lang, "valid http/https server URL and token are required", "유효한 http/https 서버 URL과 토큰을 입력하세요"), http.StatusBadRequest)
+			return
+		}
+		st, err := thttp.QueryDaemonStatusWithAuth(safeURL, tok)
+		if err != nil {
+			http.Error(w, langText(lang, fmt.Sprintf("server verification failed: %v", err), fmt.Sprintf("팀 서버 검증 실패: %v", err)), http.StatusBadRequest)
+			return
+		}
+		repoRoot := ""
+		if !isGlobal {
+			if _, root := git.CanonicalScope(r.Context(), repoPath); root != "" {
+				repoRoot = root
+			} else if abs, aerr := filepath.Abs(repoPath); aerr == nil {
+				repoRoot = abs
+			} else {
+				repoRoot = filepath.Clean(repoPath)
+			}
+		}
+		target := domain.RemoteTargetConfig{
+			URL:     safeURL,
+			Token:   tok,
+			Account: st.Account,
+			Role:    st.Role,
+		}
+		if err := config.SaveRemoteBinding(remoteBindingsDataDir(d), repoRoot, isGlobal, target); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		msg := langText(lang, fmt.Sprintf("Connected to %s", safeURL), fmt.Sprintf("팀 서버 연결 완료: %s", safeURL))
+		renderRemotesModalWithToast(w, d, lang, msg)
+	})))
+
+	mux.HandleFunc("/ui/remotes/disconnect", postHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
+		if d.ServerMode {
+			http.Error(w, "remote client connections are configured on client machines", http.StatusNotFound)
+			return
+		}
+		lang := requestLang(r)
+		isGlobal := strings.EqualFold(strings.TrimSpace(r.FormValue("mode")), "global")
+		repoPath := strings.TrimSpace(r.FormValue("repo_path"))
+		removed, err := config.RemoveRemoteBinding(remoteBindingsDataDir(d), repoPath, isGlobal)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		toast := langText(lang, "No matching connection removed", "제거할 연결 정보가 없습니다")
+		if removed {
+			toast = langText(lang, "Disconnected from remote team server", "원격 팀 서버 연결을 해제했습니다")
+		}
+		renderRemotesModalWithToast(w, d, lang, toast)
 	})))
 }

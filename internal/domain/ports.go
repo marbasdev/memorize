@@ -25,6 +25,7 @@ type PortConfig struct {
 type DaemonRuntimeState struct {
 	PID        int    `json:"pid"`
 	ListenAddr string `json:"listen_addr"`
+	ServerMode bool   `json:"server_mode,omitempty"`
 	DBPath     string `json:"db_path,omitempty"`
 	ModelsDir  string `json:"models_dir,omitempty"`
 	GGUFPort   int    `json:"gguf_port,omitempty"`

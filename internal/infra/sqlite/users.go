@@ -29,19 +29,8 @@ func generateRandomToken() (plain, hash, hint string, err error) {
 	}
 	plain = "mem_" + hex.EncodeToString(buf)
 	hash = HashAuthToken(plain)
-	hint = formatTokenHint(plain)
+	hint = domain.FormatTokenHint(plain)
 	return plain, hash, hint, nil
-}
-
-func formatTokenHint(plain string) string {
-	p := strings.TrimSpace(plain)
-	if len(p) <= 12 {
-		if len(p) <= 4 {
-			return "****"
-		}
-		return p[:4] + "..."
-	}
-	return p[:8] + "..." + p[len(p)-4:]
 }
 
 func activeAdminCountTx(ctx context.Context, tx *sql.Tx, excludeAccount string) (int, error) {
@@ -252,7 +241,7 @@ func EnsureBootstrapAdmin(ctx context.Context, db *sql.DB, rawAccount, explicitT
 	var hash, hint string
 	if plain != "" {
 		hash = HashAuthToken(plain)
-		hint = formatTokenHint(plain)
+		hint = domain.FormatTokenHint(plain)
 	} else {
 		plain, hash, hint, err = generateRandomToken()
 		if err != nil {
@@ -265,6 +254,7 @@ func EnsureBootstrapAdmin(ctx context.Context, db *sql.DB, rawAccount, explicitT
 	`, acc, domain.RoleAdmin, hash, hint); err != nil {
 		return domain.UserTokenIssue{}, false, err
 	}
+	_, _ = db.ExecContext(ctx, `UPDATE memories SET account = ? WHERE scope = 'personal' AND COALESCE(account, '') = ''`, acc)
 	u, err := GetUser(ctx, db, acc)
 	if err != nil {
 		return domain.UserTokenIssue{}, false, err

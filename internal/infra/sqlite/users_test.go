@@ -28,10 +28,19 @@ func openTestUsersDB(t *testing.T) (*sql.DB, context.Context) {
 func TestUsersCRUDTokenRotationCookiesAndLastAdminGuard(t *testing.T) {
 	db, ctx := openTestUsersDB(t)
 
+	// Legacy empty-account personal memories should be claimed by initial bootstrap admin cleanly.
+	if _, err := db.ExecContext(ctx, `INSERT INTO memories (scope, account, category, content, confidence, pinned, active) VALUES ('personal', '', 'convention', 'Legacy note', 0.9, 0, 1)`); err != nil {
+		t.Fatal(err)
+	}
+
 	// Bootstrap admin created once only when table is empty.
 	adminIssue, created, err := sqlite.EnsureBootstrapAdmin(ctx, db, "hostadmin", "")
 	if err != nil || !created {
 		t.Fatalf("EnsureBootstrapAdmin first: created=%v err=%v", created, err)
+	}
+	var claimedAcc string
+	if err := db.QueryRowContext(ctx, `SELECT account FROM memories WHERE content = 'Legacy note'`).Scan(&claimedAcc); err != nil || claimedAcc != "hostadmin" {
+		t.Fatalf("expected legacy blank-account personal memory claimed by hostadmin, got %q (err=%v)", claimedAcc, err)
 	}
 	if adminIssue.User.Account != "hostadmin" || adminIssue.User.Role != domain.RoleAdmin || !strings.HasPrefix(adminIssue.PlainToken, "mem_") {
 		t.Fatalf("unexpected bootstrap admin: %+v", adminIssue)

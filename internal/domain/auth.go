@@ -236,3 +236,15 @@ func ExtractTargetFilePath(toolIn map[string]any) string {
 	}
 	return ""
 }
+
+// FormatTokenHint returns a masked display preview for a bearer token without exposing the secret.
+func FormatTokenHint(plain string) string {
+	p := strings.TrimSpace(plain)
+	if len(p) <= 12 {
+		if len(p) <= 4 {
+			return "****"
+		}
+		return p[:4] + "..."
+	}
+	return p[:8] + "..." + p[len(p)-4:]
+}

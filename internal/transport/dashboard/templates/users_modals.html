@@ -20,6 +20,13 @@
         </div>
         <div style="font-family:var(--mono);font-size:0.8rem;padding:0.45rem 0.6rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);word-break:break-all;" id="issuedTokenValue">{{.IssuedToken}}</div>
         <div style="font-family:var(--mono);font-size:0.74rem;color:var(--muted);padding:0.35rem 0.55rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);word-break:break-all;">memorize connect --url {{.ConnectHintURL}} --token {{.IssuedToken}}</div>
+        {{if .IssuedMCPJSON}}
+          <details style="margin-top:0.2rem;">
+            <summary style="cursor:pointer;font-size:0.76rem;color:var(--muted);font-weight:600;">{{t .Lang "users_mcp_only_title"}}</summary>
+            <div style="font-size:0.73rem;color:var(--subtle);margin:0.3rem 0;">{{t .Lang "users_mcp_only_desc"}}</div>
+            <pre id="issuedMCPJSON" style="margin:0;white-space:pre-wrap;font-family:var(--mono);font-size:0.72rem;padding:0.45rem 0.6rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);overflow-x:auto;">{{.IssuedMCPJSON}}</pre>
+          </details>
+        {{end}}
       </div>
     {{end}}
 
@@ -93,6 +100,118 @@
         </tbody>
       </table>
     </div>
+  </div>
+
+  <div class="dlg-foot">
+    <span></span>
+    <button type="button" class="btn btn-sm" @click="$el.closest('dialog').close()">{{t .Lang "btn_close"}}</button>
+  </div>
+</dialog>
+{{end}}
+
+{{define "remotes_nav_btn"}}
+<button type="button" class="btn btn-sm {{if .RemoteConnected}}b-accent{{end}}" id="btnOpenRemotes"
+  {{if .RemoteOOB}}hx-swap-oob="outerHTML"{{end}}
+  hx-get="/ui/modal/remotes" hx-target="#modalHost" hx-swap="innerHTML">
+  {{if .RemoteConnected}}{{t .Lang "btn_remotes_active"}} ({{.RemoteCount}}){{else}}{{t .Lang "btn_remotes"}}{{end}}
+</button>
+{{end}}
+
+{{define "modal_remotes"}}
+<dialog id="remotesDialog" aria-labelledby="remotesDlgTitle" style="width:min(760px,95vw);"
+  x-data="{ mode: 'repo' }"
+  x-init="$el.showModal()" @click="if ($event.target === $el) $el.close()">
+  <div class="dlg-head">
+    <div style="display:flex;align-items:center;gap:0.5rem;">
+      <strong id="remotesDlgTitle">{{t .Lang "remotes_title"}}</strong>
+      <span class="badge {{if .RemoteConnected}}b-accent{{else}}b-muted{{end}}">{{if .RemoteConnected}}{{.RemoteCount}}{{else}}0{{end}}</span>
+    </div>
+    <button type="button" class="btn btn-sm" @click="$el.closest('dialog').close()">{{t .Lang "btn_close"}}</button>
+  </div>
+
+  <div class="dlg-body" style="gap:0.85rem;">
+    <div style="font-size:0.8rem;color:var(--muted);line-height:1.45;">{{t .Lang "remotes_desc"}}</div>
+
+    <div class="sub-panel" style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+      <div>
+        <div style="font-size:0.75rem;color:var(--muted);margin-bottom:0.2rem;">{{t .Lang "remotes_default_lbl"}}</div>
+        {{if .HasDefault}}
+          <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;font-family:var(--mono);font-size:0.8rem;">
+            <span class="badge b-ok">{{.DefaultURL}}</span>
+            {{if .DefaultAccount}}<span class="tag-chip">@{{.DefaultAccount}}{{if .DefaultRole}} · {{.DefaultRole}}{{end}}</span>{{end}}
+            <span class="tag-chip">{{.DefaultHint}}</span>
+          </div>
+        {{else}}
+          <span class="badge b-muted">{{t .Lang "remotes_local_solo"}}</span>
+        {{end}}
+      </div>
+      {{if .HasDefault}}
+        <div style="display:flex;gap:0.35rem;align-items:center;">
+          <a class="btn btn-sm" href="{{.DefaultURL}}" target="_blank" rel="noopener noreferrer">{{t .Lang "remotes_open_console"}}</a>
+          <button type="button" class="btn btn-danger btn-sm"
+            hx-post="/ui/remotes/disconnect" hx-vals='{"mode":"global"}'
+            hx-target="#modalHost" hx-swap="innerHTML">{{t .Lang "remotes_btn_disconnect"}}</button>
+        </div>
+      {{end}}
+    </div>
+
+    <div>
+      <div style="font-size:0.78rem;font-weight:600;color:var(--muted);margin-bottom:0.35rem;">{{t .Lang "remotes_repos_lbl"}} ({{len .Repos}})</div>
+      {{if not .Repos}}
+        <div style="font-size:0.78rem;color:var(--subtle);padding:0.55rem 0.7rem;border:1px solid var(--border);border-radius:var(--radius-sm);">{{t .Lang "remotes_repos_empty"}}</div>
+      {{else}}
+        <div style="overflow-x:auto;">
+          <table class="tbl">
+            <tbody>
+              {{range .Repos}}
+              <tr>
+                <td style="font-family:var(--mono);font-size:0.77rem;">{{.RepoPath}}</td>
+                <td>
+                  <span class="badge b-accent" style="font-family:var(--mono);">{{.URL}}</span>
+                  {{if .Account}}<span class="tag-chip">@{{.Account}}</span>{{end}}
+                </td>
+                <td style="text-align:right;white-space:nowrap;">
+                  <a class="btn btn-sm" href="{{.URL}}" target="_blank" rel="noopener noreferrer">{{t $.Lang "remotes_open_console"}}</a>
+                  <button type="button" class="btn btn-danger btn-sm"
+                    hx-post="/ui/remotes/disconnect" hx-vals='{{jsonObj "mode" "repo" "repo_path" .RepoPath}}'
+                    hx-target="#modalHost" hx-swap="innerHTML">{{t $.Lang "remotes_btn_disconnect"}}</button>
+                </td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+      {{end}}
+    </div>
+
+    <form style="display:flex;flex-direction:column;gap:0.55rem;padding:0.7rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);"
+      hx-post="/ui/remotes/connect" hx-target="#modalHost" hx-swap="innerHTML">
+      <div style="font-size:0.8rem;font-weight:600;">{{t .Lang "remotes_form_title"}}</div>
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0.55rem;">
+        <div class="field-col">
+          <label for="remModeSel">{{t .Lang "remotes_lbl_mode"}}</label>
+          <select id="remModeSel" name="mode" x-model="mode">
+            <option value="repo">{{t .Lang "remotes_mode_repo"}}</option>
+            <option value="global">{{t .Lang "remotes_mode_global"}}</option>
+          </select>
+        </div>
+        <div class="field-col" x-show="mode === 'repo'">
+          <label for="remRepoInput">{{t .Lang "remotes_lbl_repo"}}</label>
+          <input id="remRepoInput" name="repo_path" class="input" placeholder="/path/to/repo" autocomplete="off">
+        </div>
+        <div class="field-col">
+          <label for="remURLInput">{{t .Lang "remotes_lbl_url"}}</label>
+          <input id="remURLInput" name="url" class="input" placeholder="https://memorize.team:18095" required autocomplete="off">
+        </div>
+        <div class="field-col">
+          <label for="remTokInput">{{t .Lang "remotes_lbl_token"}}</label>
+          <input id="remTokInput" name="token" type="password" class="input" style="font-family:var(--mono);" placeholder="mem_..." required autocomplete="off">
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;">
+        <button type="submit" class="btn btn-primary btn-sm">{{t .Lang "remotes_btn_connect"}}</button>
+      </div>
+    </form>
   </div>
 
   <div class="dlg-foot">

@@ -51,6 +51,8 @@
           <button type="button" class="btn btn-sm" id="btnOpenUsers"
             hx-get="/ui/modal/users" hx-target="#modalHost" hx-swap="innerHTML">{{t .Lang "btn_users"}}</button>
         {{end}}
+      {{else}}
+        {{template "remotes_nav_btn" .}}
       {{end}}
       <select id="langSelect" name="lang" aria-label="Language"
         style="padding:0.24rem 0.5rem;font-size:0.75rem;background:var(--elevated);font-weight:600;cursor:pointer;"

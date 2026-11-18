@@ -93,17 +93,20 @@ type ssrCalibrateData struct {
 }
 
 type ssrPageData struct {
-	Lang        string
-	ServerMode  bool
-	CanAdmin    bool
-	AuthAccount string
-	AuthRole    string
-	Memories    ssrMemoriesData
-	Team        ssrTeamData
-	Progress    ssrProgressData
-	Guardrails  ssrGuardrailsData
-	Engines     ssrEnginesData
-	Calibrate   ssrCalibrateData
+	Lang            string
+	ServerMode      bool
+	CanAdmin        bool
+	AuthAccount     string
+	AuthRole        string
+	RemoteConnected bool
+	RemoteCount     int
+	RemoteOOB       bool
+	Memories        ssrMemoriesData
+	Team            ssrTeamData
+	Progress        ssrProgressData
+	Guardrails      ssrGuardrailsData
+	Engines         ssrEnginesData
+	Calibrate       ssrCalibrateData
 }
 
 type ssrDetailModalData struct {
