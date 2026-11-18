@@ -12,6 +12,7 @@ import (
 	"unicode"
 
 	"memorize/internal/domain"
+	"memorize/internal/infra/config"
 )
 
 func isValidTaxonomySlug(s string) bool {
@@ -81,7 +82,7 @@ func encodePresetTaxonomyMap(m map[string]map[string]bool) string {
 // EffectiveTaxonomyJSON merges configured preset_categories with all active categories and
 // sub-categories currently stored in SQLite so LLM classification reuses consistent slugs.
 func (s *Service) EffectiveTaxonomyJSON(ctx context.Context) string {
-	tax := parsePresetTaxonomyMap(s.GetConfigMap(ctx)["preset_categories"])
+	tax := parsePresetTaxonomyMap(s.GetConfigMap(ctx)[config.CfgPresetCategories])
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT DISTINCT LOWER(TRIM(category)), LOWER(TRIM(COALESCE(sub_category, '')))
 		FROM memories
@@ -112,7 +113,7 @@ func (s *Service) RegisterTaxonomyAppendOnly(ctx context.Context, rawScope, rawC
 		return
 	}
 	cfg := s.GetConfigMap(ctx)
-	tax := parsePresetTaxonomyMap(cfg["preset_categories"])
+	tax := parsePresetTaxonomyMap(cfg[config.CfgPresetCategories])
 
 	changed := false
 	if tax[cat] == nil {
@@ -127,7 +128,7 @@ func (s *Service) RegisterTaxonomyAppendOnly(ctx context.Context, rawScope, rawC
 		return
 	}
 	_ = s.SaveConfig(ctx, map[string]string{
-		"preset_categories": encodePresetTaxonomyMap(tax),
+		config.CfgPresetCategories: encodePresetTaxonomyMap(tax),
 	})
 }
 
@@ -143,7 +144,7 @@ func (s *Service) SuggestTaxonomyRebalance(ctx context.Context, rawScope, catego
 		return nil, s.ProviderName(), nil
 	}
 
-	presetTax := parsePresetTaxonomyMap(s.GetConfigMap(ctx)["preset_categories"])
+	presetTax := parsePresetTaxonomyMap(s.GetConfigMap(ctx)[config.CfgPresetCategories])
 	ev := s.router.EvalForTask(ctx, domain.TaskTaxonomy)
 	sourceLabel := "lexical-taxonomy"
 	var rawItems []domain.TaxonomyRebalanceItem

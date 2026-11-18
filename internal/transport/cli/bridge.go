@@ -669,8 +669,8 @@ func buildClientHookContext(ctx context.Context, remote domain.RemoteTargetConfi
 				continue
 			}
 			if rawMD, err := os.ReadFile(filepath.Join(root, ".memorize", "TEAM_RULES.md")); err == nil && len(rawMD) > 0 {
-				if len(rawMD) > 256*1024 {
-					rawMD = rawMD[:256*1024]
+				if len(rawMD) > domain.MaxRemoteRulePackDocBytes {
+					rawMD = rawMD[:domain.MaxRemoteRulePackDocBytes]
 				}
 				cc.TeamRuleDocs[sc] = string(rawMD)
 			} else if os.IsNotExist(err) || (err == nil && len(rawMD) == 0) {

@@ -233,7 +233,7 @@ func loadClientTurnBaselines(path string) []ClientTurnEditEntry {
 	if json.Unmarshal(b, &raw) != nil {
 		return nil
 	}
-	cutoff := time.Now().Add(-2 * time.Hour).Unix()
+	cutoff := time.Now().Add(-domain.TurnBaselineTTL).Unix()
 	var fresh []ClientTurnEditEntry
 	for _, e := range raw {
 		if e.UpdatedAt >= cutoff {

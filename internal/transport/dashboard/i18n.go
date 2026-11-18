@@ -3,6 +3,8 @@ package dashboard
 import (
 	"net/http"
 	"strings"
+
+	"memorize/internal/domain"
 )
 
 func normalizeLang(raw string) string {
@@ -16,7 +18,7 @@ func requestLang(r *http.Request) string {
 	if q := strings.TrimSpace(r.URL.Query().Get("lang")); q != "" {
 		return normalizeLang(q)
 	}
-	if c, err := r.Cookie("memorize_lang"); err == nil && c != nil {
+	if c, err := r.Cookie(domain.LangCookieName); err == nil && c != nil {
 		return normalizeLang(c.Value)
 	}
 	return "en"

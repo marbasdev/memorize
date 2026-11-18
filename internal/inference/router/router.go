@@ -119,7 +119,7 @@ func (r *Router) EvalForTask(ctx context.Context, task domain.EvalTask) domain.E
 			return ev
 		}
 	}
-	if customRes != nil && cfg["active_provider"] != "" {
+	if customRes != nil && cfg[config.CfgActiveProvider] != "" {
 		if ev := customRes(cfg); ev != nil {
 			return ev
 		}
@@ -165,7 +165,7 @@ func (r *Router) CheckReadiness(ctx context.Context) (bool, string) {
 	if mgr != nil {
 		return CheckConfiguredEngineReadiness(ctx, cfg, mgr)
 	}
-	if strings.TrimSpace(cfg["active_provider"]) != "" || defEval != nil {
+	if strings.TrimSpace(cfg[config.CfgActiveProvider]) != "" || defEval != nil {
 		return true, ""
 	}
 	return false, "no inference engine configured"
@@ -212,7 +212,7 @@ func NewTaskResolverWithEndpoint(wakeFn func(ctx context.Context, model string) 
 		in := providers.DriverBuildInput{
 			Config:        cfg,
 			ModelOverride: modelOverride,
-			RawActiveProv: cfg["active_provider"],
+			RawActiveProv: cfg[config.CfgActiveProvider],
 			GGUFSupported: localmodel.IsSupportedPlatform(),
 			WakeGGUF:      wakeFn,
 		}
@@ -238,7 +238,7 @@ func NewTaskResolverWithEndpoint(wakeFn func(ctx context.Context, model string) 
 		if primary == nil {
 			return nil
 		}
-		bulkProv := domain.NormalizeProviderID(cfg["active_provider"])
+		bulkProv := domain.NormalizeProviderID(cfg[config.CfgActiveProvider])
 		bulkMod := providerDefaultModel(bulkProv, cfg)
 		genProv := domain.NormalizeProviderID(cfg["gen_provider"])
 		genMod := strings.TrimSpace(cfg["gen_model"])
@@ -284,7 +284,7 @@ func NewTaskResolverWithEndpoint(wakeFn func(ctx context.Context, model string) 
 	}
 
 	return func(cfg map[string]string, task domain.EvalTask) (domain.Evaluator, bool) {
-		bulkProv := domain.NormalizeProviderID(cfg["active_provider"])
+		bulkProv := domain.NormalizeProviderID(cfg[config.CfgActiveProvider])
 		bulkMod := providerDefaultModel(bulkProv, cfg)
 
 		spec, hasSpec := domain.FindEvalTask(task)
@@ -343,7 +343,7 @@ func NewDynamicResolver(autoWake ...func(ctx context.Context, model string) erro
 
 // CheckConfiguredEngineReadiness probes whether the effective inference provider is ready to serve calls.
 func CheckConfiguredEngineReadiness(ctx context.Context, cfg map[string]string, mgr *localmodel.Manager) (bool, string) {
-	eff := domain.NormalizeProviderID(cfg["active_provider"])
+	eff := domain.NormalizeProviderID(cfg[config.CfgActiveProvider])
 	if eff == "" {
 		eff = domain.ResolveExplicitEnvProvider()
 	}

@@ -252,7 +252,7 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 			val = "1"
 			msg = "Personal memories enabled in projects"
 		}
-		if err := d.Memory.SaveConfig(domain.WithAdminBypass(r.Context()), map[string]string{"include_personal_in_project": val}); err != nil {
+		if err := d.Memory.SaveConfig(domain.WithAdminBypass(r.Context()), map[string]string{config.CfgIncludePersonalInProject: val}); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -350,7 +350,7 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 			return
 		}
 		facets, _ := d.Memory.GetDashboardFacets(ctx)
-		cats, allSubMap := mergeCategoriesAndSubs(d.Memory.GetConfigMap(ctx)["preset_categories"], facets)
+		cats, allSubMap := mergeCategoriesAndSubs(d.Memory.GetConfigMap(ctx)[config.CfgPresetCategories], facets)
 		scopes := facets.Scopes
 		if len(scopes) == 0 {
 			scopes = []string{"global", "personal"}
@@ -381,7 +381,7 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 
 	mux.HandleFunc("/ui/modal/categories", getHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
-		presets := discovery.NormalizePresetCategoriesJSON(d.Memory.GetConfigMap(r.Context())["preset_categories"])
+		presets := discovery.NormalizePresetCategoriesJSON(d.Memory.GetConfigMap(r.Context())[config.CfgPresetCategories])
 		writeHTMLTemplate(w, "modal_categories", ssrCategoriesModalData{
 			Lang:        lang,
 			PresetsJSON: presets,
@@ -390,8 +390,8 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 
 	mux.HandleFunc("/ui/categories/save", postHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
-		val := discovery.NormalizePresetCategoriesJSON(r.FormValue("preset_categories"))
-		if err := d.Memory.SaveConfig(domain.WithAdminBypass(r.Context()), map[string]string{"preset_categories": val}); err != nil {
+		val := discovery.NormalizePresetCategoriesJSON(r.FormValue(config.CfgPresetCategories))
+		if err := d.Memory.SaveConfig(domain.WithAdminBypass(r.Context()), map[string]string{config.CfgPresetCategories: val}); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -436,8 +436,8 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("/ui/engines/save", postHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
 		prov := strings.ToLower(strings.TrimSpace(r.FormValue("provider")))
-		pairs := map[string]string{"active_provider": prov}
-		for _, k := range []string{"gguf_endpoint", "gemini_model", "jev_api_url", "jev_model", "local_model_url", "local_model_name"} {
+		pairs := map[string]string{config.CfgActiveProvider: prov}
+		for _, k := range []string{config.CfgGGUFEndpoint, "gemini_model", "jev_api_url", "jev_model", "local_model_url", "local_model_name"} {
 			if v := strings.TrimSpace(r.FormValue(k)); v != "" {
 				pairs[k] = v
 			}
@@ -558,9 +558,9 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 			}
 			if r.FormValue("activate") == "1" {
 				_ = d.Memory.SaveConfig(domain.WithAdminBypass(r.Context()), map[string]string{
-					"active_provider": "gguf",
-					"gguf_endpoint":   ep,
-					"gguf_model":      model,
+					config.CfgActiveProvider: "gguf",
+					config.CfgGGUFEndpoint:   ep,
+					config.CfgGGUFModel:      model,
 				})
 			} else {
 				_ = config.SyncManagedGGUFEndpoint(r.Context(), d.Memory.DB(), d.Memory.DBPath(), ep)

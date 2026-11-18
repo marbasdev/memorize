@@ -202,3 +202,43 @@ func TestConfigMapExcludesSessionSecretAndAuthLastSeenThrottle(t *testing.T) {
 		t.Fatalf("expected stale last_seen_at refreshed, still got %q", gotAfterStale)
 	}
 }
+
+func TestLegacyConfigSessionSecretMigratesToInternalSecrets(t *testing.T) {
+	db, ctx := openTestUsersDB(t)
+	admIss, _, err := sqlite.EnsureBootstrapAdmin(ctx, db, "hostadmin", "")
+	if err != nil {
+		t.Fatalf("EnsureBootstrapAdmin: %v", err)
+	}
+	cookieVal, err := sqlite.IssueSessionCookieValue(ctx, db, domain.AuthPrincipal{
+		Account:       admIss.User.Account,
+		Role:          admIss.User.Role,
+		TokenHint:     admIss.User.TokenHint,
+		ServerMode:    true,
+		Authenticated: true,
+	}, domain.DefaultSessionTTL)
+	if err != nil {
+		t.Fatalf("IssueSessionCookieValue: %v", err)
+	}
+
+	// Simulate legacy DB where secret lived inside config and internal_secrets did not have it.
+	if _, err := db.ExecContext(ctx, `INSERT INTO config (key, val) SELECT key, val FROM internal_secrets WHERE key = 'auth_session_secret'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM internal_secrets`); err != nil {
+		t.Fatal(err)
+	}
+	// Run InitSchema to verify one-time migration out of config -> internal_secrets.
+	if err := sqlite.InitSchema(db); err != nil {
+		t.Fatalf("InitSchema migration: %v", err)
+	}
+	if _, existsInCfg := config.GetConfigMap(ctx, db)["auth_session_secret"]; existsInCfg {
+		t.Fatalf("expected auth_session_secret removed from config after migration")
+	}
+	var cnt int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM internal_secrets WHERE key = 'auth_session_secret'`).Scan(&cnt); err != nil || cnt != 1 {
+		t.Fatalf("expected migrated secret in internal_secrets, count=%d err=%v", cnt, err)
+	}
+	if p, ok := sqlite.AuthenticateSessionCookie(ctx, db, cookieVal); !ok || p.Account != "hostadmin" {
+		t.Fatalf("expected pre-migration session cookie valid after migration, ok=%v p=%+v", ok, p)
+	}
+}

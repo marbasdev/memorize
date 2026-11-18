@@ -1,6 +1,9 @@
 package domain
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 const (
 	MaxConsolidatedRunes = 180
@@ -8,6 +11,11 @@ const (
 
 	DefaultProgressRetentionDays  = 0
 	DefaultGuardrailRetentionDays = 0
+
+	// TurnBaselineTTL bounds how long active turn baselines and session turn state remain valid.
+	TurnBaselineTTL = 2 * time.Hour
+	// TurnInputTTL bounds how long the latest turn prompt remains active for pre-mutation gating.
+	TurnInputTTL = 15 * time.Minute
 )
 
 // Thresholds configures read/write gate thresholds for memory ingestion and retrieval.

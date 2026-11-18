@@ -187,7 +187,7 @@ func (s *Service) IncludePersonalInProject(ctx context.Context) bool {
 	if os.Getenv("MEMORY_INCLUDE_PERSONAL") == "1" {
 		return true
 	}
-	return s.GetConfigMap(ctx)["include_personal_in_project"] == "1"
+	return s.GetConfigMap(ctx)[config.CfgIncludePersonalInProject] == "1"
 }
 
 // CurrentAccount resolves the effective user account identifier for personal scope isolation.
@@ -204,7 +204,7 @@ func (s *Service) CurrentAccount(ctx context.Context) string {
 			return v
 		}
 	}
-	if cfgAcc := domain.NormalizeAccount(s.GetConfigMap(ctx)["default_account"]); cfgAcc != "" {
+	if cfgAcc := domain.NormalizeAccount(s.GetConfigMap(ctx)[config.CfgDefaultAccount]); cfgAcc != "" {
 		return cfgAcc
 	}
 	return domain.DefaultAccount()
@@ -243,7 +243,7 @@ func (s *Service) ResolveEffectiveSessionID(ctx context.Context, rawScope, expli
 	}
 	sc := domain.NormalizeScope(rawScope)
 	var turnSID string
-	cutoff := time.Now().Add(-2 * time.Hour).Unix()
+	cutoff := time.Now().Add(-domain.TurnBaselineTTL).Unix()
 	userPrefix := ""
 	if p, ok := domain.AuthPrincipalFromContext(ctx); ok && p.ServerMode && p.Account != "" {
 		userPrefix = "u:" + p.Account + ":%"

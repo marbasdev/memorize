@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"memorize/internal/domain"
 	"memorize/internal/infra/config"
@@ -128,7 +127,7 @@ func resolveRequestBaseURL(r *http.Request) string {
 		host = strings.TrimSpace(r.Host)
 	}
 	if host == "" {
-		host = "127.0.0.1:18095"
+		host = domain.DefaultDaemonAddr
 	}
 	return scheme + "://" + host
 }
@@ -283,10 +282,10 @@ func registerSSRAuthRoutes(mux *http.ServeMux, d Deps) {
 		if qLang := strings.TrimSpace(r.URL.Query().Get("lang")); qLang != "" {
 			lang = normalizeLang(qLang)
 			http.SetCookie(w, &http.Cookie{
-				Name:     "memorize_lang",
+				Name:     domain.LangCookieName,
 				Value:    lang,
 				Path:     "/",
-				MaxAge:   365 * 24 * 3600,
+				MaxAge:   int(domain.LangCookieMaxAge.Seconds()),
 				HttpOnly: true,
 				SameSite: http.SameSiteLaxMode,
 				Secure:   thttp.IsSecureRequest(r),
@@ -324,12 +323,12 @@ func registerSSRAuthRoutes(mux *http.ServeMux, d Deps) {
 			_, _ = w.Write(body)
 			return
 		}
-		cookieVal, err := sqlite.IssueSessionCookieValue(r.Context(), db, p, 7*24*time.Hour)
+		cookieVal, err := sqlite.IssueSessionCookieValue(r.Context(), db, p, domain.DefaultSessionTTL)
 		if err != nil {
 			http.Error(w, "failed to create session", http.StatusInternalServerError)
 			return
 		}
-		thttp.SetSessionCookie(w, r, cookieVal, 7*24*3600)
+		thttp.SetSessionCookie(w, r, cookieVal, int(domain.DefaultSessionTTL.Seconds()))
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	})
 

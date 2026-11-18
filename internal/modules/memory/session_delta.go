@@ -463,7 +463,7 @@ func (s *Service) ConsumeTurnPreMutateCandidate(ctx context.Context, sessionID, 
 		return ""
 	}
 	sc := domain.NormalizeScope(rawScope)
-	cutoff := time.Now().Add(-15 * time.Minute).Unix()
+	cutoff := time.Now().Add(-domain.TurnInputTTL).Unix()
 	var lastInput string
 	var mutated, gateChecked int
 	err := s.db.QueryRowContext(ctx,
@@ -517,7 +517,7 @@ func (s *Service) ActiveTurnInput(ctx context.Context, sessionID, rawScope strin
 		return ""
 	}
 	sc := domain.NormalizeScope(rawScope)
-	cutoff := time.Now().Add(-15 * time.Minute).Unix()
+	cutoff := time.Now().Add(-domain.TurnInputTTL).Unix()
 	var lastInput string
 	if err := s.db.QueryRowContext(ctx,
 		`SELECT last_input FROM turn_state WHERE session_id = ? AND scope = ? AND updated_at >= ?`,
@@ -558,7 +558,7 @@ func (s *Service) ConsumeTurnPartialNotice(ctx context.Context, sessionID, rawSc
 		return ""
 	}
 	sc := domain.NormalizeScope(rawScope)
-	cutoff := time.Now().Add(-2 * time.Hour).Unix()
+	cutoff := time.Now().Add(-domain.TurnBaselineTTL).Unix()
 	var notice string
 	if err := s.db.QueryRowContext(ctx,
 		`SELECT COALESCE(partial_notice, '') FROM turn_state WHERE session_id = ? AND scope = ? AND updated_at >= ?`,
@@ -583,7 +583,7 @@ func (s *Service) MaxTurnStopRetry(ctx context.Context, sessionID string) int {
 	if sid == "" {
 		return 0
 	}
-	cutoff := time.Now().Add(-2 * time.Hour).Unix()
+	cutoff := time.Now().Add(-domain.TurnBaselineTTL).Unix()
 	var retry int
 	if err := s.db.QueryRowContext(ctx,
 		`SELECT COALESCE(MAX(stop_retry), 0) FROM turn_state WHERE session_id = ? AND updated_at >= ?`,

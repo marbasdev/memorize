@@ -68,7 +68,7 @@ func maybeAutoBootstrap(ctx context.Context, mem *memory.Service, mgr *localmode
 		return
 	}
 	cfg := mem.GetConfigMap(ctx)
-	if strings.TrimSpace(cfg["active_provider"]) != "" ||
+	if strings.TrimSpace(cfg[config.CfgActiveProvider]) != "" ||
 		strings.TrimSpace(os.Getenv("MEMORY_PROVIDER")) != "" ||
 		strings.TrimSpace(os.Getenv("GEMINI_API_KEY")) != "" ||
 		strings.TrimSpace(os.Getenv("TYPESAFE_API_KEY")) != "" {
@@ -80,9 +80,9 @@ func maybeAutoBootstrap(ctx context.Context, mem *memory.Service, mgr *localmode
 	}
 	_, _, _ = mgr.AutoBootstrap(ctx, 0, func(ep, model string) {
 		_ = mem.SaveConfig(context.Background(), map[string]string{
-			"active_provider": "gguf",
-			"gguf_endpoint":   ep,
-			"gguf_model":      model,
+			config.CfgActiveProvider: "gguf",
+			config.CfgGGUFEndpoint:   ep,
+			config.CfgGGUFModel:      model,
 		})
 	})
 }

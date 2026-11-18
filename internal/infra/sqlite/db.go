@@ -249,7 +249,18 @@ func InitSchema(db *sql.DB) error {
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (scope, account)
 		);
+		CREATE TABLE IF NOT EXISTS internal_secrets (
+			key TEXT PRIMARY KEY,
+			val TEXT NOT NULL
+		);
 	`)
+	// One-time migration moving legacy session HMAC secrets out of the user config table.
+	_, _ = db.Exec(`
+		INSERT INTO internal_secrets (key, val)
+		SELECT key, val FROM config WHERE key = ?
+		ON CONFLICT(key) DO NOTHING
+	`, internalSecretAuthSession)
+	_, _ = db.Exec(`DELETE FROM config WHERE key = ?`, internalSecretAuthSession)
 	_, _ = db.Exec(`ALTER TABLE guardrail_logs ADD COLUMN elapsed_ms REAL NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(`ALTER TABLE guardrail_logs ADD COLUMN account TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE guardrail_logs ADD COLUMN is_private INTEGER NOT NULL DEFAULT 0`)
@@ -269,8 +280,8 @@ func InitSchema(db *sql.DB) error {
 	_, _ = db.Exec(`DELETE FROM session_sent WHERE updated_at < datetime('now', '-2 days')`)
 	_, _ = db.Exec(`DELETE FROM session_sent_rules WHERE updated_at < datetime('now', '-2 days')`)
 	_, _ = db.Exec(`DELETE FROM session_updates WHERE updated_at < datetime('now', '-2 days')`)
-	_, _ = db.Exec(`DELETE FROM turn_state WHERE updated_at < ?`, time.Now().Add(-2*time.Hour).Unix())
-	_, _ = db.Exec(`DELETE FROM turn_pending_edits WHERE updated_at < ?`, time.Now().Add(-2*time.Hour).Unix())
+	_, _ = db.Exec(`DELETE FROM turn_state WHERE updated_at < ?`, time.Now().Add(-domain.TurnBaselineTTL).Unix())
+	_, _ = db.Exec(`DELETE FROM turn_pending_edits WHERE updated_at < ?`, time.Now().Add(-domain.TurnBaselineTTL).Unix())
 	_, _ = db.Exec(`DELETE FROM onboarding_prompts WHERE updated_at < ?`, time.Now().Add(-6*time.Hour).Unix())
 	_, _ = db.Exec(`DELETE FROM session_compacts WHERE updated_at < ?`, time.Now().Add(-48*time.Hour).Unix())
 	_, _ = db.Exec(`DELETE FROM project_progress WHERE source = 'session_auto'`)

@@ -110,7 +110,7 @@ func (s *Service) AuthorName(ctx context.Context, explicitAuthor, repoDir string
 	}
 	if s != nil && s.mem != nil {
 		if cfg := s.mem.GetConfigMap(ctx); cfg != nil {
-			if a := domain.NormalizeGitHandle(cfg["rulepack_author"]); a != "" {
+			if a := domain.NormalizeGitHandle(cfg[config.CfgRulePackAuthor]); a != "" {
 				return a
 			}
 		}
@@ -135,7 +135,7 @@ func (s *Service) SetAuthorName(ctx context.Context, author string) error {
 	if err := domain.RequireAdmin(ctx); err != nil {
 		return err
 	}
-	return s.mem.SaveConfig(ctx, map[string]string{"rulepack_author": domain.NormalizeGitHandle(author)})
+	return s.mem.SaveConfig(ctx, map[string]string{config.CfgRulePackAuthor: domain.NormalizeGitHandle(author)})
 }
 
 func (s *Service) getSyncRecord(ctx context.Context, sc string) (fileHash, remoteBranch, diskBaselineHash, lastErr string) {

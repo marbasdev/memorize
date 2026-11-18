@@ -11,6 +11,7 @@ import (
 
 	"memorize/internal/domain"
 	"memorize/internal/inference/discovery"
+	"memorize/internal/infra/config"
 )
 
 func buildPageNums(cur, total int) []string {
@@ -134,7 +135,7 @@ func buildMemoriesView(ctx context.Context, d Deps, lang string, q url.Values, o
 		return ssrMemoriesData{}, err
 	}
 	cfg := d.Memory.GetConfigMap(ctx)
-	cats, allSubMap := mergeCategoriesAndSubs(cfg["preset_categories"], facets)
+	cats, allSubMap := mergeCategoriesAndSubs(cfg[config.CfgPresetCategories], facets)
 
 	var subList []string
 	if rq.Category != "" {
@@ -180,7 +181,7 @@ func buildMemoriesView(ctx context.Context, d Deps, lang string, q url.Values, o
 		Distribution:     dist,
 		Query:            rq,
 		HasCustomFilter:  hasCustomFilter,
-		IncludePersonal:  cfg["include_personal_in_project"] == "1" || (cfg["include_personal_in_project"] == "" && discovery.EnvOrDefault("", "MEMORY_INCLUDE_PERSONAL", "0") == "1"),
+		IncludePersonal:  cfg[config.CfgIncludePersonalInProject] == "1" || (cfg[config.CfgIncludePersonalInProject] == "" && discovery.EnvOrDefault("", "MEMORY_INCLUDE_PERSONAL", "0") == "1"),
 		CurrentAccount:   d.Memory.CurrentAccount(ctx),
 		Scopes:           scopes,
 		Sessions:         facets.Sessions,

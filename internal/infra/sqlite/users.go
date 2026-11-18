@@ -16,6 +16,11 @@ import (
 	"memorize/internal/domain"
 )
 
+const (
+	lastSeenUpdateInterval    = time.Minute
+	internalSecretAuthSession = "auth_session_secret"
+)
+
 // HashAuthToken returns the lowercase SHA-256 hex digest of a plaintext bearer token.
 func HashAuthToken(plain string) string {
 	sum := sha256.Sum256([]byte(strings.TrimSpace(plain)))
@@ -27,7 +32,7 @@ func generateRandomToken() (plain, hash, hint string, err error) {
 	if _, err = rand.Read(buf); err != nil {
 		return "", "", "", err
 	}
-	plain = "mem_" + hex.EncodeToString(buf)
+	plain = domain.AuthTokenPrefix + hex.EncodeToString(buf)
 	hash = HashAuthToken(plain)
 	hint = domain.FormatTokenHint(plain)
 	return plain, hash, hint, nil
@@ -300,7 +305,7 @@ func shouldTouchLastSeen(lastSeen string, now time.Time) bool {
 	}
 	for _, layout := range []string{"2006-01-02 15:04:05", time.RFC3339, "2006-01-02T15:04:05Z"} {
 		if ts, err := time.Parse(layout, s); err == nil {
-			return now.Sub(ts.UTC()) >= 60*time.Second
+			return now.Sub(ts.UTC()) >= lastSeenUpdateInterval
 		}
 	}
 	return true
@@ -311,7 +316,7 @@ func ensureSessionSecret(ctx context.Context, db *sql.DB) ([]byte, error) {
 		return nil, sql.ErrConnDone
 	}
 	var val string
-	if err := db.QueryRowContext(ctx, `SELECT val FROM config WHERE key = 'auth_session_secret'`).Scan(&val); err == nil && len(strings.TrimSpace(val)) >= 32 {
+	if err := db.QueryRowContext(ctx, `SELECT val FROM internal_secrets WHERE key = ?`, internalSecretAuthSession).Scan(&val); err == nil && len(strings.TrimSpace(val)) >= 32 {
 		if b, derr := hex.DecodeString(strings.TrimSpace(val)); derr == nil && len(b) >= 16 {
 			return b, nil
 		}
@@ -322,12 +327,12 @@ func ensureSessionSecret(ctx context.Context, db *sql.DB) ([]byte, error) {
 	}
 	hexSec := hex.EncodeToString(sec)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO config (key, val) VALUES ('auth_session_secret', ?)
+		INSERT INTO internal_secrets (key, val) VALUES (?, ?)
 		ON CONFLICT(key) DO NOTHING
-	`, hexSec); err != nil {
+	`, internalSecretAuthSession, hexSec); err != nil {
 		return nil, err
 	}
-	if err := db.QueryRowContext(ctx, `SELECT val FROM config WHERE key = 'auth_session_secret'`).Scan(&val); err == nil {
+	if err := db.QueryRowContext(ctx, `SELECT val FROM internal_secrets WHERE key = ?`, internalSecretAuthSession).Scan(&val); err == nil {
 		if b, derr := hex.DecodeString(strings.TrimSpace(val)); derr == nil {
 			return b, nil
 		}
@@ -349,7 +354,7 @@ func IssueSessionCookieValue(ctx context.Context, db *sql.DB, p domain.AuthPrinc
 		return "", err
 	}
 	if ttl <= 0 {
-		ttl = 7 * 24 * time.Hour
+		ttl = domain.DefaultSessionTTL
 	}
 	exp := time.Now().Add(ttl).Unix()
 	body := fmt.Sprintf("%s|%s|%d", p.Account, p.TokenHint, exp)

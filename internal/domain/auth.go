@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 const (
@@ -17,6 +18,16 @@ const (
 	DefaultServeAddr = "0.0.0.0:18095"
 	// SessionCookieName is the HttpOnly session cookie used by dashboard web login in server mode.
 	SessionCookieName = "memorize_session"
+	// DefaultSessionTTL is the unified lifetime applied to both signed session payloads and browser session cookies.
+	DefaultSessionTTL = 7 * 24 * time.Hour
+	// LangCookieName stores the user's selected dashboard language preference.
+	LangCookieName = "memorize_lang"
+	// LangCookieMaxAge defines how long the dashboard language preference cookie persists.
+	LangCookieMaxAge = 365 * 24 * time.Hour
+	// AuthTokenPrefix identifies plaintext team server access tokens before hashing.
+	AuthTokenPrefix = "mem_"
+	// MaxRemoteRulePackDocBytes caps per-hook TEAM_RULES.md payload snapshots sent from thin clients.
+	MaxRemoteRulePackDocBytes = 256 * 1024
 )
 
 // AuthPrincipal describes the authenticated caller identity and server mode policy for the current request.

@@ -11,6 +11,21 @@ import (
 )
 
 const (
+	// CfgActiveProvider stores the configured inference provider ID.
+	CfgActiveProvider = "active_provider"
+	// CfgGGUFEndpoint stores the managed or user-configured local GGUF server URL.
+	CfgGGUFEndpoint = "gguf_endpoint"
+	// CfgGGUFModel stores the selected local GGUF model filename.
+	CfgGGUFModel = "gguf_model"
+	// CfgIncludePersonalInProject controls whether project:* queries include the caller's personal memories.
+	CfgIncludePersonalInProject = "include_personal_in_project"
+	// CfgDefaultAccount stores the local fallback account name for non-server mode.
+	CfgDefaultAccount = "default_account"
+	// CfgPresetCategories stores the append-only preset category/sub-category taxonomy JSON.
+	CfgPresetCategories = "preset_categories"
+	// CfgRulePackAuthor stores the team administrator's default @git handle for team rule entries.
+	CfgRulePackAuthor = "rulepack_author"
+
 	// CfgProgressRetentionDays stores the automatic TTL (in days) for completed progress history.
 	CfgProgressRetentionDays = "progress_retention_days"
 	// CfgGuardrailRetentionDays stores the automatic TTL (in days) for guardrail audit logs.
@@ -49,7 +64,7 @@ func GetConfigMap(ctx context.Context, db *sql.DB) map[string]string {
 	if db == nil {
 		return out
 	}
-	rows, err := db.QueryContext(ctx, `SELECT key, val FROM config WHERE key != 'auth_session_secret'`)
+	rows, err := db.QueryContext(ctx, `SELECT key, val FROM config`)
 	if err != nil {
 		return out
 	}
@@ -97,7 +112,7 @@ func SyncManagedGGUFEndpoint(ctx context.Context, db *sql.DB, dbPath, ep string)
 		return nil
 	}
 	raw := GetConfigMap(ctx, db)
-	cur := strings.TrimSpace(raw["gguf_endpoint"])
+	cur := strings.TrimSpace(raw[CfgGGUFEndpoint])
 	if cur != "" && !domain.IsLoopbackEndpoint(cur) {
 		return nil
 	}
@@ -105,5 +120,5 @@ func SyncManagedGGUFEndpoint(ctx context.Context, db *sql.DB, dbPath, ep string)
 	if strings.TrimRight(cur, "/") == trimmed {
 		return nil
 	}
-	return SaveConfig(domain.WithAdminBypass(ctx), db, dbPath, map[string]string{"gguf_endpoint": trimmed})
+	return SaveConfig(domain.WithAdminBypass(ctx), db, dbPath, map[string]string{CfgGGUFEndpoint: trimmed})
 }

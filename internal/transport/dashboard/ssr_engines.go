@@ -443,7 +443,7 @@ func buildKnownModelSuggestions(gemModels []discovery.GeminiModelOption, lm loca
 	for _, inst := range lm.Installed {
 		add(inst.FileName)
 	}
-	add(cfg["gguf_model"])
+	add(cfg[config.CfgGGUFModel])
 	add(cfg["local_model_name"])
 	if !generativeOnly {
 		add("gemini-decision-1")
@@ -462,7 +462,7 @@ func setupMsg(lang, ko, en string) string {
 
 func buildEngineSetupWarning(lang string, rawCfg, cfg map[string]string, provName string, lm localmodel.StatusSnapshot, jev jevCatalogResult) string {
 	low := strings.ToLower(strings.TrimSpace(provName))
-	eff := domain.NormalizeProviderID(rawCfg["active_provider"])
+	eff := domain.NormalizeProviderID(rawCfg[config.CfgActiveProvider])
 	if eff == "" {
 		eff = domain.ResolveExplicitEnvProvider()
 	}
@@ -516,7 +516,7 @@ func buildEngineSetupWarning(lang string, rawCfg, cfg map[string]string, provNam
 }
 
 func checkDashboardLocalSetup(lang string, rawCfg map[string]string) string {
-	if strings.TrimSpace(rawCfg["active_provider"]) == "" &&
+	if strings.TrimSpace(rawCfg[config.CfgActiveProvider]) == "" &&
 		strings.TrimSpace(os.Getenv("MEMORY_PROVIDER")) == "" &&
 		strings.TrimSpace(rawCfg["local_model_url"]) == "" &&
 		strings.TrimSpace(os.Getenv("LOCAL_MODEL_URL")) == "" {
