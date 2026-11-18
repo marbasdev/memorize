@@ -265,7 +265,7 @@
               {{end}}
             </td>
             <td style="text-align:right;white-space:nowrap;">
-              {{if and .Active (hasPrefix .Scope "project:")}}
+              {{if and .Active (not $.ServerMode) (hasPrefix .Scope "project:")}}
                 <button type="button" class="btn btn-sm" title="{{t $.Lang "team_btn_promote"}}"
                   hx-get="/ui/modal/team-promote?id={{.ID}}&team_scope={{.Scope | urlquery}}"
                   hx-target="#modalHost" hx-swap="innerHTML">↑</button>

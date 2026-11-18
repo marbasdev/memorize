@@ -342,6 +342,7 @@ var enTranslations = map[string]string{
 	"team_btn_apply_dupes":       "Apply Selected Cleanup",
 	"team_kind_duplicate":        "Full Duplicate -> Delete Local",
 	"team_kind_partial":          "Partial Overlap -> Trim Local",
+	"team_server_readonly_note":  "Server Mode: .memorize/TEAM_RULES.md edits, Git commits, and remote sync run from connected client repositories or via team_rules MCP.",
 	"btn_users":                  "Accounts...",
 	"btn_logout":                 "Log Out",
 	"login_title":                "Team Login",

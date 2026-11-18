@@ -324,6 +324,12 @@ func (s *Service) ConsolidateMemories(ctx context.Context, rawScope, category st
 		if err := s.checkPersonalOwnership(ctx, id, srcScope, srcAcc); err != nil {
 			return 0, err
 		}
+		if err := domain.CanModifyScope(ctx, srcScope); err != nil {
+			return 0, err
+		}
+		if domain.IsServerMode(ctx) && srcScope != "personal" && targetScope == "personal" {
+			return 0, fmt.Errorf("permission denied: cannot move shared %s memory #%d into personal scope in server mode", srcScope, id)
+		}
 		if srcConf > mergedConf {
 			mergedConf = srcConf
 		}
@@ -341,7 +347,9 @@ func (s *Service) ConsolidateMemories(ctx context.Context, rawScope, category st
 		mergedConf = 0.90
 	}
 	mergedConf = domain.Clamp(mergedConf, 0.80, 1.00)
-	if acc == "" {
+	if targetScope == "personal" && domain.IsServerMode(ctx) {
+		acc = s.CurrentAccount(ctx)
+	} else if acc == "" {
 		acc = s.CurrentAccount(ctx)
 	}
 	var rawTags []string

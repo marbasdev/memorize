@@ -132,6 +132,9 @@ func (s *Service) SetAuthorName(ctx context.Context, author string) error {
 	if s == nil || s.mem == nil {
 		return nil
 	}
+	if err := domain.RequireAdmin(ctx); err != nil {
+		return err
+	}
 	return s.mem.SaveConfig(ctx, map[string]string{"rulepack_author": domain.NormalizeGitHandle(author)})
 }
 
@@ -180,22 +183,38 @@ func cloneTeamRules(rules []domain.TeamRule, hash string) []domain.TeamRule {
 	return out
 }
 
-func (s *Service) setCache(sc string, entry *cachedRulePack) {
+// rulePackCacheKey isolates per-account remote TEAM_RULES.md snapshots in multi-user server mode
+// so teammates on different branches or repos cannot overwrite each other's verified rule sets.
+func rulePackCacheKey(ctx context.Context, sc string) string {
+	norm := domain.NormalizeScope(sc)
+	if !domain.IsServerMode(ctx) {
+		return norm
+	}
+	acc := domain.EffectivePrincipalAccount(ctx)
+	if acc == "" {
+		return norm
+	}
+	return "u:" + acc + ":" + norm
+}
+
+func (s *Service) setCache(ctx context.Context, sc string, entry *cachedRulePack) {
+	key := rulePackCacheKey(ctx, sc)
 	s.cacheMu.Lock()
 	if s.cache == nil {
 		s.cache = make(map[string]*cachedRulePack)
 	}
 	if entry == nil {
-		delete(s.cache, sc)
+		delete(s.cache, key)
 	} else {
-		s.cache[sc] = entry
+		s.cache[key] = entry
 	}
 	s.cacheMu.Unlock()
 }
 
-func (s *Service) getCache(sc string) *cachedRulePack {
+func (s *Service) getCache(ctx context.Context, sc string) *cachedRulePack {
+	key := rulePackCacheKey(ctx, sc)
 	s.cacheMu.RLock()
-	entry := s.cache[sc]
+	entry := s.cache[key]
 	s.cacheMu.RUnlock()
 	return entry
 }
@@ -203,7 +222,7 @@ func (s *Service) getCache(sc string) *cachedRulePack {
 // ensureLoaded populates the in-memory rulepack cache lazily from disk (or remote ref on a feature branch)
 // after daemon restarts or before SyncTurn has run.
 func (s *Service) ensureLoaded(ctx context.Context, sc string) *cachedRulePack {
-	if entry := s.getCache(sc); entry != nil {
+	if entry := s.getCache(ctx, sc); entry != nil {
 		return entry
 	}
 	if s == nil || s.db == nil || !strings.HasPrefix(sc, "project:") {
@@ -237,7 +256,7 @@ func (s *Service) ensureLoaded(ctx context.Context, sc string) *cachedRulePack {
 	}
 	if len(chosenBytes) == 0 {
 		entry := &cachedRulePack{}
-		s.setCache(sc, entry)
+		s.setCache(ctx, sc, entry)
 		return entry
 	}
 	doc, parseErr := ParseDocument(chosenBytes, sc)
@@ -250,7 +269,7 @@ func (s *Service) ensureLoaded(ctx context.Context, sc string) *cachedRulePack {
 		remoteBranch:     remoteBranch,
 		diskBaselineHash: diskBaselineHash,
 	}
-	s.setCache(sc, entry)
+	s.setCache(ctx, sc, entry)
 	return entry
 }
 
@@ -266,18 +285,18 @@ func (s *Service) IngestTeamRuleDoc(ctx context.Context, rawScope, rawMarkdown s
 	}
 	raw := []byte(rawMarkdown)
 	if len(strings.TrimSpace(rawMarkdown)) == 0 {
-		s.setCache(sc, &cachedRulePack{})
+		s.setCache(ctx, sc, &cachedRulePack{})
 		return nil
 	}
 	hash := CanonicalHash(raw)
-	if prev := s.getCache(sc); prev != nil && prev.hash == hash {
+	if prev := s.getCache(ctx, sc); prev != nil && prev.hash == hash {
 		return nil
 	}
 	doc, err := ParseDocument(raw, sc)
 	if err != nil {
 		return err
 	}
-	s.setCache(sc, &cachedRulePack{
+	s.setCache(ctx, sc, &cachedRulePack{
 		rules: cloneTeamRules(doc.Rules, hash),
 		hash:  hash,
 	})
@@ -289,7 +308,7 @@ func (s *Service) applyMirrorTx(ctx context.Context, sc string, doc *Document, h
 		return nil, nil
 	}
 	before := make(map[string]string)
-	if prev := s.getCache(sc); prev != nil {
+	if prev := s.getCache(ctx, sc); prev != nil {
 		for _, r := range prev.rules {
 			before[r.RuleKey] = ruleSignature(r.Category, r.SubCategory, r.Pinned, r.Title, r.Why, r.How, r.Where)
 		}
@@ -353,7 +372,7 @@ func (s *Service) applyMirrorTx(ctx context.Context, sc string, doc *Document, h
 	if doc != nil {
 		nextRules = cloneTeamRules(doc.Rules, hash)
 	}
-	s.setCache(sc, &cachedRulePack{
+	s.setCache(ctx, sc, &cachedRulePack{
 		rules:            nextRules,
 		hash:             hash,
 		remoteBranch:     strings.TrimSpace(remoteBranch),

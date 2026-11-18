@@ -361,3 +361,58 @@ func TestSyncProjectProgressSynthesizesMilestonesWithAIAndCoversRemainder(t *tes
 		t.Fatalf("expected synthesized AI milestone with 4 linked commits in details, got %+v", ov.Records)
 	}
 }
+
+func TestServerModeProgressUpdateAuthorization(t *testing.T) {
+	_, svc := openTestProgressService(t)
+	ctxAdmin := domain.WithAuthPrincipal(context.Background(), domain.AuthPrincipal{
+		Account:       "admin",
+		Role:          domain.RoleAdmin,
+		ServerMode:    true,
+		Authenticated: true,
+	})
+	ctxAlice := domain.WithAuthPrincipal(context.Background(), domain.AuthPrincipal{
+		Account:       "alice",
+		Role:          domain.RoleMember,
+		ServerMode:    true,
+		Authenticated: true,
+	})
+	ctxBob := domain.WithAuthPrincipal(context.Background(), domain.AuthPrincipal{
+		Account:       "bob",
+		Role:          domain.RoleMember,
+		ServerMode:    true,
+		Authenticated: true,
+	})
+
+	recAlice, err := svc.RecordProgress(ctxAlice, domain.ProgressInput{
+		Scope:    "project:teamapp",
+		Category: "backend",
+		Summary:  "Alice shipped API validation",
+	})
+	if err != nil {
+		t.Fatalf("alice RecordProgress: %v", err)
+	}
+	recGlobal, err := svc.RecordProgress(ctxAdmin, domain.ProgressInput{
+		Scope:    "global",
+		Category: "release",
+		Summary:  "Admin tagged v1.1",
+	})
+	if err != nil {
+		t.Fatalf("admin RecordProgress global: %v", err)
+	}
+
+	if err := svc.UpdateProgress(ctxBob, recAlice.ID, domain.ProgressInput{Summary: "bob hijack"}); err == nil {
+		t.Fatalf("expected member Bob UpdateProgress on Alice entry to fail in ServerMode")
+	}
+	if err := svc.UpdateProgress(ctxBob, recGlobal.ID, domain.ProgressInput{Summary: "bob global edit"}); err == nil {
+		t.Fatalf("expected member Bob UpdateProgress on global entry to fail in ServerMode")
+	}
+	if err := svc.UpdateProgress(ctxAlice, recAlice.ID, domain.ProgressInput{Scope: "personal"}); err == nil {
+		t.Fatalf("expected moving shared project progress into personal to fail in ServerMode")
+	}
+	if err := svc.UpdateProgress(ctxAlice, recAlice.ID, domain.ProgressInput{Summary: "Alice updated API validation"}); err != nil {
+		t.Fatalf("expected owner Alice UpdateProgress to succeed: %v", err)
+	}
+	if err := svc.UpdateProgress(ctxAdmin, recAlice.ID, domain.ProgressInput{Summary: "Admin reviewed API validation"}); err != nil {
+		t.Fatalf("expected admin UpdateProgress to succeed: %v", err)
+	}
+}

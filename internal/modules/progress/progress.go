@@ -188,15 +188,38 @@ func (s *Service) GetProgressByID(ctx context.Context, id int64) (domain.Progres
 	return r, nil
 }
 
+func authorizeProgressMutation(ctx context.Context, cur domain.ProgressRecord) error {
+	if err := domain.CanModifyScope(ctx, cur.Scope); err != nil {
+		return err
+	}
+	if domain.IsServerMode(ctx) {
+		if curAcc := domain.EffectivePrincipalAccount(ctx); cur.Account == "" || cur.Account != curAcc {
+			if err := domain.RequireAdmin(ctx); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // UpdateProgress updates mutable fields of an existing project_progress entry.
 func (s *Service) UpdateProgress(ctx context.Context, id int64, in domain.ProgressInput) error {
 	cur, err := s.GetProgressByID(ctx, id)
 	if err != nil {
 		return err
 	}
+	if err := authorizeProgressMutation(ctx, cur); err != nil {
+		return err
+	}
 	sc := cur.Scope
 	if strings.TrimSpace(in.Scope) != "" {
 		sc = domain.NormalizeScope(in.Scope)
+	}
+	if domain.IsServerMode(ctx) && cur.Scope != "personal" && sc == "personal" {
+		return fmt.Errorf("permission denied: cannot move shared %s progress #%d into personal scope in server mode", cur.Scope, id)
+	}
+	if err := domain.CanModifyScope(ctx, sc); err != nil {
+		return err
 	}
 	sid := cur.SessionID
 	if strings.TrimSpace(in.SessionID) != "" {
@@ -259,16 +282,12 @@ func (s *Service) UpdateProgress(ctx context.Context, id int64, in domain.Progre
 
 // DeleteProgress removes one project_progress entry by ID.
 func (s *Service) DeleteProgress(ctx context.Context, id int64) error {
-	if domain.IsServerMode(ctx) {
-		cur, err := s.GetProgressByID(ctx, id)
-		if err != nil {
-			return err
-		}
-		if curAcc := domain.EffectivePrincipalAccount(ctx); cur.Account == "" || cur.Account != curAcc {
-			if err := domain.RequireAdmin(ctx); err != nil {
-				return err
-			}
-		}
+	cur, err := s.GetProgressByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := authorizeProgressMutation(ctx, cur); err != nil {
+		return err
 	}
 	res, err := s.db.ExecContext(ctx, `DELETE FROM project_progress WHERE id = ?`, id)
 	if err != nil {

@@ -22,6 +22,8 @@ type ssrTeamCategoryGroup struct {
 
 type ssrTeamData struct {
 	Lang             string
+	ServerMode       bool
+	CanAdmin         bool
 	ProjectScopes    []string
 	SelectedScope    string
 	RepoRoot         string
@@ -123,6 +125,8 @@ func buildTeamView(ctx context.Context, d Deps, lang string, q url.Values) ssrTe
 	selected := resolveTeamScope(ctx, d, q, projScopes)
 	view := ssrTeamData{
 		Lang:          lang,
+		ServerMode:    d.ServerMode || domain.IsServerMode(ctx),
+		CanAdmin:      domain.CanAccessAdminFeatures(ctx),
 		ProjectScopes: projScopes,
 		SelectedScope: selected,
 	}
@@ -137,8 +141,12 @@ func buildTeamView(ctx context.Context, d Deps, lang string, q url.Values) ssrTe
 	}
 
 	if d.Memory != nil {
-		view.RepoRoot = sqlite.ResolveScopeRepoPath(ctx, d.Memory.DB(), selected, "")
-		view.Author = d.RulePack.AuthorName(ctx, "", view.RepoRoot)
+		repoRoot := ""
+		if !view.ServerMode {
+			repoRoot = sqlite.ResolveScopeRepoPath(ctx, d.Memory.DB(), selected, "")
+			view.RepoRoot = repoRoot
+		}
+		view.Author = d.RulePack.AuthorName(ctx, "", repoRoot)
 		_ = d.Memory.DB().QueryRowContext(ctx,
 			`SELECT COALESCE(file_hash, ''), COALESCE(last_error, '') FROM team_rule_sync WHERE scope = ?`,
 			selected,
@@ -198,13 +206,23 @@ func renderTeamSection(w http.ResponseWriter, r *http.Request, d Deps, lang stri
 	writeHTMLTemplate(w, "team_section", view)
 }
 
+func rejectServerTeamGit(d Deps, w http.ResponseWriter, r *http.Request) bool {
+	if d.ServerMode || domain.IsServerMode(r.Context()) {
+		http.Error(w, "team rule git operations must run from connected client repositories rather than the team server", http.StatusBadRequest)
+		return true
+	}
+	return false
+}
+
 func registerSSRTeamRoutes(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("/ui/team", getHX(func(w http.ResponseWriter, r *http.Request) {
 		view := buildTeamView(r.Context(), d, requestLang(r), r.URL.Query())
 		writeHTMLTemplate(w, "team_section", view)
 	}))
 
-	mux.HandleFunc("/ui/team/config", teamHX(d, postHX, func(w http.ResponseWriter, r *http.Request, lang, sc string) {
+	mux.HandleFunc("/ui/team/config", teamHX(d, func(next http.HandlerFunc) http.HandlerFunc {
+		return postHX(requireAdminRoute(next))
+	}, func(w http.ResponseWriter, r *http.Request, lang, sc string) {
 		if !strings.HasPrefix(sc, "project:") {
 			http.Error(w, "select a project:* scope first", http.StatusBadRequest)
 			return
@@ -212,7 +230,7 @@ func registerSSRTeamRoutes(mux *http.ServeMux, d Deps) {
 		if _, hasAuthor := r.Form["author"]; hasAuthor {
 			author := strings.TrimSpace(r.FormValue("author"))
 			if err := d.RulePack.SetAuthorName(r.Context(), author); err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
+				http.Error(w, err.Error(), http.StatusForbidden)
 				return
 			}
 		}
@@ -221,6 +239,9 @@ func registerSSRTeamRoutes(mux *http.ServeMux, d Deps) {
 	}))
 
 	mux.HandleFunc("/ui/team/sync", teamHX(d, postHX, func(w http.ResponseWriter, r *http.Request, lang, sc string) {
+		if rejectServerTeamGit(d, w, r) {
+			return
+		}
 		ctx := r.Context()
 		st, err := d.RulePack.SyncExplicit(ctx, sc, "", true)
 		if err != nil {
@@ -252,6 +273,9 @@ func registerSSRTeamRoutes(mux *http.ServeMux, d Deps) {
 	}))
 
 	mux.HandleFunc("/ui/modal/team-draft", teamHX(d, postHX, func(w http.ResponseWriter, r *http.Request, lang, sc string) {
+		if rejectServerTeamGit(d, w, r) {
+			return
+		}
 		ctx := r.Context()
 		rawRule := strings.TrimSpace(r.FormValue("raw_rule"))
 		cat := strings.TrimSpace(r.FormValue("category"))
@@ -277,6 +301,9 @@ func registerSSRTeamRoutes(mux *http.ServeMux, d Deps) {
 	}))
 
 	mux.HandleFunc("/ui/modal/team-promote", teamHX(d, getHX, func(w http.ResponseWriter, r *http.Request, lang, sc string) {
+		if rejectServerTeamGit(d, w, r) {
+			return
+		}
 		ctx := r.Context()
 		id := parsePositiveInt64(r.URL.Query().Get("id"))
 		projScopes := collectProjectScopes(ctx, d)
@@ -311,6 +338,9 @@ func registerSSRTeamRoutes(mux *http.ServeMux, d Deps) {
 	}))
 
 	mux.HandleFunc("/ui/team/publish", teamHX(d, postHX, func(w http.ResponseWriter, r *http.Request, lang, sc string) {
+		if rejectServerTeamGit(d, w, r) {
+			return
+		}
 		localID := parsePositiveInt64(r.FormValue("local_memory_id"))
 		retireLocal := r.FormValue("retire_local") == "1" || r.FormValue("retire_local") == "true"
 
@@ -345,6 +375,9 @@ func registerSSRTeamRoutes(mux *http.ServeMux, d Deps) {
 	}))
 
 	mux.HandleFunc("/ui/modal/team-edit", teamHX(d, getHX, func(w http.ResponseWriter, r *http.Request, lang, sc string) {
+		if rejectServerTeamGit(d, w, r) {
+			return
+		}
 		ctx := r.Context()
 		key := domain.NormalizeRuleKey(r.URL.Query().Get("rule_key"))
 		rules, err := d.RulePack.ListTeamRules(ctx, sc)
@@ -376,6 +409,9 @@ func registerSSRTeamRoutes(mux *http.ServeMux, d Deps) {
 	}))
 
 	mux.HandleFunc("/ui/team/update", teamHX(d, postHX, func(w http.ResponseWriter, r *http.Request, lang, sc string) {
+		if rejectServerTeamGit(d, w, r) {
+			return
+		}
 		targetKey := strings.TrimSpace(r.FormValue("target_key"))
 		res, err := d.RulePack.UpdateWithDefaults(r.Context(), rulepack.UpdateInput{
 			Scope:     sc,
@@ -399,6 +435,9 @@ func registerSSRTeamRoutes(mux *http.ServeMux, d Deps) {
 	}))
 
 	mux.HandleFunc("/ui/team/delete", teamHX(d, postHX, func(w http.ResponseWriter, r *http.Request, lang, sc string) {
+		if rejectServerTeamGit(d, w, r) {
+			return
+		}
 		key := strings.TrimSpace(r.FormValue("rule_key"))
 		res, err := d.RulePack.RemoveRuleRemote(r.Context(), rulepack.RemoveInput{
 			Scope:     sc,

@@ -205,13 +205,16 @@ func (s *Service) attachRecordReplaces(ctx context.Context, out []domain.MemoryR
 	if len(out) == 0 {
 		return
 	}
+	strictPersonal := boolToInt(s.enforceStrictPersonalVisibility(ctx))
+	curAcc := s.CurrentAccount(ctx)
 	placeholders := make([]string, 0, len(out))
-	args := make([]any, 0, len(out))
+	args := make([]any, 0, len(out)+2)
+	args = append(args, strictPersonal, curAcc)
 	for _, r := range out {
 		placeholders = append(placeholders, "?")
 		args = append(args, r.ID)
 	}
-	query := fmt.Sprintf(`SELECT superseded_by, content FROM memories WHERE active = 0 AND superseded_by IN (%s) ORDER BY id ASC`, strings.Join(placeholders, ","))
+	query := fmt.Sprintf(`SELECT superseded_by, content FROM memories WHERE active = 0 AND (? = 0 OR scope != 'personal' OR COALESCE(account, '') = ?) AND superseded_by IN (%s) ORDER BY id ASC`, strings.Join(placeholders, ","))
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return

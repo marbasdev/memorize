@@ -223,3 +223,100 @@ func TestRemoteThinClientIsolationAndHooks(t *testing.T) {
 		t.Fatalf("expected git-precommit to fail on remote StagedDiffs violation, code=%d err=%v", pcCode, err)
 	}
 }
+
+func TestRemoteServerTeamRuleDocsPerAccountIsolation(t *testing.T) {
+	eval := &remoteViolEval{
+		stubEval: stubEval{
+			dec: domain.MutationDecision{Action: "IGNORE", Category: "architecture", Confidence: 0.9},
+		},
+	}
+	st := newTestStack(t, "", eval)
+	rp := rulepack.New(st.mem)
+	st.gr.AttachRulePack(rp)
+
+	ctxAlice := domain.WithAuthPrincipal(context.Background(), domain.AuthPrincipal{
+		Account:       "alice",
+		Role:          domain.RoleMember,
+		ServerMode:    true,
+		Authenticated: true,
+	})
+	ctxBob := domain.WithAuthPrincipal(context.Background(), domain.AuthPrincipal{
+		Account:       "bob",
+		Role:          domain.RoleMember,
+		ServerMode:    true,
+		Authenticated: true,
+	})
+	ctxAdmin := domain.WithAuthPrincipal(context.Background(), domain.AuthPrincipal{
+		Account:       "admin",
+		Role:          domain.RoleAdmin,
+		ServerMode:    true,
+		Authenticated: true,
+	})
+
+	aliceTurn, _ := json.Marshal(map[string]any{
+		"session_id":  "s-alice",
+		"user_prompt": "check alice rules",
+		"client_ctx": domain.ClientHookContext{
+			CanonicalScopes: []string{"project:teamapp"},
+			TargetScope:     "project:teamapp",
+			TeamRuleDocs: map[string]string{
+				"project:teamapp": "# Team Rules\n\n## Architecture (`architecture`)\n- Never skip Alice check. · `@alice` · `2026-11-18`\n",
+			},
+		},
+	})
+	if _, code, err := st.gr.ExecuteHook(ctxAlice, "claude-turn", aliceTurn, ""); err != nil || code != 0 {
+		t.Fatalf("alice turn hook failed: code=%d err=%v", code, err)
+	}
+
+	bobTurn, _ := json.Marshal(map[string]any{
+		"session_id":  "s-bob",
+		"user_prompt": "check bob rules",
+		"client_ctx": domain.ClientHookContext{
+			CanonicalScopes: []string{"project:teamapp"},
+			TargetScope:     "project:teamapp",
+			TeamRuleDocs: map[string]string{
+				"project:teamapp": "# Team Rules\n\n## Architecture (`architecture`)\n- Bob branch rule only. · `@bob` · `2026-11-18`\n",
+			},
+		},
+	})
+	if _, code, err := st.gr.ExecuteHook(ctxBob, "claude-turn", bobTurn, ""); err != nil || code != 0 {
+		t.Fatalf("bob turn hook failed: code=%d err=%v", code, err)
+	}
+
+	aliceRules, err := rp.ListTeamRules(ctxAlice, "project:teamapp")
+	if err != nil || len(aliceRules) != 1 || !strings.Contains(aliceRules[0].Title+" "+aliceRules[0].How, "Alice check") {
+		t.Fatalf("expected Alice cache isolated from Bob's TeamRuleDocs, got %+v (err=%v)", aliceRules, err)
+	}
+	bobRules, err := rp.ListTeamRules(ctxBob, "project:teamapp")
+	if err != nil || len(bobRules) != 1 || !strings.Contains(bobRules[0].Title+" "+bobRules[0].How, "Bob branch") {
+		t.Fatalf("expected Bob cache isolated from Alice's TeamRuleDocs, got %+v (err=%v)", bobRules, err)
+	}
+
+	// Clearing Bob's local TEAM_RULES.md (empty string) clears only Bob's cache entry, leaving Alice intact.
+	bobClear, _ := json.Marshal(map[string]any{
+		"session_id":  "s-bob-clear",
+		"user_prompt": "clear bob rules",
+		"client_ctx": domain.ClientHookContext{
+			CanonicalScopes: []string{"project:teamapp"},
+			TargetScope:     "project:teamapp",
+			TeamRuleDocs:    map[string]string{"project:teamapp": ""},
+		},
+	})
+	if _, code, err := st.gr.ExecuteHook(ctxBob, "claude-turn", bobClear, ""); err != nil || code != 0 {
+		t.Fatalf("bob clear turn failed: code=%d err=%v", code, err)
+	}
+	if gotBob, _ := rp.ListTeamRules(ctxBob, "project:teamapp"); len(gotBob) != 0 {
+		t.Fatalf("expected Bob cache cleared cleanly, got %+v", gotBob)
+	}
+	if gotAlice, _ := rp.ListTeamRules(ctxAlice, "project:teamapp"); len(gotAlice) != 1 {
+		t.Fatalf("expected Alice cache unaffected by Bob clear, got %+v", gotAlice)
+	}
+
+	// Shared SetAuthorName must reject members and permit admin.
+	if err := rp.SetAuthorName(ctxBob, "@bob"); err == nil {
+		t.Fatalf("expected SetAuthorName by member to be rejected in ServerMode")
+	}
+	if err := rp.SetAuthorName(ctxAdmin, "@lead"); err != nil {
+		t.Fatalf("expected SetAuthorName by admin to succeed: %v", err)
+	}
+}

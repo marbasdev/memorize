@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -314,5 +315,131 @@ func TestDashboardLocalRemoteConnectionsUI(t *testing.T) {
 	}
 	if _, ok := config.ResolveRemoteTarget(tmp, teamRepo); ok {
 		t.Fatalf("expected remote binding cleared after disconnect")
+	}
+}
+
+func TestDashboardServerModeTeamReadOnlyConfigRBACAndSharedToPersonalGuard(t *testing.T) {
+	d := newTestDeps(t, "", noopMutEval{}, "", thttp.DashboardHooks{})
+	d.ServerMode = true
+	d.DB = d.Memory.DB()
+	h := dashboard.NewHandler(d)
+
+	ctx := context.Background()
+	adminIssue, _, err := sqlite.EnsureBootstrapAdmin(ctx, d.DB, "admin", "")
+	if err != nil {
+		t.Fatalf("EnsureBootstrapAdmin: %v", err)
+	}
+	aliceIssue, err := sqlite.CreateUser(ctx, d.DB, "alice", domain.RoleMember)
+	if err != nil {
+		t.Fatalf("CreateUser alice: %v", err)
+	}
+	host := "127.0.0.1:18095"
+	adminCookie := loginSessionCookie(t, h, host, adminIssue.PlainToken)
+	aliceCookie := loginSessionCookie(t, h, host, aliceIssue.PlainToken)
+
+	// Seed a shared project memory via admin context so /ui/team has a project scope and modal_detail can inspect it.
+	ctxAdmin := domain.WithAuthPrincipal(ctx, domain.AuthPrincipal{
+		Account:       "admin",
+		Role:          domain.RoleAdmin,
+		ServerMode:    true,
+		Authenticated: true,
+	})
+	if _, err := d.Memory.CommitMemoryFull(ctxAdmin, "SHARED_PROJECT_RULE", "architecture", "", "", "project:teamapp"); err != nil {
+		t.Fatalf("seed project memory: %v", err)
+	}
+	var projMemID int64
+	if err := d.DB.QueryRowContext(ctx, `SELECT id FROM memories WHERE content = 'SHARED_PROJECT_RULE' ORDER BY id DESC LIMIT 1`).Scan(&projMemID); err != nil || projMemID <= 0 {
+		t.Fatalf("lookup seeded project memory ID: id=%d err=%v", projMemID, err)
+	}
+
+	// GET /ui/team as member renders ServerMode read-only notice, hides host-git buttons & #teamAuthorForm.
+	recTeamAlice := httptest.NewRecorder()
+	reqTeamAlice := httptest.NewRequest(http.MethodGet, "http://"+host+"/ui/team?team_scope=project:teamapp", nil)
+	reqTeamAlice.Host = host
+	reqTeamAlice.AddCookie(aliceCookie)
+	h.ServeHTTP(recTeamAlice, reqTeamAlice)
+	bodyAlice := recTeamAlice.Body.String()
+	if recTeamAlice.Code != http.StatusOK || !strings.Contains(bodyAlice, ".memorize/TEAM_RULES.md") ||
+		strings.Contains(bodyAlice, `id="btnTeamSync"`) || strings.Contains(bodyAlice, `id="btnTeamToggleAdd"`) || strings.Contains(bodyAlice, `id="teamAuthorForm"`) {
+		t.Fatalf("unexpected member /ui/team HTML (%d):\n%s", recTeamAlice.Code, bodyAlice)
+	}
+
+	// GET /ui/team as admin includes #teamAuthorForm while still hiding server-local git buttons.
+	recTeamAdmin := httptest.NewRecorder()
+	reqTeamAdmin := httptest.NewRequest(http.MethodGet, "http://"+host+"/ui/team?team_scope=project:teamapp", nil)
+	reqTeamAdmin.Host = host
+	reqTeamAdmin.AddCookie(adminCookie)
+	h.ServeHTTP(recTeamAdmin, reqTeamAdmin)
+	bodyAdmin := recTeamAdmin.Body.String()
+	if recTeamAdmin.Code != http.StatusOK || !strings.Contains(bodyAdmin, `id="teamAuthorForm"`) ||
+		strings.Contains(bodyAdmin, `id="btnTeamSync"`) || strings.Contains(bodyAdmin, `id="btnTeamToggleAdd"`) {
+		t.Fatalf("unexpected admin /ui/team HTML (%d):\n%s", recTeamAdmin.Code, bodyAdmin)
+	}
+
+	// POST /ui/team/config rejects member (403) and accepts admin (200).
+	cfgForm := url.Values{"team_scope": {"project:teamapp"}, "author": {"lead"}}.Encode()
+	recCfgAlice := httptest.NewRecorder()
+	reqCfgAlice := httptest.NewRequest(http.MethodPost, "http://"+host+"/ui/team/config", strings.NewReader(cfgForm))
+	reqCfgAlice.Host = host
+	reqCfgAlice.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqCfgAlice.Header.Set("HX-Request", "true")
+	reqCfgAlice.AddCookie(aliceCookie)
+	h.ServeHTTP(recCfgAlice, reqCfgAlice)
+	if recCfgAlice.Code != http.StatusForbidden {
+		t.Fatalf("expected member POST /ui/team/config 403, got %d %s", recCfgAlice.Code, recCfgAlice.Body.String())
+	}
+
+	recCfgAdmin := httptest.NewRecorder()
+	reqCfgAdmin := httptest.NewRequest(http.MethodPost, "http://"+host+"/ui/team/config", strings.NewReader(cfgForm))
+	reqCfgAdmin.Host = host
+	reqCfgAdmin.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqCfgAdmin.Header.Set("HX-Request", "true")
+	reqCfgAdmin.AddCookie(adminCookie)
+	h.ServeHTTP(recCfgAdmin, reqCfgAdmin)
+	if recCfgAdmin.Code != http.StatusOK || !strings.Contains(recCfgAdmin.Body.String(), "@lead") {
+		t.Fatalf("expected admin POST /ui/team/config 200 with @lead, got %d %s", recCfgAdmin.Code, recCfgAdmin.Body.String())
+	}
+
+	// Server-local git team rule mutation endpoints reject requests in ServerMode cleanly (400).
+	for _, ep := range []string{"/ui/team/sync", "/ui/modal/team-draft", "/ui/team/publish", "/ui/team/delete"} {
+		form := url.Values{"team_scope": {"project:teamapp"}, "rule_key": {"k"}, "raw_rule": {"test rule"}}.Encode()
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "http://"+host+ep, strings.NewReader(form))
+		req.Host = host
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("HX-Request", "true")
+		req.AddCookie(adminCookie)
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %s rejected (400) in ServerMode, got %d %s", ep, rec.Code, rec.Body.String())
+		}
+	}
+
+	// GET /ui/modal/detail for shared project memory omits "personal" scope option & promote button in ServerMode,
+	// and POST /ui/memories/update moving shared project memory into personal fails.
+	recDetail := httptest.NewRecorder()
+	reqDetail := httptest.NewRequest(http.MethodGet, "http://"+host+"/ui/modal/detail?id="+url.QueryEscape(strings.TrimSpace(strconv.FormatInt(projMemID, 10))), nil)
+	reqDetail.Host = host
+	reqDetail.AddCookie(aliceCookie)
+	h.ServeHTTP(recDetail, reqDetail)
+	detailBody := recDetail.Body.String()
+	if recDetail.Code != http.StatusOK || strings.Contains(detailBody, `"personal"`) || strings.Contains(detailBody, "/ui/modal/team-promote") {
+		t.Fatalf("expected ServerMode modal_detail to omit personal target & promote button (%d):\n%s", recDetail.Code, detailBody)
+	}
+
+	updForm := url.Values{
+		"id":      {strconv.FormatInt(projMemID, 10)},
+		"scope":   {"personal"},
+		"content": {"SHARED_PROJECT_RULE"},
+	}.Encode()
+	recUpd := httptest.NewRecorder()
+	reqUpd := httptest.NewRequest(http.MethodPost, "http://"+host+"/ui/memories/update", strings.NewReader(updForm))
+	reqUpd.Host = host
+	reqUpd.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqUpd.Header.Set("HX-Request", "true")
+	reqUpd.AddCookie(aliceCookie)
+	h.ServeHTTP(recUpd, reqUpd)
+	if recUpd.Code == http.StatusOK {
+		t.Fatalf("expected POST /ui/memories/update moving shared memory into personal to fail in ServerMode")
 	}
 }

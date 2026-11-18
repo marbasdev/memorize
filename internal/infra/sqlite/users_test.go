@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"memorize/internal/domain"
+	"memorize/internal/infra/config"
 	"memorize/internal/infra/sqlite"
 )
 
@@ -132,5 +133,72 @@ func TestUsersCRUDTokenRotationCookiesAndLastAdminGuard(t *testing.T) {
 	users, err := sqlite.ListUsers(ctx, db)
 	if err != nil || len(users) != 1 || users[0].Account != "alice" {
 		t.Fatalf("unexpected users list after delete: %+v (err=%v)", users, err)
+	}
+}
+
+func TestConfigMapExcludesSessionSecretAndAuthLastSeenThrottle(t *testing.T) {
+	db, ctx := openTestUsersDB(t)
+	adminIss, _, err := sqlite.EnsureBootstrapAdmin(ctx, db, "hostadmin", "")
+	if err != nil {
+		t.Fatalf("EnsureBootstrapAdmin: %v", err)
+	}
+	iss, err := sqlite.CreateUser(ctx, db, "alice", domain.RoleMember)
+	if err != nil {
+		t.Fatalf("CreateUser alice: %v", err)
+	}
+	pAdm := domain.AuthPrincipal{
+		Account:       adminIss.User.Account,
+		Role:          adminIss.User.Role,
+		TokenHint:     adminIss.User.TokenHint,
+		ServerMode:    true,
+		Authenticated: true,
+	}
+	if _, err := sqlite.IssueSessionCookieValue(ctx, db, pAdm, time.Hour); err != nil {
+		t.Fatalf("IssueSessionCookieValue: %v", err)
+	}
+	cfg := config.GetConfigMap(ctx, db)
+	if _, leaked := cfg["auth_session_secret"]; leaked {
+		t.Fatalf("config.GetConfigMap leaked auth_session_secret")
+	}
+
+	// First AuthenticateToken populates empty last_seen_at.
+	if _, ok := sqlite.AuthenticateToken(ctx, db, iss.PlainToken); !ok {
+		t.Fatalf("expected initial AuthenticateToken to succeed")
+	}
+	var firstSeen string
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(last_seen_at, '') FROM users WHERE account = 'alice'`).Scan(&firstSeen); err != nil || firstSeen == "" {
+		t.Fatalf("expected first last_seen_at populated, got %q (err=%v)", firstSeen, err)
+	}
+
+	// Recent timestamp (<60s old) skips write inside AuthenticateToken.
+	freshStamp := time.Now().UTC().Add(-10 * time.Second).Format("2006-01-02 15:04:05")
+	if _, err := db.ExecContext(ctx, `UPDATE users SET last_seen_at = ? WHERE account = 'alice'`, freshStamp); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := sqlite.AuthenticateToken(ctx, db, iss.PlainToken); !ok {
+		t.Fatalf("expected fresh-window AuthenticateToken to succeed")
+	}
+	var gotAfterFresh string
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(last_seen_at, '') FROM users WHERE account = 'alice'`).Scan(&gotAfterFresh); err != nil {
+		t.Fatal(err)
+	}
+	if gotAfterFresh != freshStamp {
+		t.Fatalf("expected last_seen_at throttled within 60s window: want %q, got %q", freshStamp, gotAfterFresh)
+	}
+
+	// Stale timestamp (>=60s old) triggers last_seen_at refresh.
+	staleStamp := time.Now().UTC().Add(-120 * time.Second).Format("2006-01-02 15:04:05")
+	if _, err := db.ExecContext(ctx, `UPDATE users SET last_seen_at = ? WHERE account = 'alice'`, staleStamp); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := sqlite.AuthenticateToken(ctx, db, iss.PlainToken); !ok {
+		t.Fatalf("expected stale-window AuthenticateToken to succeed")
+	}
+	var gotAfterStale string
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(last_seen_at, '') FROM users WHERE account = 'alice'`).Scan(&gotAfterStale); err != nil {
+		t.Fatal(err)
+	}
+	if gotAfterStale == staleStamp || gotAfterStale == "" {
+		t.Fatalf("expected stale last_seen_at refreshed, still got %q", gotAfterStale)
 	}
 }

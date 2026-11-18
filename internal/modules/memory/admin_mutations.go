@@ -32,7 +32,7 @@ func (s *Service) checkPersonalOwnership(ctx context.Context, id int64, recScope
 		return nil
 	}
 	cur := s.CurrentAccount(ctx)
-	if recAccount != "" && recAccount != cur {
+	if (recAccount != "" || domain.IsServerMode(ctx)) && recAccount != cur {
 		return fmt.Errorf("permission denied: personal memory #%d belongs to account %q (current: %q)", id, recAccount, cur)
 	}
 	return nil
@@ -103,26 +103,46 @@ func (s *Service) UndoMemory(ctx context.Context, id int64) (string, error) {
 	if err := domain.CanModifyScope(ctx, recScope); err != nil {
 		return "", err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id FROM memories WHERE superseded_by = ?`, id)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, scope, COALESCE(account, '') FROM memories WHERE superseded_by = ?`, id)
 	if err != nil {
 		return "", err
 	}
 	var children []int64
+	var childErr error
 	for rows.Next() {
 		var cid int64
-		if rows.Scan(&cid) == nil {
+		var cScope, cAcc string
+		if rows.Scan(&cid, &cScope, &cAcc) == nil {
+			if err := s.checkPersonalOwnership(ctx, cid, cScope, cAcc); err != nil && childErr == nil {
+				childErr = err
+			}
+			if err := domain.CanModifyScope(ctx, cScope); err != nil && childErr == nil {
+				childErr = err
+			}
 			children = append(children, cid)
 		}
 	}
 	rows.Close()
+	if childErr != nil {
+		return "", childErr
+	}
 
+	bypassFlag := boolToInt(s.canBypassPersonal(ctx))
+	canGlobalFlag := boolToInt(domain.CanModifyScope(ctx, "global") == nil)
+	curAcc := s.CurrentAccount(ctx)
 	var msg string
 	if err := s.withTx(ctx, func(tx *sql.Tx) error {
 		if act == 1 && len(children) > 0 {
 			if _, err := tx.ExecContext(ctx, `UPDATE memories SET active = 0 WHERE id = ?`, id); err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, `UPDATE memories SET active = 1, superseded_by = NULL WHERE superseded_by = ?`, id); err != nil {
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE memories
+				SET active = 1, superseded_by = NULL
+				WHERE superseded_by = ?
+				  AND (? = 1 OR scope != 'personal' OR COALESCE(account, '') = ?)
+				  AND (? = 1 OR scope != 'global')
+			`, id, bypassFlag, curAcc, canGlobalFlag); err != nil {
 				return err
 			}
 			msg = fmt.Sprintf("UNDONE OVERWRITE: deactivated #%d and restored %v", id, children)
@@ -166,6 +186,9 @@ func (s *Service) UpdateMemoryFull(ctx context.Context, id int64, rawScope, cate
 	scope := curScope
 	if strings.TrimSpace(rawScope) != "" {
 		scope = domain.NormalizeScope(rawScope)
+	}
+	if domain.IsServerMode(ctx) && curScope != "personal" && scope == "personal" {
+		return fmt.Errorf("permission denied: cannot move shared %s memory #%d into personal scope in server mode", curScope, id)
 	}
 	if err := domain.CanModifyScope(ctx, scope); err != nil {
 		return err

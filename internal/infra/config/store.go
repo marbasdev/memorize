@@ -49,7 +49,7 @@ func GetConfigMap(ctx context.Context, db *sql.DB) map[string]string {
 	if db == nil {
 		return out
 	}
-	rows, err := db.QueryContext(ctx, `SELECT key, val FROM config`)
+	rows, err := db.QueryContext(ctx, `SELECT key, val FROM config WHERE key != 'auth_session_secret'`)
 	if err != nil {
 		return out
 	}

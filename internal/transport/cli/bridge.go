@@ -673,6 +673,8 @@ func buildClientHookContext(ctx context.Context, remote domain.RemoteTargetConfi
 					rawMD = rawMD[:256*1024]
 				}
 				cc.TeamRuleDocs[sc] = string(rawMD)
+			} else if os.IsNotExist(err) || (err == nil && len(rawMD) == 0) {
+				cc.TeamRuleDocs[sc] = ""
 			}
 		}
 	}

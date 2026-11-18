@@ -105,7 +105,7 @@
           hx-target="#memoriesSection" hx-swap="innerHTML">{{t .Lang "btn_undo"}}</button>
       </div>
       <div style="display:flex;gap:0.4rem;">
-        {{if .Record.Active}}
+        {{if and .Record.Active (not .ServerMode)}}
           <button type="button" class="btn btn-sm"
             hx-get="/ui/modal/team-promote?id={{.Record.ID}}{{if hasPrefix .Record.Scope "project:"}}&team_scope={{.Record.Scope | urlquery}}{{end}}"
             hx-target="#modalHost" hx-swap="innerHTML">{{t .Lang "team_btn_promote"}}</button>

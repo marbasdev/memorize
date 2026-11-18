@@ -272,16 +272,18 @@ func AuthenticateToken(ctx context.Context, db *sql.DB, plainToken string) (doma
 		return domain.AuthPrincipal{}, false
 	}
 	digest := HashAuthToken(trimmed)
-	var acc, role, hint string
+	var acc, role, hint, lastSeen string
 	var act int
 	err := db.QueryRowContext(ctx, `
-		SELECT account, role, COALESCE(token_hint, ''), active
+		SELECT account, role, COALESCE(token_hint, ''), COALESCE(last_seen_at, ''), active
 		FROM users WHERE token_hash = ?
-	`, digest).Scan(&acc, &role, &hint, &act)
+	`, digest).Scan(&acc, &role, &hint, &lastSeen, &act)
 	if err != nil || act != 1 {
 		return domain.AuthPrincipal{}, false
 	}
-	_, _ = db.ExecContext(ctx, `UPDATE users SET last_seen_at = CURRENT_TIMESTAMP WHERE account = ?`, acc)
+	if shouldTouchLastSeen(lastSeen, time.Now().UTC()) {
+		_, _ = db.ExecContext(ctx, `UPDATE users SET last_seen_at = CURRENT_TIMESTAMP WHERE account = ?`, acc)
+	}
 	return domain.AuthPrincipal{
 		Account:       acc,
 		Role:          domain.NormalizeRole(role),
@@ -289,6 +291,19 @@ func AuthenticateToken(ctx context.Context, db *sql.DB, plainToken string) (doma
 		ServerMode:    true,
 		Authenticated: true,
 	}, true
+}
+
+func shouldTouchLastSeen(lastSeen string, now time.Time) bool {
+	s := strings.TrimSpace(lastSeen)
+	if s == "" {
+		return true
+	}
+	for _, layout := range []string{"2006-01-02 15:04:05", time.RFC3339, "2006-01-02T15:04:05Z"} {
+		if ts, err := time.Parse(layout, s); err == nil {
+			return now.Sub(ts.UTC()) >= 60*time.Second
+		}
+	}
+	return true
 }
 
 func ensureSessionSecret(ctx context.Context, db *sql.DB) ([]byte, error) {

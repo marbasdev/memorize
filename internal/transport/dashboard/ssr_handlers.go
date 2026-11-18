@@ -355,6 +355,15 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 		if len(scopes) == 0 {
 			scopes = []string{"global", "personal"}
 		}
+		if (d.ServerMode || domain.IsServerMode(ctx)) && recs[0].Scope != "personal" {
+			filtered := make([]string, 0, len(scopes))
+			for _, sc := range scopes {
+				if sc != "personal" {
+					filtered = append(filtered, sc)
+				}
+			}
+			scopes = filtered
+		}
 		writeHTMLTemplate(w, "modal_detail", ssrDetailModalData{
 			Lang:             lang,
 			ServerMode:       d.ServerMode,

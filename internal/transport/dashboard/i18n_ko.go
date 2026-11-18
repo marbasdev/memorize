@@ -342,6 +342,7 @@ var koTranslations = map[string]string{
 	"team_btn_apply_dupes":       "선택한 정리 실행",
 	"team_kind_duplicate":        "완전 중복 -> 로컬 삭제",
 	"team_kind_partial":          "일부 겹침 -> 고유 내용만 남기고 축소",
+	"team_server_readonly_note":  "팀 서버 모드에서는 .memorize/TEAM_RULES.md 수정·커밋·원격 싱크를 연결된 클라이언트 저장소 또는 team_rules MCP에서 실행합니다.",
 	"btn_users":                  "계정 관리...",
 	"btn_logout":                 "로그아웃",
 	"login_title":                "팀 서버 로그인",
