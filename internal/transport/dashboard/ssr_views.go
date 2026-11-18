@@ -51,31 +51,28 @@ func toggleFilterJSON(key, cur, target string, extra map[string]string) string {
 }
 
 type ssrMemoriesData struct {
-	Lang                 string
-	OOB                  bool
-	Stats                domain.DashboardStats
-	GeneralCount         int
-	Histogram            ssrHistogramData
-	Distribution         domain.ScopeDistribution
-	Query                domain.RecordQuery
-	HasCustomFilter      bool
-	IncludePersonal      bool
-	CurrentAccount       string
-	Scopes               []string
-	Sessions             []domain.SessionSummary
-	Accounts             []string
-	Categories           []string
-	SubCategories        []string
-	AllSubCategories     map[string][]string
-	Page                 domain.RecordPage
-	PageActiveIDs        []int64
-	PageNums             []string
-	PageSizes            []int
-	PageInfo             string
-	HighlightTerms       []string
-	SyncEnabled          bool
-	PendingSyncConflicts int
-	SyncConflicts        []domain.SyncConflict
+	Lang             string
+	OOB              bool
+	Stats            domain.DashboardStats
+	GeneralCount     int
+	Histogram        ssrHistogramData
+	Distribution     domain.ScopeDistribution
+	Query            domain.RecordQuery
+	HasCustomFilter  bool
+	IncludePersonal  bool
+	CurrentAccount   string
+	Scopes           []string
+	Sessions         []domain.SessionSummary
+	Accounts         []string
+	Categories       []string
+	SubCategories    []string
+	AllSubCategories map[string][]string
+	Page             domain.RecordPage
+	PageActiveIDs    []int64
+	PageNums         []string
+	PageSizes        []int
+	PageInfo         string
+	HighlightTerms   []string
 }
 
 type ssrGuardrailsData struct {
@@ -208,7 +205,6 @@ var ssrTemplateFiles = []string{
 	"templates/telemetry.html",
 	"templates/calibrate.html",
 	"templates/modals.html",
-	"templates/sync_modals.html",
 }
 
 func ssrFuncMap() template.FuncMap {

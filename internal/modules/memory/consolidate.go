@@ -356,18 +356,9 @@ func (s *Service) ConsolidateMemories(ctx context.Context, rawScope, category st
 			return err
 		}
 		newID, _ = res.LastInsertId()
-		if err := recordMemoryTxInTx(ctx, tx, "", newID, domain.SyncOpUpsert, "", 0); err != nil {
-			return err
-		}
 		for _, oldID := range sourceIDs {
-			resOld, err := tx.ExecContext(ctx, `UPDATE memories SET active = 0, superseded_by = ? WHERE id = ?`, newID, oldID)
-			if err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE memories SET active = 0, superseded_by = ? WHERE id = ?`, newID, oldID); err != nil {
 				return err
-			}
-			if n, _ := resOld.RowsAffected(); n > 0 {
-				if err := recordMemoryTxInTx(ctx, tx, "", oldID, domain.SyncOpUpsert, "", 0); err != nil {
-					return err
-				}
 			}
 		}
 		return nil

@@ -24,7 +24,6 @@ type RuntimeHooks struct {
 	RunDaemonServer     func(explicitAddr, dbPath, modelsDir string) int
 	ServeInlineStdio    func(dbPath, modelsDir string, withDashboard bool, dashAddr string) int
 	RunInlineHook       func(ctx context.Context, dbPath, modelsDir, mode string, rawStdin []byte) (string, int)
-	ServeInlineSync     func(ctx context.Context, dbPath, modelsDir string, r io.Reader, w io.Writer) error
 }
 
 func readHookStdin() []byte {
@@ -136,7 +135,6 @@ func executeArgs(args []string, version string, hooks RuntimeHooks) int {
 	daemonCtl := fs.String("daemon-ctl", "", "control background daemon: status, start, stop, restart, logs, port")
 	dashAddr := fs.String("dashboard", "", "alias to run unified daemon/dashboard on explicit listen address (e.g. 127.0.0.1:18095)")
 	hookMode := fs.String("hook", "", "execute zero-touch lifecycle hook mode (claude-start, claude-turn, claude-pretool, claude-stop, claude-end, antigravity-start, antigravity-turn, antigravity-pretool, antigravity-stop, git-precommit)")
-	syncServe := fs.Bool("sync-serve", false, "run internal NDJSON SSH sync server over stdio (disabled in this release)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -162,12 +160,6 @@ func executeArgs(args []string, version string, hooks RuntimeHooks) int {
 
 	if ctlAction := parseDaemonCtlAction(*daemonCtl, posArgs); ctlAction != "" {
 		return runDaemonControlCLI(ctlAction, posArgs, explicitAddr, dbPath, modelsDir, hooks)
-	}
-	if *syncServe {
-		return runSyncServeCommand(explicitAddr, dbPath, modelsDir, hooks)
-	}
-	if len(posArgs) > 0 && strings.EqualFold(posArgs[0], "sync") {
-		return runSyncCLI(posArgs[1:], explicitAddr, dbPath, modelsDir, hooks)
 	}
 
 	if m := strings.TrimSpace(*hookMode); m != "" {
@@ -205,4 +197,29 @@ func executeArgs(args []string, version string, hooks RuntimeHooks) int {
 // Execute parses CLI flags/subcommands from os.Args and returns the process exit code.
 func Execute(version string, hooks RuntimeHooks) int {
 	return executeArgs(os.Args[1:], version, hooks)
+}
+
+func reorderFlagsBeforePositional(args []string, valueFlags map[string]bool) []string {
+	var flags, pos []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			pos = append(pos, args[i+1:]...)
+			break
+		}
+		if strings.HasPrefix(a, "-") && len(a) > 1 {
+			flags = append(flags, a)
+			name := strings.TrimLeft(a, "-")
+			if eq := strings.IndexByte(name, '='); eq >= 0 {
+				continue
+			}
+			if valueFlags[name] && i+1 < len(args) {
+				flags = append(flags, args[i+1])
+				i++
+			}
+			continue
+		}
+		pos = append(pos, a)
+	}
+	return append(flags, pos...)
 }

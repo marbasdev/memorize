@@ -515,15 +515,10 @@ func (s *Service) applyEvaluatedCommit(ctx context.Context, targetScope, candida
 	if dec.Action == "IGNORE" && len(targetIDs) > 0 {
 		_ = s.withTx(ctx, func(tx *sql.Tx) error {
 			for _, id := range targetIDs {
-				res, uerr := tx.ExecContext(ctx,
+				_, _ = tx.ExecContext(ctx,
 					`UPDATE memories SET confidence = MIN(1.0, 1.0 - (1.0 - confidence) * 0.8)
 					 WHERE id = ? AND scope = ? AND (scope != 'personal' OR account = ?) AND active = 1`,
 					id, targetScope, acc)
-				if uerr == nil {
-					if n, _ := res.RowsAffected(); n > 0 {
-						_ = recordMemoryTxInTx(ctx, tx, "", id, domain.SyncOpUpsert, "", 0)
-					}
-				}
 			}
 			return nil
 		})
@@ -559,23 +554,15 @@ func (s *Service) applyEvaluatedCommit(ctx context.Context, targetScope, candida
 			return err
 		}
 		newID, _ = res.LastInsertId()
-		if err := recordMemoryTxInTx(ctx, tx, "", newID, domain.SyncOpUpsert, "", 0); err != nil {
-			return err
-		}
 		if dec.Action == "OVERWRITE" && len(targetIDs) > 0 {
 			actionKind = "overwrite"
 			for _, oldID := range targetIDs {
-				resUpd, err := tx.ExecContext(ctx,
+				_, err := tx.ExecContext(ctx,
 					`UPDATE memories SET active = 0, superseded_by = ?
 					 WHERE id = ? AND scope = ? AND (scope != 'personal' OR account = ?) AND active = 1`,
 					newID, oldID, targetScope, acc)
 				if err != nil {
 					return err
-				}
-				if n, _ := resUpd.RowsAffected(); n > 0 {
-					if err := recordMemoryTxInTx(ctx, tx, "", oldID, domain.SyncOpUpsert, "", 0); err != nil {
-						return err
-					}
 				}
 			}
 			status = fmt.Sprintf("OVERWRITTEN (id=%d superseded %v, scope=%s, category=%s, tags=%v, pinned=%v)", newID, targetIDs, targetScope, catDisplay, tags, pinned == 1)

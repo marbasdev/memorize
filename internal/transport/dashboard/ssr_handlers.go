@@ -555,5 +555,4 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 
 	registerSSRCalibrateRoutes(mux, d)
 	registerSSRTeamRoutes(mux, d)
-	registerSSRSyncRoutes(mux, d)
 }

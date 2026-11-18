@@ -218,8 +218,6 @@ func NewDaemonMux(deps DaemonDeps) http.Handler {
 		})
 	})
 
-	registerSyncDaemonRoutes(mux, deps.Memory)
-
 	if deps.Dashboard != nil {
 		mux.Handle("/", deps.Dashboard)
 	}

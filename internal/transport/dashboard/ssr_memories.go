@@ -168,37 +168,29 @@ func buildMemoriesView(ctx context.Context, d Deps, lang string, q url.Values, o
 	if len(scopes) == 0 {
 		scopes = []string{"global", "personal"}
 	}
-	syncEnabled := domain.IsMemorySyncEnabled()
-	var syncConflicts []domain.SyncConflict
-	if syncEnabled {
-		syncConflicts, _ = d.Memory.ListSyncConflicts(ctx)
-	}
 
 	return ssrMemoriesData{
-		Lang:                 lang,
-		OOB:                  oob,
-		Stats:                stats,
-		GeneralCount:         max(0, stats.ActiveCount-stats.PinnedCount),
-		Histogram:            buildHistogramData(stats.ConfidenceBins, oob),
-		Distribution:         dist,
-		Query:                rq,
-		HasCustomFilter:      hasCustomFilter,
-		IncludePersonal:      cfg["include_personal_in_project"] == "1" || (cfg["include_personal_in_project"] == "" && discovery.EnvOrDefault("", "MEMORY_INCLUDE_PERSONAL", "0") == "1"),
-		CurrentAccount:       d.Memory.CurrentAccount(ctx),
-		Scopes:               scopes,
-		Sessions:             facets.Sessions,
-		Accounts:             facets.Accounts,
-		Categories:           cats,
-		SubCategories:        subList,
-		AllSubCategories:     allSubMap,
-		Page:                 pageRes,
-		PageActiveIDs:        activeIDs,
-		PageNums:             buildPageNums(pageRes.Page, pageRes.TotalPages),
-		PageSizes:            []int{10, 20, 50, 100},
-		PageInfo:             formatPageInfo(lang, pageRes, isFiltered),
-		HighlightTerms:       extractHighlightTerms(rq.Search),
-		SyncEnabled:          syncEnabled,
-		PendingSyncConflicts: len(syncConflicts),
-		SyncConflicts:        syncConflicts,
+		Lang:             lang,
+		OOB:              oob,
+		Stats:            stats,
+		GeneralCount:     max(0, stats.ActiveCount-stats.PinnedCount),
+		Histogram:        buildHistogramData(stats.ConfidenceBins, oob),
+		Distribution:     dist,
+		Query:            rq,
+		HasCustomFilter:  hasCustomFilter,
+		IncludePersonal:  cfg["include_personal_in_project"] == "1" || (cfg["include_personal_in_project"] == "" && discovery.EnvOrDefault("", "MEMORY_INCLUDE_PERSONAL", "0") == "1"),
+		CurrentAccount:   d.Memory.CurrentAccount(ctx),
+		Scopes:           scopes,
+		Sessions:         facets.Sessions,
+		Accounts:         facets.Accounts,
+		Categories:       cats,
+		SubCategories:    subList,
+		AllSubCategories: allSubMap,
+		Page:             pageRes,
+		PageActiveIDs:    activeIDs,
+		PageNums:         buildPageNums(pageRes.Page, pageRes.TotalPages),
+		PageSizes:        []int{10, 20, 50, 100},
+		PageInfo:         formatPageInfo(lang, pageRes, isFiltered),
+		HighlightTerms:   extractHighlightTerms(rq.Search),
 	}, nil
 }

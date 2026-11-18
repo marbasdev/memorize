@@ -300,9 +300,6 @@ func (s *Service) ApplyTaxonomyRebalance(ctx context.Context, rawScope string, i
 				return err
 			}
 			if n, _ := res.RowsAffected(); n > 0 {
-				if err := recordMemoryTxInTx(ctx, tx, "", it.ID, domain.SyncOpUpsert, "", 0); err != nil {
-					return err
-				}
 				updated++
 				taxPairs = append(taxPairs, [2]string{newCat, newSub})
 			}

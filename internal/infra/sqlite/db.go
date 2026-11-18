@@ -253,9 +253,6 @@ func InitSchema(db *sql.DB) error {
 	_, _ = db.Exec(`DELETE FROM onboarding_prompts WHERE updated_at < ?`, time.Now().Add(-6*time.Hour).Unix())
 	_, _ = db.Exec(`DELETE FROM session_compacts WHERE updated_at < ?`, time.Now().Add(-48*time.Hour).Unix())
 	_, _ = db.Exec(`DELETE FROM project_progress WHERE source = 'session_auto'`)
-	if err := initSyncSchema(db); err != nil {
-		return err
-	}
 	return nil
 }
 

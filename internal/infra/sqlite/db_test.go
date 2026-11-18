@@ -2,13 +2,10 @@ package sqlite
 
 import (
 	"database/sql"
-	"encoding/json"
 	"path/filepath"
 	"testing"
 
 	_ "modernc.org/sqlite"
-
-	"memorize/internal/domain"
 )
 
 func TestInitSchemaDropsLegacyProgressStatusColumn(t *testing.T) {
@@ -98,131 +95,5 @@ func TestInitSchemaDropsLegacyProgressStatusColumn(t *testing.T) {
 	}
 	if idxCount != 2 {
 		t.Fatalf("expected 2 recreated progress indexes, got %d", idxCount)
-	}
-}
-
-func TestInitSchemaBackfillsLegacyMemoriesSyncLog(t *testing.T) {
-	t.Cleanup(domain.SetMemorySyncEnabledForTest(true))
-	dbPath := filepath.Join(t.TempDir(), "legacy-mem.db")
-	rawDB, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("sql.Open: %v", err)
-	}
-	_, err = rawDB.Exec(`
-		CREATE TABLE memories (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			scope TEXT NOT NULL DEFAULT 'global',
-			account TEXT NOT NULL DEFAULT 'alice',
-			category TEXT NOT NULL,
-			sub_category TEXT NOT NULL DEFAULT '',
-			tags TEXT NOT NULL DEFAULT '',
-			content TEXT NOT NULL,
-			confidence REAL NOT NULL,
-			pinned INTEGER NOT NULL DEFAULT 0,
-			superseded_by INTEGER,
-			active INTEGER NOT NULL DEFAULT 1,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		);
-		INSERT INTO memories (id, scope, account, category, content, confidence, pinned, superseded_by, active)
-		VALUES
-			(1, 'global', 'alice', 'convention', 'Old rule replaced by #2', 0.9, 0, 2, 0),
-			(2, 'global', 'alice', 'convention', 'New rule replacing #1', 0.95, 1, NULL, 1);
-	`)
-	_ = rawDB.Close()
-	if err != nil {
-		t.Fatalf("seed legacy memories: %v", err)
-	}
-
-	db, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
-	// Running InitSchema again must be strictly idempotent without duplicating tx rows.
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("2nd InitSchema: %v", err)
-	}
-
-	devID, err := EnsureSyncDeviceID(db)
-	if err != nil || devID == "" {
-		t.Fatalf("EnsureSyncDeviceID failed: %q err=%v", devID, err)
-	}
-
-	var sync1, sync2, origDev string
-	var origSeq2 int64
-	if err := db.QueryRow(`SELECT sync_id FROM memories WHERE id = 1`).Scan(&sync1); err != nil || sync1 == "" {
-		t.Fatalf("row 1 missing sync_id: %q err=%v", sync1, err)
-	}
-	if err := db.QueryRow(`SELECT sync_id, origin_device, origin_seq FROM memories WHERE id = 2`).Scan(&sync2, &origDev, &origSeq2); err != nil {
-		t.Fatalf("row 2 scan failed: %v", err)
-	}
-	if sync2 == "" || sync1 == sync2 || origDev != devID || origSeq2 != 2 {
-		t.Fatalf("unexpected row 2 sync metadata: sync2=%q origDev=%q origSeq2=%d", sync2, origDev, origSeq2)
-	}
-
-	var txCount int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM memory_tx_log`).Scan(&txCount); err != nil || txCount != 2 {
-		t.Fatalf("expected 2 backfilled tx log rows, got %d (err=%v)", txCount, err)
-	}
-
-	var payloadRaw string
-	if err := db.QueryRow(`SELECT payload_json FROM memory_tx_log WHERE sync_id = ?`, sync1).Scan(&payloadRaw); err != nil {
-		t.Fatalf("load tx payload for row 1: %v", err)
-	}
-	var snap domain.MemorySnapshot
-	if err := json.Unmarshal([]byte(payloadRaw), &snap); err != nil {
-		t.Fatalf("unmarshal payload: %v", err)
-	}
-	if snap.SupersededBySyncID != sync2 || snap.Active {
-		t.Fatalf("expected forward superseded_by_sync_id=%q active=false, got %+v", sync2, snap)
-	}
-}
-
-func TestInitSchemaSkipsLegacySyncBackfillWhenDisabled(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "legacy-disabled.db")
-	rawDB, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("sql.Open: %v", err)
-	}
-	_, err = rawDB.Exec(`
-		CREATE TABLE memories (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			scope TEXT NOT NULL DEFAULT 'global',
-			account TEXT NOT NULL DEFAULT 'alice',
-			category TEXT NOT NULL,
-			sub_category TEXT NOT NULL DEFAULT '',
-			tags TEXT NOT NULL DEFAULT '',
-			content TEXT NOT NULL,
-			confidence REAL NOT NULL,
-			pinned INTEGER NOT NULL DEFAULT 0,
-			superseded_by INTEGER,
-			active INTEGER NOT NULL DEFAULT 1,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		);
-		INSERT INTO memories (id, scope, account, category, content, confidence, pinned, active)
-		VALUES (1, 'global', 'alice', 'convention', 'Legacy rule stays untouched', 0.9, 1, 1);
-	`)
-	_ = rawDB.Close()
-	if err != nil {
-		t.Fatalf("seed legacy memories: %v", err)
-	}
-
-	db, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
-	var syncID string
-	if err := db.QueryRow(`SELECT COALESCE(sync_id, '') FROM memories WHERE id = 1`).Scan(&syncID); err != nil {
-		t.Fatalf("query sync_id: %v", err)
-	}
-	if syncID != "" {
-		t.Fatalf("expected sync_id to remain empty when sync disabled, got %q", syncID)
-	}
-	var txCount int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM memory_tx_log`).Scan(&txCount); err != nil || txCount != 0 {
-		t.Fatalf("expected 0 memory_tx_log rows when sync disabled, got %d (err=%v)", txCount, err)
 	}
 }

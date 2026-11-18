@@ -70,9 +70,6 @@ func (s *Service) ForgetMemories(ctx context.Context, ids []int64) (int64, error
 				return err
 			}
 			if n, _ := res.RowsAffected(); n > 0 {
-				if err := recordMemoryTxInTx(ctx, tx, "", id, domain.SyncOpUpsert, "", 0); err != nil {
-					return err
-				}
 				total += n
 			}
 		}
@@ -119,24 +116,13 @@ func (s *Service) UndoMemory(ctx context.Context, id int64) (string, error) {
 			if _, err := tx.ExecContext(ctx, `UPDATE memories SET active = 0 WHERE id = ?`, id); err != nil {
 				return err
 			}
-			if err := recordMemoryTxInTx(ctx, tx, "", id, domain.SyncOpUpsert, "", 0); err != nil {
-				return err
-			}
 			if _, err := tx.ExecContext(ctx, `UPDATE memories SET active = 1, superseded_by = NULL WHERE superseded_by = ?`, id); err != nil {
 				return err
-			}
-			for _, cid := range children {
-				if err := recordMemoryTxInTx(ctx, tx, "", cid, domain.SyncOpUpsert, "", 0); err != nil {
-					return err
-				}
 			}
 			msg = fmt.Sprintf("UNDONE OVERWRITE: deactivated #%d and restored %v", id, children)
 			return nil
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE memories SET active = 1, superseded_by = NULL WHERE id = ?`, id); err != nil {
-			return err
-		}
-		if err := recordMemoryTxInTx(ctx, tx, "", id, domain.SyncOpUpsert, "", 0); err != nil {
 			return err
 		}
 		msg = fmt.Sprintf("RESTORED: memory #%d is active again", id)
@@ -201,10 +187,8 @@ func (s *Service) UpdateMemoryFull(ctx context.Context, id int64, rawScope, cate
 		pin = boolToInt(*pinned)
 	}
 	if err := s.withTx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `UPDATE memories SET scope = ?, account = ?, category = ?, sub_category = ?, content = ?, pinned = ? WHERE id = ?`, scope, acc, cat, sub, txt, pin, id); err != nil {
-			return err
-		}
-		return recordMemoryTxInTx(ctx, tx, "", id, domain.SyncOpUpsert, "", 0)
+		_, err := tx.ExecContext(ctx, `UPDATE memories SET scope = ?, account = ?, category = ?, sub_category = ?, content = ?, pinned = ? WHERE id = ?`, scope, acc, cat, sub, txt, pin, id)
+		return err
 	}); err != nil {
 		return err
 	}
@@ -241,10 +225,8 @@ func (s *Service) UpdateMemoryAccount(ctx context.Context, id int64, rawAccount 
 		acc = s.CurrentAccount(ctx)
 	}
 	if err := s.withTx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `UPDATE memories SET account = ? WHERE id = ?`, acc, id); err != nil {
-			return err
-		}
-		return recordMemoryTxInTx(ctx, tx, "", id, domain.SyncOpUpsert, "", 0)
+		_, err := tx.ExecContext(ctx, `UPDATE memories SET account = ? WHERE id = ?`, acc, id)
+		return err
 	}); err != nil {
 		return err
 	}
@@ -263,10 +245,8 @@ func (s *Service) UpdateMemoryTags(ctx context.Context, id int64, rawTags string
 	})
 	tags := domain.NormalizeTags(scope, parts)
 	if err := s.withTx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `UPDATE memories SET tags = ? WHERE id = ?`, strings.Join(tags, " "), id); err != nil {
-			return err
-		}
-		return recordMemoryTxInTx(ctx, tx, "", id, domain.SyncOpUpsert, "", 0)
+		_, err := tx.ExecContext(ctx, `UPDATE memories SET tags = ? WHERE id = ?`, strings.Join(tags, " "), id)
+		return err
 	}); err != nil {
 		return err
 	}
@@ -314,37 +294,9 @@ func (s *Service) PurgeTombstones(ctx context.Context, scopeFilter string) (int6
 						merged = append(merged, it)
 					}
 				}
-				resP, perr := tx.ExecContext(ctx, `UPDATE memories SET replaces_text = ? WHERE id = ?`, strings.Join(merged, "\n"), pid)
-				if perr != nil {
+				if _, perr := tx.ExecContext(ctx, `UPDATE memories SET replaces_text = ? WHERE id = ?`, strings.Join(merged, "\n"), pid); perr != nil {
 					return perr
 				}
-				if pn, _ := resP.RowsAffected(); pn > 0 {
-					if err := recordMemoryTxInTx(ctx, tx, "", pid, domain.SyncOpUpsert, "", 0); err != nil {
-						return err
-					}
-				}
-			}
-		}
-
-		purgeRows, err := tx.QueryContext(ctx, `
-			SELECT id FROM memories
-			WHERE active = 0 AND (? = '' OR scope = ?)
-			  AND (? = 1 OR scope != 'personal' OR account = ?)
-			ORDER BY id ASC`, sc, sc, boolToInt(isAdmin), curAcc)
-		if err != nil {
-			return err
-		}
-		var purgeIDs []int64
-		for purgeRows.Next() {
-			var pid int64
-			if purgeRows.Scan(&pid) == nil {
-				purgeIDs = append(purgeIDs, pid)
-			}
-		}
-		_ = purgeRows.Close()
-		for _, pid := range purgeIDs {
-			if err := recordMemoryTxInTx(ctx, tx, "", pid, domain.SyncOpPurge, "", 0); err != nil {
-				return err
 			}
 		}
 
@@ -442,9 +394,6 @@ func (s *Service) RecalibrateConfidence(ctx context.Context, scopeFilter string)
 				return err
 			}
 			if n, _ := res.RowsAffected(); n > 0 {
-				if err := recordMemoryTxInTx(ctx, tx, "", id, domain.SyncOpUpsert, "", 0); err != nil {
-					return err
-				}
 				updated++
 			}
 		}

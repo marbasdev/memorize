@@ -2,7 +2,6 @@ package localdaemon
 
 import (
 	"context"
-	"io"
 	"log"
 	"net"
 	"os"
@@ -344,19 +343,6 @@ func ServeInlineStdio(version, dbPath, modelsDir string, withDashboard bool, das
 	return 0
 }
 
-// ServeInlineSync executes the passive NDJSON SSH sync stream directly against SQLite when daemon delegation is disabled.
-func ServeInlineSync(ctx context.Context, dbPath, modelsDir string, r io.Reader, w io.Writer) error {
-	if !domain.IsMemorySyncEnabled() {
-		return domain.ErrMemorySyncDisabled
-	}
-	b, err := openRuntime(dbPath, modelsDir, false)
-	if err != nil {
-		return err
-	}
-	defer b.close()
-	return memory.ServeSyncStream(domain.WithAdminBypass(ctx), b.mem, r, w)
-}
-
 // Hooks returns the cli.RuntimeHooks implementation backed by localdaemon.
 func Hooks(version string) cli.RuntimeHooks {
 	return cli.RuntimeHooks{
@@ -367,7 +353,6 @@ func Hooks(version string) cli.RuntimeHooks {
 		ServeInlineStdio: func(dbPath, modelsDir string, withDashboard bool, dashAddr string) int {
 			return ServeInlineStdio(version, dbPath, modelsDir, withDashboard, dashAddr)
 		},
-		RunInlineHook:   RunInlineHook,
-		ServeInlineSync: ServeInlineSync,
+		RunInlineHook: RunInlineHook,
 	}
 }
