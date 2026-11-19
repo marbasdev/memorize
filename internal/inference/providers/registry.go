@@ -12,7 +12,6 @@ import (
 	"memorize/internal/domain"
 )
 
-// GGUFRuntimeProbe carries local managed llama-server readiness without importing localmodel.
 type GGUFRuntimeProbe struct {
 	Supported        bool
 	ServerRunning    bool
@@ -22,7 +21,6 @@ type GGUFRuntimeProbe struct {
 	DownloadTarget   string
 }
 
-// DriverBuildInput supplies configuration and optional local GGUF wake callbacks to a provider driver.
 type DriverBuildInput struct {
 	Config        map[string]string
 	ModelOverride string
@@ -33,8 +31,6 @@ type DriverBuildInput struct {
 	EnsureGGUF    func(context.Context) error
 }
 
-// ProviderDriver encapsulates cache-key derivation, evaluator construction,
-// startup initialization, and readiness probing for a single inference provider.
 type ProviderDriver struct {
 	ID             string
 	CacheKey       func(in DriverBuildInput) string
@@ -48,7 +44,6 @@ var (
 	drivers   = make(map[string]ProviderDriver)
 )
 
-// RegisterDriver registers or replaces an inference provider driver under its canonical ID.
 func RegisterDriver(drv ProviderDriver) {
 	id := domain.NormalizeProviderID(drv.ID)
 	if id == "" {
@@ -60,7 +55,6 @@ func RegisterDriver(drv ProviderDriver) {
 	driversMu.Unlock()
 }
 
-// LookupDriver resolves the registered ProviderDriver for a canonical provider ID or alias.
 func LookupDriver(provider string) (ProviderDriver, bool) {
 	id := domain.NormalizeProviderID(provider)
 	if id == "" {
@@ -72,7 +66,6 @@ func LookupDriver(provider string) (ProviderDriver, bool) {
 	return drv, ok
 }
 
-// StartupEvaluator instantiates the initial startup Evaluator for rawProv using registered drivers.
 func StartupEvaluator(rawProv string, in DriverBuildInput) domain.Evaluator {
 	if drv, ok := LookupDriver(rawProv); ok && drv.Startup != nil {
 		return drv.Startup(rawProv, in)
@@ -83,7 +76,6 @@ func StartupEvaluator(rawProv string, in DriverBuildInput) domain.Evaluator {
 
 var setupProbeClient = &http.Client{Timeout: 200 * time.Millisecond}
 
-// ProbeHTTPAlive performs a quick HTTP GET health check and reports true on any non-5xx response.
 func ProbeHTTPAlive(ctx context.Context, rawURL string) bool {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {

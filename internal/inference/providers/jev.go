@@ -12,8 +12,6 @@ import (
 	"time"
 )
 
-// httpClient sets a generous safety ceiling while letting caller ctx deadlines
-// (e.g. lifecycle hooks vs MCP tool calls) govern per-request timeouts.
 var httpClient = &http.Client{Timeout: 30 * time.Second}
 
 const (
@@ -137,10 +135,6 @@ func NewJevAdapterConfig(endpoint, apiKey string, modelOpt ...string) *BatchEval
 		model:    m,
 	}
 	return NewBatchEvaluator(prefix+m, &decisionEvaluator{tr: raw}, chunkSize, 6)
-}
-
-func NewLocalLayaAdapter() *BatchEvaluator {
-	return NewLocalLayaAdapterConfig("", "")
 }
 
 func NewLocalLayaAdapterConfig(endpoint, apiKey string) *BatchEvaluator {

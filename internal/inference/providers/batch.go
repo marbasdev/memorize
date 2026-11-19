@@ -19,8 +19,6 @@ func envInt(key string, fallback int) int {
 	return fallback
 }
 
-// BatchEvaluator wraps any Evaluator to perform 100% exhaustive evaluation
-// across arbitrarily many active memories via bounded parallel chunks.
 type BatchEvaluator struct {
 	name        string
 	base        domain.Evaluator
@@ -39,17 +37,14 @@ func NewBatchEvaluator(name string, base domain.Evaluator, defaultBatch, default
 
 func (b *BatchEvaluator) Name() string { return b.name }
 
-// SupportsTask reports the true per-task capabilities of the underlying base evaluator.
 func (b *BatchEvaluator) SupportsTask(task domain.EvalTask) bool {
 	return domain.EvaluatorSupportsTask(b.base, task)
 }
 
-// InputTokenLimit exposes the wrapped evaluator's verified runtime context limit when known.
 func (b *BatchEvaluator) InputTokenLimit(ctx context.Context) int {
 	return domain.EvaluatorInputTokenLimit(ctx, b.base)
 }
 
-// RuleBatchSize returns the maximum number of rules sent in one evaluation request.
 func (b *BatchEvaluator) RuleBatchSize() int {
 	return b.batchSize
 }
@@ -251,7 +246,6 @@ func (b *BatchEvaluator) SuggestConsolidations(ctx context.Context, scope string
 	if len(facts) <= maxPlanBatch {
 		return p.SuggestConsolidations(ctx, scope, facts)
 	}
-	// Group by category first so related memories stay together within chunks <= maxPlanBatch.
 	byCat := make(map[string][]domain.Fact)
 	var catOrder []string
 	for _, f := range facts {

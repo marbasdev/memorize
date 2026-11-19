@@ -167,8 +167,10 @@ func (s *Service) clearSessionDelivered(ctx context.Context, sessionID string) {
 	if s == nil || sessionID == "" {
 		return
 	}
+	now := time.Now()
 	s.mu.Lock()
 	s.sent[sessionID] = make(map[int64]bool)
+	s.touchSentLocked(sessionID, now)
 	s.mu.Unlock()
 	if s.db != nil {
 		_, _ = s.db.ExecContext(ctx, `DELETE FROM session_sent WHERE session_id = ?`, sessionID)
@@ -238,8 +240,6 @@ func (s *Service) shouldRefreshInitialCheckpoint(ctx context.Context, sessionID,
 	return !ckptTime.Before(sentTime.Add(-2 * time.Second))
 }
 
-// InspectCompactionForHook detects or consumes session compaction state for both start and turn hooks.
-// On compaction, it returns compacted=true along with an optional compacted summary snippet for relevance scoring.
 func (s *Service) InspectCompactionForHook(ctx context.Context, sessionID, transcriptPath, source string, isStart bool) (compacted bool, summary string) {
 	sessionID = domain.ScopedSessionID(ctx, sessionID)
 	if s == nil || s.db == nil || sessionID == "" {

@@ -18,7 +18,6 @@ import (
 	"memorize/internal/infra/config"
 )
 
-// ErrDaemonAuthRequired indicates that a running memorize team server requires Bearer authentication.
 var ErrDaemonAuthRequired = errors.New("daemon authentication required")
 
 var (
@@ -27,7 +26,6 @@ var (
 	daemonHookHTTP  = &http.Client{}
 )
 
-// ExplicitDaemonOverride returns any explicitly provided or env-configured daemon listen address.
 func ExplicitDaemonOverride(explicit string) string {
 	for _, v := range []string{explicit, os.Getenv("MEMORY_DAEMON_ADDR"), os.Getenv("MEMORY_DASHBOARD_ADDR")} {
 		if s := strings.TrimSpace(v); s != "" {
@@ -37,15 +35,6 @@ func ExplicitDaemonOverride(explicit string) string {
 	return ""
 }
 
-// ResolveDaemonAddr resolves the explicit override or default daemon address.
-func ResolveDaemonAddr(explicit string) string {
-	if ov := ExplicitDaemonOverride(explicit); ov != "" {
-		return ov
-	}
-	return domain.DefaultDaemonAddr
-}
-
-// ResolveDaemonTargetAddr resolves the target address and whether an explicit override was set.
 func ResolveDaemonTargetAddr(explicit, dbPath string) (string, bool) {
 	if ov := ExplicitDaemonOverride(explicit); ov != "" {
 		return ov, true
@@ -54,13 +43,11 @@ func ResolveDaemonTargetAddr(explicit, dbPath string) (string, bool) {
 	return net.JoinHostPort(domain.DefaultDaemonHost, strconv.Itoa(cfg.DaemonPort)), false
 }
 
-// ResolveDaemonAddrForDB resolves the target daemon listen address from explicit override or persisted port config.
 func ResolveDaemonAddrForDB(explicit, dbPath string) string {
 	addr, _ := ResolveDaemonTargetAddr(explicit, dbPath)
 	return addr
 }
 
-// SameDBPath reports whether two database paths match (treating empty paths as wildcard compatible).
 func SameDBPath(a, b string) bool {
 	if a == "" || b == "" {
 		return true
@@ -76,12 +63,10 @@ func buildEndpointURL(addrOrURL, path string) string {
 	return s + path
 }
 
-// QueryDaemonStatus fetches live runtime status from the daemon at addr.
 func QueryDaemonStatus(addr string) (*DaemonStatus, error) {
 	return QueryDaemonStatusWithAuth(addr, "")
 }
 
-// QueryDaemonStatusWithAuth fetches live runtime status from a local daemon or remote team server.
 func QueryDaemonStatusWithAuth(addrOrURL, bearerToken string) (*DaemonStatus, error) {
 	req, err := http.NewRequest(http.MethodGet, buildEndpointURL(addrOrURL, "/api/daemon/status"), nil)
 	if err != nil {
@@ -112,8 +97,6 @@ func QueryDaemonStatusWithAuth(addrOrURL, bearerToken string) (*DaemonStatus, er
 	return &st, nil
 }
 
-// ProbeLiveDaemonState checks candidate daemon addresses for a live instance serving dbPath,
-// also reporting when an authenticated memorize team server is already occupying the target address/DB.
 func ProbeLiveDaemonState(explicitAddr, dbPath string) (*DaemonStatus, string, bool, bool) {
 	seen := make(map[string]bool)
 	var candidates []string
@@ -163,13 +146,11 @@ func ProbeLiveDaemonState(explicitAddr, dbPath string) (*DaemonStatus, string, b
 	return nil, "", false, false
 }
 
-// DiscoverLiveDaemonStatus probes candidate daemon addresses and returns the running instance matching dbPath.
 func DiscoverLiveDaemonStatus(explicitAddr, dbPath string) (*DaemonStatus, string, bool) {
 	st, cand, ok, _ := ProbeLiveDaemonState(explicitAddr, dbPath)
 	return st, cand, ok
 }
 
-// ProbeDashboardMetaAlive checks whether a local dashboard server responds on /api/dashboard/meta.
 func ProbeDashboardMetaAlive(addr string) bool {
 	client := &http.Client{Timeout: 300 * time.Millisecond}
 	resp, err := client.Get("http://" + addr + "/api/dashboard/meta")
@@ -180,7 +161,6 @@ func ProbeDashboardMetaAlive(addr string) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// RemoteDashboardBinModTime retrieves the binary modification timestamp reported by a local dashboard server.
 func RemoteDashboardBinModTime(addr string) (int64, bool) {
 	client := &http.Client{Timeout: 350 * time.Millisecond}
 	resp, err := client.Get("http://" + addr + "/api/dashboard/meta")
@@ -200,7 +180,6 @@ func RemoteDashboardBinModTime(addr string) (int64, bool) {
 	return meta.BinMtime, true
 }
 
-// RequestDashboardYield asks an existing local dashboard listener on addr to close gracefully.
 func RequestDashboardYield(addr string) bool {
 	client := &http.Client{Timeout: 500 * time.Millisecond}
 	req, err := http.NewRequest(http.MethodPost, "http://"+addr+"/api/dashboard/yield", bytes.NewReader([]byte(`{}`)))
@@ -216,7 +195,6 @@ func RequestDashboardYield(addr string) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// PostDaemonStop sends a stop signal to the daemon listening at addr.
 func PostDaemonStop(addr string) {
 	req, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/api/daemon/stop", bytes.NewReader([]byte(`{}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -234,7 +212,6 @@ func PostDaemonRestart(addr string) {
 	}
 }
 
-// PostDaemonPortApply sends a port update request to the running daemon on addr.
 func PostDaemonPortApply(addr string, req PortApplyRequest) (PortApplyResponse, error) {
 	var out PortApplyResponse
 	body, err := json.Marshal(req)
@@ -266,7 +243,6 @@ func PostDaemonPortApply(addr string, req PortApplyRequest) (PortApplyResponse, 
 	return out, nil
 }
 
-// WaitDaemonPortHealthy polls expectedAddr and daemon state until the restarted daemon serves dbPath cleanly.
 func WaitDaemonPortHealthy(expectedAddr, excludeOldAddr, dbPath string, timeout time.Duration) (*DaemonStatus, bool) {
 	deadline := time.Now().Add(timeout)
 	exp := strings.TrimPrefix(strings.TrimPrefix(strings.TrimRight(expectedAddr, "/"), "http://"), "https://")
@@ -287,13 +263,11 @@ func WaitDaemonPortHealthy(expectedAddr, excludeOldAddr, dbPath string, timeout 
 	return nil, false
 }
 
-// PostDaemonHook delivers a lifecycle hook execution RPC to addr.
 func PostDaemonHook(ctx context.Context, addr, mode string, rawStdin []byte, cwd, account string, timeoutMs int64) (string, int, bool) {
 	out, code, err := PostDaemonHookWithAuth(ctx, addr, "", mode, rawStdin, cwd, account, timeoutMs, nil)
 	return out, code, err == nil
 }
 
-// PostDaemonHookWithAuth delivers a lifecycle hook execution RPC with optional Bearer token and Thin Client context.
 func PostDaemonHookWithAuth(ctx context.Context, addrOrURL, bearerToken, mode string, rawStdin []byte, cwd, account string, timeoutMs int64, clientCtx *domain.ClientHookContext) (string, int, error) {
 	payload := DaemonHookRequest{
 		Mode:      mode,
@@ -330,12 +304,6 @@ func PostDaemonHookWithAuth(ctx context.Context, addrOrURL, bearerToken, mode st
 	return out.Output, out.ExitCode, nil
 }
 
-// PostDaemonMCP forwards one JSON-RPC request from the stdio bridge to /api/daemon/mcp.
-func PostDaemonMCP(addr, sid, cwd, account string, roots []string, payload []byte) ([]byte, bool, error) {
-	return PostDaemonMCPWithAuth(addr, "", sid, cwd, account, roots, nil, payload)
-}
-
-// PostDaemonMCPWithAuth forwards one JSON-RPC request with optional Bearer token and client scope hints.
 func PostDaemonMCPWithAuth(addrOrURL, bearerToken, sid, cwd, account string, roots []string, scopeHints map[string]string, payload []byte) ([]byte, bool, error) {
 	req, err := http.NewRequest(http.MethodPost, buildEndpointURL(addrOrURL, "/api/daemon/mcp"), bytes.NewReader(payload))
 	if err != nil {
@@ -369,7 +337,7 @@ func PostDaemonMCPWithAuth(addrOrURL, bearerToken, sid, cwd, account string, roo
 	if resp.StatusCode == http.StatusNoContent {
 		return nil, true, nil
 	}
-	respBytes, err := io.ReadAll(resp.Body)
+	respBytes, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if resp.StatusCode == http.StatusOK && err == nil {
 		return respBytes, false, nil
 	}

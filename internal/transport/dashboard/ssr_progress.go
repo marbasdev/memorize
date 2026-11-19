@@ -120,7 +120,6 @@ func buildProgressView(ctx context.Context, d Deps, lang string, q url.Values) (
 	if kindF == "all" {
 		kindF = ""
 	}
-	// Progress tab is project-centric (no session filter).
 	trkF := strings.TrimSpace(q.Get("track"))
 	catF := strings.TrimSpace(q.Get("category"))
 	doneWin := domain.NormalizeDoneWindow(q.Get("done_window"))

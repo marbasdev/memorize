@@ -15,7 +15,6 @@ type hookToolCall struct {
 }
 
 type hookPayload struct {
-	// Claude / generic snake_case fields
 	SessionID      string         `json:"session_id"`
 	ConversationID string         `json:"conversation_id"`
 	Account        string         `json:"account"`
@@ -35,7 +34,6 @@ type hookPayload struct {
 	ToolInput      map[string]any `json:"tool_input"`
 	Input          map[string]any `json:"input"`
 
-	// Antigravity camelCase protojson fields
 	ConversationIDCamel string        `json:"conversationId"`
 	TranscriptPathCamel string        `json:"transcriptPath"`
 	WorkspacePaths      []string      `json:"workspacePaths"`
@@ -45,15 +43,11 @@ type hookPayload struct {
 	TerminationReason   string        `json:"terminationReason"`
 	ContinuationActive  bool          `json:"continuationActive"`
 
-	// Claude Code Stop loop guard
 	StopHookActive bool `json:"stop_hook_active"`
 
-	// Remote Thin Client resolved context/diffs
 	ClientCtx *domain.ClientHookContext `json:"client_ctx,omitempty"`
 }
 
-// NormalizedHookEvent is the canonical internal representation of any coding-agent
-// or VCS hook payload after wire-format decoding.
 type NormalizedHookEvent struct {
 	Mode       string
 	Agent      string
@@ -134,7 +128,6 @@ func (ev NormalizedHookEvent) isStopContinuation() bool {
 	return ev.Raw.ContinuationActive || ev.Raw.StopHookActive
 }
 
-// AgentCodec formats hook verdicts and injected memory context for a specific coding agent or VCS host.
 type AgentCodec interface {
 	FormatEmpty() (string, int, error)
 	FormatContext(body string) (string, int, error)
@@ -148,7 +141,6 @@ var (
 	agentCodecs   = map[string]AgentCodec{}
 )
 
-// RegisterAgentCodec registers or overrides the wire-response codec for agentID.
 func RegisterAgentCodec(agentID string, codec AgentCodec) {
 	id := strings.ToLower(strings.TrimSpace(agentID))
 	if id == "" || codec == nil {

@@ -319,7 +319,6 @@ func (s *Service) runStopHook(ctx context.Context, ev NormalizedHookEvent, codec
 
 	curRetry := s.mem.MaxTurnStopRetry(ctx, sid)
 	if ev.isStopContinuation() && curRetry <= 0 {
-		// Continuation not initiated by memorize's Stop block: honor external bypass cleanly.
 		s.clearPendingTurnEdits(persistCtx, sid)
 		return codec.FormatEmpty()
 	}
@@ -374,7 +373,6 @@ func (s *Service) verifyStopDiffSections(
 	if evalEvent.TurnPrompt == "" && scopeTurnInput != "" {
 		evalEvent.TurnPrompt = scopeTurnInput
 	}
-	// Ensure evaluateGuardrailPlanChunks can load ActiveTurnInput when explicitSID was derived.
 	if evalEvent.SessionID == "" {
 		evalEvent.SessionID = sid
 	}

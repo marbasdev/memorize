@@ -21,7 +21,6 @@ const (
 	internalSecretAuthSession = "auth_session_secret"
 )
 
-// HashAuthToken returns the lowercase SHA-256 hex digest of a plaintext bearer token.
 func HashAuthToken(plain string) string {
 	sum := sha256.Sum256([]byte(strings.TrimSpace(plain)))
 	return hex.EncodeToString(sum[:])
@@ -46,7 +45,6 @@ func activeAdminCountTx(ctx context.Context, tx *sql.Tx, excludeAccount string) 
 	return cnt, err
 }
 
-// CreateUser registers a new team server account and returns a once-shown plaintext token.
 func CreateUser(ctx context.Context, db *sql.DB, rawAccount, rawRole string) (domain.UserTokenIssue, error) {
 	if db == nil {
 		return domain.UserTokenIssue{}, sql.ErrConnDone
@@ -76,7 +74,6 @@ func CreateUser(ctx context.Context, db *sql.DB, rawAccount, rawRole string) (do
 	return domain.UserTokenIssue{User: u, PlainToken: plain}, nil
 }
 
-// GetUser fetches one registered user account without exposing its token hash.
 func GetUser(ctx context.Context, db *sql.DB, rawAccount string) (domain.UserAccount, error) {
 	acc := domain.NormalizeAccount(rawAccount)
 	var u domain.UserAccount
@@ -95,7 +92,6 @@ func GetUser(ctx context.Context, db *sql.DB, rawAccount string) (domain.UserAcc
 	return u, nil
 }
 
-// ListUsers returns all team server user accounts sorted with admins first, then by account name.
 func ListUsers(ctx context.Context, db *sql.DB) ([]domain.UserAccount, error) {
 	if db == nil {
 		return nil, sql.ErrConnDone
@@ -122,7 +118,6 @@ func ListUsers(ctx context.Context, db *sql.DB) ([]domain.UserAccount, error) {
 	return out, rows.Err()
 }
 
-// RotateUserToken replaces the user's token hash with a newly generated token and returns the plaintext once.
 func RotateUserToken(ctx context.Context, db *sql.DB, rawAccount string) (domain.UserTokenIssue, error) {
 	if db == nil {
 		return domain.UserTokenIssue{}, sql.ErrConnDone
@@ -146,7 +141,6 @@ func RotateUserToken(ctx context.Context, db *sql.DB, rawAccount string) (domain
 	return domain.UserTokenIssue{User: u, PlainToken: plain}, nil
 }
 
-// SetUserActive enables or disables a user account while preventing lockout of the last active admin.
 func SetUserActive(ctx context.Context, db *sql.DB, rawAccount string, active bool) error {
 	if db == nil {
 		return sql.ErrConnDone
@@ -175,7 +169,6 @@ func SetUserActive(ctx context.Context, db *sql.DB, rawAccount string, active bo
 	})
 }
 
-// UpdateUserRole promotes or demotes a user while preserving at least one active admin.
 func UpdateUserRole(ctx context.Context, db *sql.DB, rawAccount, rawRole string) error {
 	if db == nil {
 		return sql.ErrConnDone
@@ -201,7 +194,6 @@ func UpdateUserRole(ctx context.Context, db *sql.DB, rawAccount, rawRole string)
 	})
 }
 
-// DeleteUser removes a user account while preventing deletion of the last active admin.
 func DeleteUser(ctx context.Context, db *sql.DB, rawAccount string) error {
 	if db == nil {
 		return sql.ErrConnDone
@@ -226,7 +218,6 @@ func DeleteUser(ctx context.Context, db *sql.DB, rawAccount string) error {
 	})
 }
 
-// EnsureBootstrapAdmin creates an initial admin user if the users table is empty.
 func EnsureBootstrapAdmin(ctx context.Context, db *sql.DB, rawAccount, explicitToken string) (domain.UserTokenIssue, bool, error) {
 	if db == nil {
 		return domain.UserTokenIssue{}, false, sql.ErrConnDone
@@ -268,7 +259,6 @@ func EnsureBootstrapAdmin(ctx context.Context, db *sql.DB, rawAccount, explicitT
 	return domain.UserTokenIssue{User: u, PlainToken: plain}, true, nil
 }
 
-// AuthenticateToken validates a bearer token against active users and updates last_seen_at.
 func AuthenticateToken(ctx context.Context, db *sql.DB, plainToken string) (domain.AuthPrincipal, bool) {
 	if db == nil {
 		return domain.AuthPrincipal{}, false
@@ -347,8 +337,6 @@ func signCookiePayload(secret []byte, body string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// IssueSessionCookieValue builds an HMAC-signed cookie value bound to account + current token hint.
-// Rotating or revoking the user's token immediately invalidates any previously issued browser cookies.
 func IssueSessionCookieValue(ctx context.Context, db *sql.DB, p domain.AuthPrincipal, ttl time.Duration) (string, error) {
 	secret, err := ensureSessionSecret(ctx, db)
 	if err != nil {
@@ -362,7 +350,6 @@ func IssueSessionCookieValue(ctx context.Context, db *sql.DB, p domain.AuthPrinc
 	return body + "|" + signCookiePayload(secret, body), nil
 }
 
-// AuthenticateSessionCookie validates cookieVal's HMAC signature, expiration, and live user token state.
 func AuthenticateSessionCookie(ctx context.Context, db *sql.DB, cookieVal string) (domain.AuthPrincipal, bool) {
 	if db == nil || strings.TrimSpace(cookieVal) == "" {
 		return domain.AuthPrincipal{}, false

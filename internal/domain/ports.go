@@ -15,13 +15,11 @@ const (
 	DefaultGGUFPort   = 18088
 )
 
-// PortConfig holds persistent port preferences for the unified daemon/console and built-in GGUF server.
 type PortConfig struct {
 	DaemonPort int `json:"daemon_port"`
 	GGUFPort   int `json:"gguf_port"`
 }
 
-// DaemonRuntimeState publishes the live daemon listener address and metadata for local auto-discovery.
 type DaemonRuntimeState struct {
 	PID        int    `json:"pid"`
 	ListenAddr string `json:"listen_addr"`
@@ -33,7 +31,6 @@ type DaemonRuntimeState struct {
 	StartedAt  string `json:"started_at,omitempty"`
 }
 
-// DefaultPortConfig returns the default daemon and GGUF ports.
 func DefaultPortConfig() PortConfig {
 	return PortConfig{
 		DaemonPort: DefaultDaemonPort,
@@ -41,7 +38,6 @@ func DefaultPortConfig() PortConfig {
 	}
 }
 
-// ValidatePortConfig verifies valid distinct daemon and GGUF TCP port numbers.
 func ValidatePortConfig(daemonPort, ggufPort int) error {
 	if daemonPort < 1 || daemonPort > 65535 {
 		return fmt.Errorf("invalid daemon port %d (must be 1..65535)", daemonPort)
@@ -55,7 +51,6 @@ func ValidatePortConfig(daemonPort, ggufPort int) error {
 	return nil
 }
 
-// ParseHostPort extracts host and port from an address or URL string.
 func ParseHostPort(addr string) (string, int, bool) {
 	raw := strings.TrimSpace(addr)
 	if raw == "" {
@@ -81,7 +76,6 @@ func ParseHostPort(addr string) (string, int, bool) {
 	return h, p, true
 }
 
-// IsLoopbackEndpoint reports whether rawURL resolves to 127.0.0.1, localhost, or ::1.
 func IsLoopbackEndpoint(rawURL string) bool {
 	s := strings.TrimSpace(rawURL)
 	if s == "" {

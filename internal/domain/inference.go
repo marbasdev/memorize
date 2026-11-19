@@ -8,7 +8,6 @@ import (
 	"time"
 )
 
-// ElapsedMsSince returns milliseconds elapsed since start, floored at zero.
 func ElapsedMsSince(start time.Time) float64 {
 	if start.IsZero() {
 		return 0
@@ -20,9 +19,6 @@ func ElapsedMsSince(start time.Time) float64 {
 	return ms
 }
 
-// DefaultProvider returns the platform-appropriate default inference provider:
-// "local" (OpenAI-compatible Custom Local URL) on Windows where built-in GGUF llama-server
-// is disabled, and "gguf" on macOS/Linux.
 func DefaultProvider() string {
 	if runtime.GOOS == "windows" {
 		return "local"
@@ -30,7 +26,6 @@ func DefaultProvider() string {
 	return "gguf"
 }
 
-// Evaluator is the core inference contract for relevance scoring, mutation gatekeeping, and plan verification.
 type Evaluator interface {
 	Name() string
 	ScoreRelevance(ctx context.Context, currentTask string, facts []Fact) ([]ScoredFact, error)
@@ -38,50 +33,39 @@ type Evaluator interface {
 	VerifyPlan(ctx context.Context, proposedPlan string, rules []Fact) ([]PlanViolation, error)
 }
 
-// BatchMutationEvaluator evaluates multiple candidate facts against existing memories in a single pass.
 type BatchMutationEvaluator interface {
 	EvaluateMutations(ctx context.Context, scope string, candidates []string, existing []Fact) ([]MutationDecision, error)
 }
 
-// Consolidator synthesizes multiple fragmented memories into one dense rule statement.
 type Consolidator interface {
 	ConsolidateFacts(ctx context.Context, scope, category string, facts []Fact) (string, error)
 }
 
-// ConsolidationPlanner proposes cohesive groups of overlapping or redundant memories.
 type ConsolidationPlanner interface {
 	SuggestConsolidations(ctx context.Context, scope string, facts []Fact) ([]ConsolidationProposal, error)
 }
 
-// ConfidenceCalibrator assesses individual semantic certainty [0.0, 1.0] for active memories.
 type ConfidenceCalibrator interface {
 	CalibrateConfidence(ctx context.Context, scope string, facts []Fact) (map[int64]float64, error)
 }
 
-// ProgressCommitCategorizer maps Git commits into concise progress entries during Progress Sync.
 type ProgressCommitCategorizer interface {
 	SummarizeCommitProgress(ctx context.Context, scope, lang string, commits []GitCommitBrief) ([]CommitProgressItem, error)
 }
 
-// ProgressMilestoneSummarizer synthesizes multiple pending Git commits into high-level work milestones
-// instead of producing 1-to-1 per-commit log lines.
 type ProgressMilestoneSummarizer interface {
 	SummarizeCommitMilestones(ctx context.Context, scope, lang string, commits []GitCommitBrief) ([]GitMilestoneSummary, error)
 }
 
-// TaxonomyPlanner proposes non-destructive category/sub_category reorganizations.
 type TaxonomyPlanner interface {
 	SuggestTaxonomyRebalance(ctx context.Context, scope string, facts []Fact) ([]TaxonomyRebalanceItem, error)
 }
 
-// RulePackPlanner drafts concise single-line Team Rule Pack entries with surgical placement
-// ordering and identifies local memories that duplicate or partially overlap active Team Rules.
 type RulePackPlanner interface {
 	DraftRulePackProposal(ctx context.Context, scope, rawRuleText, sourceCat, sourceSub string, outline []RuleOutlineEntry) (RulePlacementProposal, error)
 	FindRedundantLocalMemories(ctx context.Context, scope string, teamRules []TeamRule, localFacts []Fact) ([]RuleDuplicateSuggestion, error)
 }
 
-// EvalTask identifies each discrete workload in memorize for specialized model routing.
 type EvalTask string
 
 const (
@@ -94,7 +78,6 @@ const (
 	TaskTaxonomy    EvalTask = "taxonomy"
 )
 
-// EvalTaskSpec describes a routable memorize feature and whether it requires text generation.
 type EvalTaskSpec struct {
 	Task               EvalTask `json:"task"`
 	RequiresGenerative bool     `json:"requires_generative"`
@@ -112,14 +95,12 @@ var evalTaskCatalog = []EvalTaskSpec{
 	{Task: TaskTaxonomy, RequiresGenerative: true, ProviderKey: "task_taxonomy_provider", ModelKey: "task_taxonomy_model"},
 }
 
-// AllEvalTasks returns the canonical ordered list of routable feature specs.
 func AllEvalTasks() []EvalTaskSpec {
 	out := make([]EvalTaskSpec, len(evalTaskCatalog))
 	copy(out, evalTaskCatalog)
 	return out
 }
 
-// FindEvalTask looks up a task specification by ID.
 func FindEvalTask(task EvalTask) (EvalTaskSpec, bool) {
 	for _, spec := range evalTaskCatalog {
 		if spec.Task == task {
@@ -129,7 +110,6 @@ func FindEvalTask(task EvalTask) (EvalTaskSpec, bool) {
 	return EvalTaskSpec{}, false
 }
 
-// IsDecisionOnlySpec reports whether (provider, model) is a non-generative decision engine.
 func IsDecisionOnlySpec(provider, model string) bool {
 	p := NormalizeProviderID(provider)
 	m := strings.ToLower(strings.TrimSpace(model))
@@ -164,23 +144,18 @@ func ValidateTaskRoute(task EvalTask, provider, model string) error {
 	return nil
 }
 
-// TaskCapableEvaluator lets wrapper evaluators expose underlying per-task capabilities.
 type TaskCapableEvaluator interface {
 	SupportsTask(task EvalTask) bool
 }
 
-// ContextWindowProvider exposes an evaluator's verified runtime input token limit when known.
-// A non-positive return value indicates the runtime limit is unknown so callers use a conservative budget.
 type ContextWindowProvider interface {
 	InputTokenLimit(ctx context.Context) int
 }
 
-// RuleBatchSizeProvider exposes the maximum number of rules sent in a single verification call.
 type RuleBatchSizeProvider interface {
 	RuleBatchSize() int
 }
 
-// EvaluatorInputTokenLimit returns ev's verified runtime input token limit, or 0 if unknown.
 func EvaluatorInputTokenLimit(ctx context.Context, ev Evaluator) int {
 	if p, ok := ev.(ContextWindowProvider); ok && ev != nil {
 		return p.InputTokenLimit(ctx)
@@ -188,7 +163,6 @@ func EvaluatorInputTokenLimit(ctx context.Context, ev Evaluator) int {
 	return 0
 }
 
-// EvaluatorRuleBatchSize returns ev's per-call rule chunk size, or 0 if unspecified.
 func EvaluatorRuleBatchSize(ev Evaluator) int {
 	if p, ok := ev.(RuleBatchSizeProvider); ok && ev != nil {
 		return p.RuleBatchSize()
@@ -196,7 +170,6 @@ func EvaluatorRuleBatchSize(ev Evaluator) int {
 	return 0
 }
 
-// EvaluatorSupportsTask reports whether ev can genuinely execute the given EvalTask.
 func EvaluatorSupportsTask(ev Evaluator, task EvalTask) bool {
 	if ev == nil {
 		return false
@@ -225,7 +198,6 @@ func EvaluatorSupportsTask(ev Evaluator, task EvalTask) bool {
 	}
 }
 
-// EvalTaskStats summarizes observed runtime latency and outcomes for one EvalTask.
 type EvalTaskStats struct {
 	Task           EvalTask `json:"task"`
 	Calls          int      `json:"calls"`
@@ -243,7 +215,6 @@ type EvalTaskStats struct {
 	LastAt         string   `json:"last_at,omitempty"`
 }
 
-// EvalEngineStats summarizes observed runtime latency and outcomes for one provider:model engine.
 type EvalEngineStats struct {
 	Engine         string  `json:"engine"`
 	Calls          int     `json:"calls"`
@@ -257,7 +228,6 @@ type EvalEngineStats struct {
 	AvgItems       float64 `json:"avg_items"`
 }
 
-// EvalTelemetrySample represents a single recent evaluator invocation for sparkline visualization.
 type EvalTelemetrySample struct {
 	ID        int64    `json:"id"`
 	Task      EvalTask `json:"task"`
@@ -268,7 +238,6 @@ type EvalTelemetrySample struct {
 	CreatedAt string   `json:"created_at"`
 }
 
-// EvalTelemetryReport aggregates measured per-task and per-engine inference performance across a lookback window.
 type EvalTelemetryReport struct {
 	WindowHours    int                      `json:"window_hours"`
 	TotalCalls     int                      `json:"total_calls"`

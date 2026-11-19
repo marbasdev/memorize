@@ -31,8 +31,6 @@ type tokenLogprob struct {
 	Logprob float64
 }
 
-// semanticConfidence computes debiased probability [0, 1] from semantic decision tokens,
-// filtering out zero-entropy JSON punctuation and schema keys.
 func semanticConfidence(tokens []tokenLogprob, avgFallback float64) float64 {
 	var sumLP float64
 	var cntLP int
@@ -46,7 +44,6 @@ func semanticConfidence(tokens []tokenLogprob, avgFallback float64) float64 {
 		return math.Min(1.0, math.Max(0.0, math.Exp(sumLP/float64(cntLP))))
 	}
 	if avgFallback < 0 {
-		// Debias JSON structural token inflation (~60-70% zero-entropy punctuation/keys)
 		return math.Min(1.0, math.Max(0.0, math.Exp(avgFallback*2.5)))
 	}
 	return 0.85
@@ -76,7 +73,6 @@ func (d schemaDialect) obj(props map[string]any, req []string) map[string]any {
 	return m
 }
 
-// jsonSchemaTransport abstracts structured JSON generation across cloud (Gemini) and local (GGUF/OpenAI) engines.
 type jsonSchemaTransport interface {
 	Name() string
 	Dialect() schemaDialect
@@ -93,7 +89,6 @@ func newSchemaEvaluator(tr jsonSchemaTransport) domain.Evaluator {
 
 func (e *schemaEvaluator) Name() string { return e.tr.Name() }
 
-// InputTokenLimit forwards the underlying transport's verified context limit when available.
 func (e *schemaEvaluator) InputTokenLimit(ctx context.Context) int {
 	if p, ok := e.tr.(domain.ContextWindowProvider); ok {
 		return p.InputTokenLimit(ctx)
@@ -105,8 +100,6 @@ func (e *schemaEvaluator) ScoreRelevance(ctx context.Context, currentTask string
 	if len(facts) == 0 {
 		return nil, nil
 	}
-	// Prefix-stable ordering: static instructions + sorted Facts first, dynamic Current Task last
-	// so local llama-server (KV cache) and cloud Context Caching reuse the entire Facts prefix.
 	var sb strings.Builder
 	sb.WriteString(`Evaluate each fact individually against the Current Task and return per-item "score" and "confidence":
 - score (0.0 to 5.0): 4.5-5.0 critical constraint directly governing the task; 3.5-4.4 directly applicable rule/context; 2.0-3.4 indirect background; 0.0-1.9 unrelated.
@@ -583,8 +576,6 @@ Changes:
 	return parsed.Items, nil
 }
 
-// SummarizeCommitMilestones synthesizes multiple pending Git commits into 1-4 high-level work milestones
-// rather than echoing every commit line individually.
 func (e *schemaEvaluator) SummarizeCommitMilestones(ctx context.Context, scope, lang string, commits []domain.GitCommitBrief) ([]domain.GitMilestoneSummary, error) {
 	if len(commits) == 0 {
 		return nil, nil

@@ -16,14 +16,11 @@ import (
 	"memorize/internal/modules/progress"
 )
 
-// RulePack provides read-only declarative Team Rule Pack loading and sub-ms hook sync for guardrails.
 type RulePack interface {
 	LoadExtraFacts(ctx context.Context, scopeA, scopeB, category string) ([]domain.Fact, error)
 	SyncTurnNotice(ctx context.Context, rawScope, repoDir string) (string, error)
 }
 
-// Service owns PreToolUse/pre-commit guardrails, explicit plan verification,
-// audit logging, cold-start onboarding prompts, and guardrail log retention.
 type Service struct {
 	mem                *memory.Service
 	prog               *progress.Service
@@ -35,7 +32,6 @@ type Service struct {
 	lastRetentionSweep atomic.Int64
 }
 
-// New constructs a guardrail Service layered over mem and an optional prog tracker.
 func New(mem *memory.Service, prog *progress.Service) *Service {
 	var (
 		db     *sql.DB
@@ -62,24 +58,20 @@ func New(mem *memory.Service, prog *progress.Service) *Service {
 	}
 }
 
-// Memory returns the underlying memory Service.
 func (s *Service) Memory() *memory.Service {
 	return s.mem
 }
 
-// Progress returns the linked progress Service if attached.
 func (s *Service) Progress() *progress.Service {
 	return s.prog
 }
 
-// AttachRulePack wires declarative Team Rule Pack enforcement and hook sync into the guardrail service.
 func (s *Service) AttachRulePack(rp RulePack) {
 	if s != nil {
 		s.rp = rp
 	}
 }
 
-// CheckEngineReadiness reports whether the active inference engine is ready to serve verification and hook calls.
 func (s *Service) CheckEngineReadiness(ctx context.Context) (bool, string) {
 	if s == nil || s.router == nil {
 		return false, "no inference engine configured"
@@ -93,7 +85,6 @@ func (s *Service) notifyGuardrailsChange() {
 	}
 }
 
-// filterEnforceableRules excludes soft unpinned preferences, which act as tie-breaker hints rather than blocking constraints.
 func filterEnforceableRules(loaded []domain.Fact) []domain.Fact {
 	var rules []domain.Fact
 	for _, r := range loaded {
@@ -163,9 +154,6 @@ func formatViolationRef(f domain.Fact) string {
 	return fmt.Sprintf("#%d", f.ID)
 }
 
-// EvaluatePlanViolations loads all active enforceable rules (excluding soft unpinned preferences),
-// evaluates whether proposedPlan violates them (chunked safely when exceeding model context),
-// filters by minProb, and sorts descending by probability.
 func (s *Service) EvaluatePlanViolations(ctx context.Context, proposedPlan, rawScope string, minProb float64) (string, int, []domain.PlanViolation, error) {
 	scA, _ := memory.ScopesFor(rawScope, true)
 	res := s.evaluateGuardrailPlanChunks(ctx, func(budget int) []diffPlanChunk {
@@ -177,7 +165,6 @@ func (s *Service) EvaluatePlanViolations(ctx context.Context, proposedPlan, rawS
 	return scA, res.RuleCount, res.Blocking, nil
 }
 
-// VerifyPlan evaluates proposedPlan against active scope+global enforceable rules and records an audit log entry.
 func (s *Service) VerifyPlan(ctx context.Context, proposedPlan string, scope ...string) (string, error) {
 	rawScope := ""
 	if len(scope) > 0 {

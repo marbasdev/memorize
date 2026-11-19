@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"memorize/internal/domain"
 	"memorize/internal/inference/router"
@@ -24,7 +25,6 @@ import (
 // so relevance/guardrail evaluators never hit ID map collisions across Team Rules and Local Memories.
 const TeamFactIDOffset int64 = 1_000_000_000
 
-// SyncStatus summarizes the state of the local SQLite Team Rule mirror against the repository document.
 type SyncStatus struct {
 	Scope            string
 	RepoRoot         string
@@ -38,11 +38,17 @@ type SyncStatus struct {
 	LastError        string
 }
 
+const (
+	maxRulePackCacheEntries = 256
+	rulePackCacheIdleTTL    = 6 * time.Hour
+)
+
 type cachedRulePack struct {
 	rules            []domain.TeamRule
 	hash             string
 	remoteBranch     string
 	diskBaselineHash string
+	lastAccess       time.Time
 }
 
 type ruleStateRow struct {
@@ -54,7 +60,6 @@ type ruleStateRow struct {
 	updatedAt      string
 }
 
-// Service owns declarative Team Rule Pack parsing, in-memory rule caching, conflict states, and isolated Git publishing.
 type Service struct {
 	mem     *memory.Service
 	db      *sql.DB
@@ -65,7 +70,6 @@ type Service struct {
 	cache   map[string]*cachedRulePack
 }
 
-// New constructs a rulepack Service attached to mem.
 func New(mem *memory.Service) *Service {
 	var (
 		db     *sql.DB
@@ -92,7 +96,6 @@ func New(mem *memory.Service) *Service {
 	}
 }
 
-// Memory returns the attached memory Service.
 func (s *Service) Memory() *memory.Service {
 	return s.mem
 }
@@ -103,7 +106,6 @@ func (s *Service) notifyChange() {
 	}
 }
 
-// AuthorName resolves the default Added Git handle (@username -> git github.user/user.name -> account fallback).
 func (s *Service) AuthorName(ctx context.Context, explicitAuthor, repoDir string) string {
 	if a := domain.NormalizeGitHandle(explicitAuthor); a != "" {
 		return a
@@ -127,7 +129,6 @@ func (s *Service) AuthorName(ctx context.Context, explicitAuthor, repoDir string
 	return domain.NormalizeGitHandle(domain.DefaultAccount())
 }
 
-// SetAuthorName persists a user-preferred Git handle (@username) in SQLite config.
 func (s *Service) SetAuthorName(ctx context.Context, author string) error {
 	if s == nil || s.mem == nil {
 		return nil
@@ -136,6 +137,22 @@ func (s *Service) SetAuthorName(ctx context.Context, author string) error {
 		return err
 	}
 	return s.mem.SaveConfig(ctx, map[string]string{config.CfgRulePackAuthor: domain.NormalizeGitHandle(author)})
+}
+
+func (s *Service) SyncMeta(ctx context.Context, rawScope string) (fileHash, lastError string) {
+	sc := domain.NormalizeScope(rawScope)
+	fh, _, _, le := s.getSyncRecord(ctx, sc)
+	return fh, le
+}
+
+func (s *Service) resolveScopeRepoPath(ctx context.Context, rawScope, explicitRepo string) string {
+	if s != nil && s.mem != nil {
+		return s.mem.ResolveScopeRepoPath(ctx, rawScope, explicitRepo)
+	}
+	if domain.IsServerMode(ctx) {
+		return ""
+	}
+	return git.ResolveRoot(explicitRepo)
 }
 
 func (s *Service) getSyncRecord(ctx context.Context, sc string) (fileHash, remoteBranch, diskBaselineHash, lastErr string) {
@@ -199,6 +216,7 @@ func rulePackCacheKey(ctx context.Context, sc string) string {
 
 func (s *Service) setCache(ctx context.Context, sc string, entry *cachedRulePack) {
 	key := rulePackCacheKey(ctx, sc)
+	now := time.Now()
 	s.cacheMu.Lock()
 	if s.cache == nil {
 		s.cache = make(map[string]*cachedRulePack)
@@ -206,21 +224,52 @@ func (s *Service) setCache(ctx context.Context, sc string, entry *cachedRulePack
 	if entry == nil {
 		delete(s.cache, key)
 	} else {
+		entry.lastAccess = now
 		s.cache[key] = entry
+		if len(s.cache) > maxRulePackCacheEntries {
+			for k, e := range s.cache {
+				if k != key && (e == nil || now.Sub(e.lastAccess) > rulePackCacheIdleTTL) {
+					delete(s.cache, k)
+				}
+			}
+			for len(s.cache) > maxRulePackCacheEntries {
+				oldestKey := ""
+				var oldestTime time.Time
+				for k, e := range s.cache {
+					if k == key {
+						continue
+					}
+					var ts time.Time
+					if e != nil {
+						ts = e.lastAccess
+					}
+					if oldestKey == "" || ts.Before(oldestTime) {
+						oldestKey = k
+						oldestTime = ts
+					}
+				}
+				if oldestKey == "" {
+					break
+				}
+				delete(s.cache, oldestKey)
+			}
+		}
 	}
 	s.cacheMu.Unlock()
 }
 
 func (s *Service) getCache(ctx context.Context, sc string) *cachedRulePack {
 	key := rulePackCacheKey(ctx, sc)
-	s.cacheMu.RLock()
+	now := time.Now()
+	s.cacheMu.Lock()
 	entry := s.cache[key]
-	s.cacheMu.RUnlock()
+	if entry != nil {
+		entry.lastAccess = now
+	}
+	s.cacheMu.Unlock()
 	return entry
 }
 
-// ensureLoaded populates the in-memory rulepack cache lazily from disk (or remote ref on a feature branch)
-// after daemon restarts or before SyncTurn has run.
 func (s *Service) ensureLoaded(ctx context.Context, sc string) *cachedRulePack {
 	if entry := s.getCache(ctx, sc); entry != nil {
 		return entry
@@ -228,7 +277,7 @@ func (s *Service) ensureLoaded(ctx context.Context, sc string) *cachedRulePack {
 	if s == nil || s.db == nil || !strings.HasPrefix(sc, "project:") {
 		return nil
 	}
-	root := sqlite.ResolveScopeRepoPath(ctx, s.db, sc, "")
+	root := s.resolveScopeRepoPath(ctx, sc, "")
 	if root == "" {
 		return nil
 	}
@@ -273,8 +322,6 @@ func (s *Service) ensureLoaded(ctx context.Context, sc string) *cachedRulePack {
 	return entry
 }
 
-// IngestTeamRuleDoc caches a client-provided .memorize/TEAM_RULES.md snapshot for rawScope
-// so remote team server verification honors local repository team rules without host disk access.
 func (s *Service) IngestTeamRuleDoc(ctx context.Context, rawScope, rawMarkdown string) error {
 	if s == nil {
 		return nil
@@ -347,7 +394,6 @@ func (s *Service) applyMirrorTx(ctx context.Context, sc string, doc *Document, h
 					invalidatedIDs = append(invalidatedIDs, virtualRuleID(key))
 				}
 			}
-			// Remove stale rule states (overrides/conflicts) for rules deleted from TEAM_RULES.md.
 			if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM team_rule_states WHERE scope = ? AND rule_key NOT IN (%s)`, strings.Join(ph, ",")), kept...); err != nil {
 				return err
 			}
@@ -386,13 +432,10 @@ func (s *Service) applyMirrorTx(ctx context.Context, sc string, doc *Document, h
 	return changedKeys, nil
 }
 
-// SyncTurn checks the workspace TEAM_RULES.md SHA-256 without invoking Git network commands
-// and updates the read-only local SQLite mirror only when the hash actually changed (<1ms steady state).
 func (s *Service) SyncTurn(ctx context.Context, rawScope, repoDir string) (SyncStatus, error) {
 	return s.syncInternal(ctx, rawScope, repoDir, false)
 }
 
-// SyncExplicit triggers a mirror sync and optionally fetches origin/<targetBranch> non-destructively first.
 func (s *Service) SyncExplicit(ctx context.Context, rawScope, repoDir string, fetchRemote bool) (SyncStatus, error) {
 	return s.syncInternal(ctx, rawScope, repoDir, fetchRemote)
 }
@@ -411,7 +454,7 @@ func (s *Service) syncInternal(ctx context.Context, rawScope, repoDir string, fe
 	if s == nil || s.db == nil || !strings.HasPrefix(sc, "project:") {
 		return status, nil
 	}
-	root := sqlite.ResolveScopeRepoPath(ctx, s.db, sc, repoDir)
+	root := s.resolveScopeRepoPath(ctx, sc, repoDir)
 	status.RepoRoot = root
 	if root == "" {
 		return status, nil
@@ -430,15 +473,12 @@ func (s *Service) syncInternal(ctx context.Context, rawScope, repoDir string, fe
 			remoteHash := CanonicalHash(remoteBytes)
 			curBranch := git.CurrentBranch(ctx, root)
 			diskHash := currentDiskHash(root)
-			// If checked out on targetBranch and only TEAM_RULES.md is behind origin, update mirror cleanly.
 			if curBranch == targetBranch &&
 				!git.IsPathDirty(ctx, root, domain.RulePackRelPath) &&
 				git.AheadCount(ctx, root, curBranch, remoteRef) == 0 &&
 				diskHash != remoteHash {
 				return s.mirrorBytes(ctx, sc, root, targetBranch, remoteBytes, remoteHash, targetBranch, diskHash, "remote")
 			}
-			// On a feature branch whose working copy still matches branch HEAD (no custom branch edits to TEAM_RULES.md),
-			// adopt origin/<targetBranch>'s newer rules into the local read-only mirror without dirtying the feature tree.
 			if curBranch != targetBranch {
 				headBytes, hasHeadBlob, _ := git.ReadBlobAtRef(ctx, root, "HEAD", domain.RulePackRelPath)
 				headHash := ""
@@ -457,7 +497,6 @@ func (s *Service) syncInternal(ctx context.Context, rawScope, repoDir string, fe
 		if !os.IsNotExist(err) {
 			return status, err
 		}
-		// Preserve mirror when an isolated remote push succeeded from a branch whose disk tree still lacks TEAM_RULES.md.
 		if remoteBranch != "" && diskBaselineHash == "" && git.RemoteRefFastSHA(root, "origin", remoteBranch) != "" {
 			if st, ok := s.cachedSyncStatus(ctx, sc, status, "remote", remoteBranch, ""); ok {
 				return st, nil
@@ -479,8 +518,6 @@ func (s *Service) syncInternal(ctx context.Context, rawScope, repoDir string, fe
 		st, _ := s.cachedSyncStatus(ctx, sc, status, "cached", "", diskHash)
 		return st, nil
 	}
-	// While still on a feature branch where remote targetBranch rules were mirrored without dirtying disk,
-	// keep the newer remote mirror until the developer merges/edits the disk file.
 	if remoteBranch != "" && diskHash == diskBaselineHash && git.RemoteRefFastSHA(root, "origin", remoteBranch) != "" {
 		if st, ok := s.cachedSyncStatus(ctx, sc, status, "remote", remoteBranch, storedHash); ok {
 			return st, nil
@@ -538,7 +575,6 @@ func (s *Service) mirrorBytes(ctx context.Context, sc, root, targetBranch string
 	return status, nil
 }
 
-// MirrorSnapshot updates the SQLite read-only mirror directly from committed bytes (used right after isolated push).
 func (s *Service) MirrorSnapshot(ctx context.Context, rawScope, repoRoot, remoteBranch string, raw []byte) (SyncStatus, error) {
 	sc := domain.NormalizeScope(rawScope)
 	diskBase := ""
@@ -578,7 +614,6 @@ func (s *Service) loadRuleStates(ctx context.Context, sc string) (map[string]rul
 	return states, rows.Err()
 }
 
-// ListTeamRules returns all read-only Team Rules from the in-memory cache (lazy-loaded from disk/remote) with their resolution status.
 func (s *Service) ListTeamRules(ctx context.Context, rawScope string) ([]domain.TeamRule, error) {
 	if s == nil || s.db == nil {
 		return nil, nil
@@ -631,7 +666,6 @@ func (s *Service) ListTeamRuleFacts(ctx context.Context, rawScope string) ([]dom
 	return out, nil
 }
 
-// CountPendingConflicts counts unresolved team-vs-local rule conflicts in rawScope.
 func (s *Service) CountPendingConflicts(ctx context.Context, rawScope string) int {
 	if s == nil || s.db == nil {
 		return 0
@@ -644,7 +678,6 @@ func (s *Service) CountPendingConflicts(ctx context.Context, rawScope string) in
 	return cnt
 }
 
-// UpsertConflictState records or clears a team-vs-local policy conflict or local_override state.
 func (s *Service) UpsertConflictState(ctx context.Context, rawScope, ruleKey, status string, localMemID int64, localContent, reason, overrideNote string) error {
 	if s == nil || s.db == nil {
 		return nil
@@ -677,7 +710,6 @@ func (s *Service) UpsertConflictState(ctx context.Context, rawScope, ruleKey, st
 	return err
 }
 
-// ListConflicts returns unresolved (or all if includeResolved) conflicts between Team Rules and Local Memories.
 func (s *Service) ListConflicts(ctx context.Context, rawScope string, includeResolved bool) ([]domain.RulePackConflict, error) {
 	if s == nil || s.db == nil {
 		return nil, nil
@@ -730,8 +762,6 @@ func (s *Service) invalidateRuleSession(ctx context.Context, _ string, key strin
 	s.mem.InvalidateSessionIDs(ctx, virtualRuleID(key))
 }
 
-// ResolveConflict resolves a pending team-vs-local conflict using "adopt_team", "local_override", or "mark_updated".
-// When adopting the Team Rule, any linked Local Memory is softly archived (active=0, recoverable via undo).
 func (s *Service) ResolveConflict(ctx context.Context, rawScope, ruleKey, decision, note string) error {
 	if s == nil || s.db == nil {
 		return nil

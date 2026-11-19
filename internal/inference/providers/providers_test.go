@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,7 +24,6 @@ func TestGeminiZeroThinkingFallbackAndThoughtPartFiltering(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		if n == 1 {
-			// Verify thinkingBudget=0 is sent first for Gemini 3.x models, then simulate an endpoint rejecting thinkingConfig
 			tc, ok := reqBody.GenerationConfig["thinkingConfig"].(map[string]any)
 			if !ok || tc["thinkingBudget"] != float64(0) {
 				t.Errorf("expected first call to include thinkingBudget=0, got %+v", reqBody.GenerationConfig["thinkingConfig"])
@@ -35,7 +35,6 @@ func TestGeminiZeroThinkingFallbackAndThoughtPartFiltering(t *testing.T) {
 		if _, has := reqBody.GenerationConfig["thinkingConfig"]; has {
 			t.Errorf("expected fallback call to omit thinkingConfig, got %+v", reqBody.GenerationConfig["thinkingConfig"])
 		}
-		// Include a thought part before the JSON payload part to ensure non-thought part selection works
 		_, _ = w.Write([]byte(`{
 			"candidates": [{
 				"content": {
@@ -64,7 +63,6 @@ func TestGeminiZeroThinkingFallbackAndThoughtPartFiltering(t *testing.T) {
 		t.Fatalf("expected 2 HTTP calls (initial + fallback), got %d", calls.Load())
 	}
 
-	// Subsequent call must reuse cached noThinking state in 1 request
 	_, err = ev.ScoreRelevance(context.Background(), "auth middleware", []domain.Fact{
 		{ID: 1, Scope: "project:app", Category: "security", Content: "Use HttpOnly cookies"},
 	})
@@ -110,7 +108,6 @@ func TestGeminiQuota429ModelFallbackAndCooldown(t *testing.T) {
 		t.Fatalf("expected 1 primary hit + 1 fallback hit, got primary=%d fallback=%d", primaryHits.Load(), fallbackHits.Load())
 	}
 
-	// Second call within cooldown window must skip the exhausted primary model and hit fallback directly.
 	_, err = ev.ScoreRelevance(context.Background(), "daemon test", []domain.Fact{
 		{ID: 1, Scope: "project:app", Category: "architecture", Content: "Single local daemon"},
 	})
@@ -131,7 +128,6 @@ func TestOpenAICompatibleAdapterAndMinimalJSONObjectFallback(t *testing.T) {
 		n := calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		if n == 1 {
-			// Simulate an OpenAI-compatible server rejecting strict json_schema mode with 400
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte(`{"error":{"message":"json_schema not supported"}}`))
 			return
@@ -322,13 +318,11 @@ func TestGeminiDecisionsAdapterWireProtocolAndTasks(t *testing.T) {
 	defer srv.Close()
 
 	t.Setenv("GEMINI_API_BASE", srv.URL)
-	// Calling NewGeminiAdapterConfig with gemini-decision-1 must auto-select GeminiDecisionsAdapter.
 	ev := NewGeminiAdapterConfig("gem-dec-key", "gemini-decision-1")
 	if ev.Name() != "gemini:gemini-decision-1" {
 		t.Fatalf("expected Name() = gemini:gemini-decision-1, got %q", ev.Name())
 	}
 
-	// Capability check: decision tasks allowed, generative-only tasks rejected cleanly.
 	for _, tk := range []domain.EvalTask{domain.TaskRelevance, domain.TaskMutation, domain.TaskVerify, domain.TaskCalibrate} {
 		if !ev.SupportsTask(tk) {
 			t.Fatalf("expected gemini-decision-1 to support decision task %s", tk)
@@ -375,8 +369,6 @@ func TestGeminiDecisionsAdapterWireProtocolAndTasks(t *testing.T) {
 func TestGeminiDecisionAnswerOrdinalScoreConfidence(t *testing.T) {
 	ptr := func(v float64) *float64 { return &v }
 
-	// Adjacent ordinal mass split between 4 and 5 should reflect contiguous certainty (~0.80)
-	// rather than single-bin argmax (0.51).
 	splitAns := geminiDecisionAnswerWire{
 		ExpectedScore: ptr(4.25),
 		Confidence:    0.5126,
@@ -386,7 +378,6 @@ func TestGeminiDecisionAnswerOrdinalScoreConfidence(t *testing.T) {
 		t.Fatalf("expected ordinal adjacent-bin confidence ~0.8027, got %.4f", splitAns.Confidence)
 	}
 
-	// Uniform / bimodal distributions must remain low-confidence so uncertain matches are filtered.
 	bimodalAns := geminiDecisionAnswerWire{
 		ExpectedScore: ptr(2.5),
 		Confidence:    0.50,
@@ -429,7 +420,6 @@ func TestIsTypesafeCloudURL(t *testing.T) {
 func TestContextWindowProbingForGGUFOpenAIAndGemini(t *testing.T) {
 	ctx := context.Background()
 
-	// 1. GGUF /props n_ctx
 	ggufSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/props" {
 			_, _ = w.Write([]byte(`{"default_generation_settings":{"n_ctx":8192}}`))
@@ -443,7 +433,6 @@ func TestContextWindowProbingForGGUFOpenAIAndGemini(t *testing.T) {
 		t.Fatalf("expected GGUF InputTokenLimit=8192 from /props, got %d", got)
 	}
 
-	// 2. OpenAI-compatible /v1/models max_model_len vs generic Ollama (0 = unknown)
 	vllmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/models" {
 			_, _ = w.Write([]byte(`{"data":[{"id":"qwen3-coder","max_model_len":16384},{"id":"ollama-only"}]}`))
@@ -461,7 +450,6 @@ func TestContextWindowProbingForGGUFOpenAIAndGemini(t *testing.T) {
 		t.Fatalf("expected unknown Ollama context limit to return 0 (no guessing), got %d", got)
 	}
 
-	// 3. Gemini live /v1beta/models/<id> probe + canonical catalog fallback
 	gemSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1beta/models/gemini-custom-test" {
 			_, _ = w.Write([]byte(`{"name":"models/gemini-custom-test","inputTokenLimit":32768}`))
@@ -507,5 +495,277 @@ func TestSchemaEvaluatorSummarizeCommitMilestones(t *testing.T) {
 	})
 	if err != nil || len(got) != 1 || len(got[0].CommitSHAs) != 3 {
 		t.Fatalf("expected 1 synthesized milestone covering 3 SHAs, got %+v (err=%v)", got, err)
+	}
+}
+
+func TestDriverRegistryBuiltinsAndAlias(t *testing.T) {
+	for _, id := range []string{"gguf", "gemini", "jev", "local"} {
+		drv, ok := LookupDriver(id)
+		if !ok || drv.ID != id {
+			t.Fatalf("expected driver %q registered, got ok=%v drv=%+v", id, ok, drv)
+		}
+		if drv.CacheKey == nil || drv.Build == nil || drv.CheckReadiness == nil {
+			t.Fatalf("driver %q missing required hooks", id)
+		}
+	}
+	drv, ok := LookupDriver("flide")
+	if !ok || drv.ID != "jev" {
+		t.Fatalf("expected flide alias to resolve to jev driver, got %+v ok=%v", drv, ok)
+	}
+	if ev := StartupEvaluator("flide", DriverBuildInput{GGUFSupported: true}); ev == nil || !strings.HasPrefix(ev.Name(), "flide:") {
+		t.Fatalf("expected flide: startup evaluator, got %v", ev)
+	}
+}
+
+func TestRegisterCustomDriver(t *testing.T) {
+	RegisterDriver(ProviderDriver{
+		ID:       "custom-test-drv",
+		CacheKey: func(in DriverBuildInput) string { return "custom|" + in.ModelOverride },
+		Build:    func(_ DriverBuildInput) domain.Evaluator { return nil },
+		CheckReadiness: func(_ context.Context, _ DriverBuildInput) (bool, string) {
+			return true, ""
+		},
+	})
+	t.Cleanup(func() {
+		driversMu.Lock()
+		delete(drivers, "custom-test-drv")
+		driversMu.Unlock()
+	})
+	drv, ok := LookupDriver("custom-test-drv")
+	if !ok || drv.CacheKey(DriverBuildInput{ModelOverride: "m1"}) != "custom|m1" {
+		t.Fatalf("unexpected custom driver state: ok=%v drv=%+v", ok, drv)
+	}
+}
+
+func TestDraftRulePackProposalSanitizesAndValidatesAfterIndex(t *testing.T) {
+	var seenPrompt string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		seenPrompt = string(bodyBytes)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"candidates": [{
+				"content": {
+					"parts": [{
+						"text": "{\"category\":\"database\",\"sub_category\":\"SQLite Driver\",\"title\":\"[invariant] Always compile with CGO_ENABLED=0\\nusing modernc.org/sqlite across all OS targets.\",\"after_index\":1}"
+					}]
+				}
+			}]
+		}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv("GEMINI_API_BASE", srv.URL)
+	ev := NewGeminiAdapterConfig("test-key", "gemini-2.5-flash")
+	planner, ok := any(ev).(domain.RulePackPlanner)
+	if !ok {
+		t.Fatalf("expected Gemini BatchEvaluator to implement domain.RulePackPlanner")
+	}
+
+	ctx := domain.WithPresetCategories(context.Background(), `{"database":["sqlite-driver"]}`)
+	outline := []domain.RuleOutlineEntry{
+		{RuleKey: "db-wal-mode", Category: "database", SubCategory: "sqlite-driver", Title: "Enable WAL mode."},
+	}
+	prop, err := planner.DraftRulePackProposal(ctx, "project:app", "CGO 없이 modernc.org/sqlite 사용", "database", "", outline)
+	if err != nil {
+		t.Fatalf("DraftRulePackProposal failed: %v", err)
+	}
+	if !strings.Contains(seenPrompt, "[1] (database/sqlite-driver) Enable WAL mode.") || strings.Contains(seenPrompt, "db-wal-mode") || !strings.Contains(seenPrompt, "CGO 없이") {
+		t.Fatalf("expected indexed prompt without exposed keys, got: %s", seenPrompt)
+	}
+	wantKey := domain.ComputeRuleKey("database", prop.Title)
+	if prop.RuleKey != wantKey || !strings.HasPrefix(prop.RuleKey, "r-") {
+		t.Fatalf("unexpected hashed rule_key %q (want %q)", prop.RuleKey, wantKey)
+	}
+	if prop.AfterKey != "" {
+		t.Fatalf("expected empty after_key when appending to category end, got %q", prop.AfterKey)
+	}
+	if strings.Contains(prop.Title, "`[invariant]`") || strings.Contains(prop.Title, "\n") {
+		t.Fatalf("expected title sanitized to single line without tier prefix, got %q", prop.Title)
+	}
+}
+
+func TestFindRedundantLocalMemoriesFiltersAndShortens(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if n == 1 {
+			longTrimmed := strings.Repeat("한국어고유규칙세부사항", 20) // > 180 runes
+			payload, _ := json.Marshal(map[string]any{
+				"items": []map[string]any{
+					{"local_memory_id": 10, "team_rule_index": 1, "kind": "duplicate", "trimmed_content": "should be ignored", "reason": "팀 룰과 동일"},
+					{"local_memory_id": 11, "team_rule_index": 2, "kind": "partial_overlap", "trimmed_content": longTrimmed, "reason": "로컬 디버그 포트 정보만 고유"},
+					{"local_memory_id": 11, "team_rule_index": 2, "kind": "duplicate", "trimmed_content": "", "reason": "duplicate local id ignored"},
+					{"local_memory_id": 999, "team_rule_index": 1, "kind": "duplicate", "trimmed_content": "", "reason": "unknown local id"},
+					{"local_memory_id": 12, "team_rule_index": 99, "kind": "duplicate", "trimmed_content": "", "reason": "unknown team rule"},
+				},
+			})
+			resp, _ := json.Marshal(map[string]any{
+				"candidates": []map[string]any{
+					{"content": map[string]any{"parts": []map[string]any{{"text": string(payload)}}}},
+				},
+			})
+			_, _ = w.Write(resp)
+			return
+		}
+		_, _ = w.Write([]byte(`{
+			"candidates": [{
+				"content": {
+					"parts": [{
+						"text": "{\"trimmed_content\":\"로컬 디버그 서버는 19090 포트를 사용한다.\"}"
+					}]
+				}
+			}]
+		}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv("GEMINI_API_BASE", srv.URL)
+	ev := NewGeminiAdapterConfig("test-key", "gemini-2.5-flash")
+
+	teamRules := []domain.TeamRule{
+		{RuleKey: "db-no-cgo", Scope: "project:app", Category: "database", Pinned: true, Title: "Never enable CGO.", Why: "Static binaries.", How: "CGO_ENABLED=0"},
+		{RuleKey: "api-auth", Scope: "project:app", Category: "api", Title: "Require bearer auth.", Why: "Security.", How: "Middleware"},
+	}
+	localFacts := []domain.Fact{
+		{ID: 10, Scope: "project:app", Category: "database", Content: "CGO를 끄고 빌드한다."},
+		{ID: 11, Scope: "project:app", Category: "api", Content: "Bearer auth를 쓰고 로컬 디버그 서버는 19090 포트를 사용한다."},
+		{ID: 12, Scope: "project:app", Category: "testing", Content: "Unit tests run in parallel."},
+	}
+
+	out, err := ev.FindRedundantLocalMemories(context.Background(), "project:app", teamRules, localFacts)
+	if err != nil {
+		t.Fatalf("FindRedundantLocalMemories failed: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("expected exactly 2 validated suggestions, got %+v", out)
+	}
+	if out[0].LocalMemoryID != 10 || out[0].Kind != "duplicate" || out[0].TrimmedContent != "" {
+		t.Fatalf("unexpected first suggestion: %+v", out[0])
+	}
+	if out[1].LocalMemoryID != 11 || out[1].Kind != "partial_overlap" || out[1].TrimmedContent != "로컬 디버그 서버는 19090 포트를 사용한다." {
+		t.Fatalf("expected shortened partial_overlap trimmed_content, got: %+v", out[1])
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("expected 1 main call + 1 shortening retry = 2 calls, got %d", calls.Load())
+	}
+}
+
+func TestLocalLayaMicroBatching(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"answers":{"perm":{"noul":0.9,"confidence":0.9},"inv":{"noul":0.2,"confidence":0.9},"cat":{"choice":"architecture","confidence":0.9},"r_6":{"choice":"OVERWRITE","confidence":0.92}}}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv("LOCAL_MODEL_URL", srv.URL)
+	adapter := NewLocalLayaAdapterConfig("", "")
+
+	var facts []domain.Fact
+	for i := int64(1); i <= 7; i++ {
+		facts = append(facts, domain.Fact{ID: i, Scope: "project:demo", Category: "architecture", Content: "rule"})
+	}
+	dec, err := adapter.EvaluateMutation(context.Background(), "project:demo", "new rule", facts)
+	if err != nil {
+		t.Fatalf("LocalLayaAdapter error: %v", err)
+	}
+	if dec.Action != "OVERWRITE" || dec.ConflictFactID != 6 {
+		t.Fatalf("expected OVERWRITE of fact 6 across batches, got %+v", dec)
+	}
+}
+
+func TestGeminiHeaderAndLogprobsDebiasing(t *testing.T) {
+	mode := "tokens"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.RawQuery != "" {
+			t.Errorf("API key leaked into URL query string: %q", r.URL.RawQuery)
+		}
+		if got := r.Header.Get("x-goog-api-key"); got != "header-only-test-key" {
+			t.Errorf("expected x-goog-api-key header, got %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if mode == "tokens" {
+			_, _ = w.Write([]byte(`{
+				"candidates": [{
+					"content": {"parts": [{"text": "{\"items\":[{\"id\":1,\"score\":2.5}]}"}]},
+					"avgLogprobs": -0.05,
+					"logprobsResult": {
+						"chosenCandidates": [
+							{"token": "{", "logProbability": -0.0001},
+							{"token": "\"items\"", "logProbability": -0.0001},
+							{"token": ":[{", "logProbability": -0.0001},
+							{"token": "\"id\"", "logProbability": -0.0001},
+							{"token": "1", "logProbability": -0.65},
+							{"token": "\"score\"", "logProbability": -0.0001},
+							{"token": "2.5", "logProbability": -0.65},
+							{"token": "}]}", "logProbability": -0.0001}
+						]
+					}
+				}]
+			}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{
+			"candidates": [{
+				"content": {"parts": [{"text": "{\"items\":[{\"id\":1,\"score\":4.1}]}"}]},
+				"avgLogprobs": -0.12
+			}]
+		}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv("GEMINI_API_BASE", srv.URL)
+	t.Setenv("GEMINI_API_KEY", "header-only-test-key")
+	gem := NewGeminiAdapter()
+
+	facts := []domain.Fact{{ID: 1, Scope: "project:gem", Category: "security", Content: "Use HttpOnly cookies"}}
+	scored1, err := gem.ScoreRelevance(context.Background(), "login handler", facts)
+	if err != nil || len(scored1) != 1 {
+		t.Fatalf("Gemini ScoreRelevance (tokens) failed: %v (%+v)", err, scored1)
+	}
+	if scored1[0].Confidence >= 0.60 {
+		t.Fatalf("expected debiased semantic token confidence < 0.60, got %.3f", scored1[0].Confidence)
+	}
+
+	mode = "avg_fallback"
+	scored2, err := gem.ScoreRelevance(context.Background(), "login handler", facts)
+	if err != nil || len(scored2) != 1 {
+		t.Fatalf("Gemini ScoreRelevance (fallback) failed: %v (%+v)", err, scored2)
+	}
+	if scored2[0].Confidence >= 0.80 || scored2[0].Confidence < 0.70 {
+		t.Fatalf("expected debiased avgLogprobs fallback in [0.70, 0.80), got %.3f", scored2[0].Confidence)
+	}
+}
+
+func TestGeminiSchemaDialectAndLogprobsFallbackRetry(t *testing.T) {
+	var calls int32
+	mockGemini := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&calls, 1)
+		bodyBytes, _ := io.ReadAll(r.Body)
+		bodyStr := string(bodyBytes)
+		if !strings.Contains(bodyStr, `"OBJECT"`) || strings.Contains(bodyStr, `"additionalProperties"`) {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"invalid OpenAPI responseSchema dialect"}}`))
+			return
+		}
+		if n == 1 && strings.Contains(bodyStr, `"responseLogprobs":true`) {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"responseLogprobs is not supported for gemini-3.8-flash"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"{\"items\":[{\"id\":7,\"score\":4.7}]}"}]}}]}`))
+	}))
+	defer mockGemini.Close()
+
+	t.Setenv("GEMINI_API_BASE", mockGemini.URL)
+	gemEval := NewGeminiAdapterConfig("test-key", "gemini-3.8-flash")
+	scored, err := gemEval.ScoreRelevance(context.Background(), "테스트 작업", []domain.Fact{{ID: 7, Scope: "project:sec", Category: "security", Content: "보안 규칙"}})
+	if err != nil {
+		t.Fatalf("GeminiAdapter fallback ScoreRelevance failed: %v", err)
+	}
+	if atomic.LoadInt32(&calls) != 2 || len(scored) != 1 || scored[0].Score != 4.7 || scored[0].Confidence < 0.85 {
+		t.Fatalf("expected 2 calls (400 retry -> 200) and score 4.7, got calls=%d scored=%+v", atomic.LoadInt32(&calls), scored)
 	}
 }

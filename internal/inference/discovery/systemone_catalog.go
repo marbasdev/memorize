@@ -27,7 +27,6 @@ func sameURLHost(rawA, rawB string) bool {
 	return strings.EqualFold(uA.Hostname(), uB.Hostname())
 }
 
-// SystemOneModelOption describes a System 1 model exposed by Flide / Jev.
 type SystemOneModelOption struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -36,7 +35,6 @@ type SystemOneModelOption struct {
 	Desc        string `json:"desc"`
 }
 
-// SystemOneDiscovery captures health and served model metadata from a System 1 endpoint.
 type SystemOneDiscovery struct {
 	Source       string                 `json:"source"`        // "live_flide", "typesafe_cloud", "builtin"
 	Engine       string                 `json:"engine"`        // "flide" or "jev"
@@ -48,12 +46,10 @@ type SystemOneDiscovery struct {
 	APIError     string                 `json:"api_error,omitempty"`
 }
 
-// DefaultFlideModels returns the built-in local Flide System 1 model presets.
 func DefaultFlideModels() []SystemOneModelOption {
 	return defaultFlideModels()
 }
 
-// DefaultTypesafeJevModels returns the built-in TypeSafe Cloud System 1 presets.
 func DefaultTypesafeJevModels() []SystemOneModelOption {
 	return defaultTypesafeJevModels()
 }

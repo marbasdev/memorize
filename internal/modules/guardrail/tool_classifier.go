@@ -107,8 +107,6 @@ func isReadOnlyShellBin(bin string, fields []string) bool {
 	return false
 }
 
-// isReadOnlyShellCommand deterministically checks if a command line consists solely of
-// non-mutating inspection/test/format-check commands without unsafe env overrides or file redirections.
 func isReadOnlyShellCommand(raw string) bool {
 	cmdStr := strings.TrimSpace(raw)
 	if cmdStr == "" {

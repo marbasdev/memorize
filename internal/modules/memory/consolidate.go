@@ -12,7 +12,6 @@ import (
 	"memorize/internal/domain"
 )
 
-// TopActiveScope returns the scope with the highest number of active memories, or "" if none exist.
 func (s *Service) TopActiveScope(ctx context.Context) string {
 	privSQL, privArgs := s.privateScopeSQL(ctx, "", true)
 	var sc string
@@ -25,13 +24,6 @@ func (s *Service) TopActiveScope(ctx context.Context) string {
 	return strings.TrimSpace(sc)
 }
 
-// SuggestConsolidationPlan scans active memories in rawScope using the configured AI evaluator
-// (or a deterministic structural/lexical similarity fallback) and returns validated, disjoint merge proposals.
-func (s *Service) SuggestConsolidationPlan(ctx context.Context, rawScope string) ([]domain.ConsolidationProposal, string, error) {
-	return s.SuggestConsolidationPlanFiltered(ctx, rawScope, "")
-}
-
-// SuggestConsolidationPlanFiltered scans active memories in rawScope matching categoryFilter for consolidation candidates.
 func (s *Service) SuggestConsolidationPlanFiltered(ctx context.Context, rawScope, categoryFilter string) ([]domain.ConsolidationProposal, string, error) {
 	targetScope := domain.NormalizeScope(rawScope)
 	facts, err := s.LoadActiveFacts(ctx, targetScope, targetScope, strings.TrimSpace(categoryFilter))
@@ -251,7 +243,6 @@ func (s *Service) suggestHeuristicConsolidations(ctx context.Context, targetScop
 	return out
 }
 
-// ApplyConsolidationPlan executes multiple approved consolidation groups in rawScope.
 func (s *Service) ApplyConsolidationPlan(ctx context.Context, rawScope string, proposals []domain.ConsolidationProposal) ([]int64, int, error) {
 	if len(proposals) == 0 {
 		return nil, 0, fmt.Errorf("select at least 1 consolidation group to execute")
@@ -292,7 +283,6 @@ func (s *Service) ApplyConsolidationPlan(ctx context.Context, rawScope string, p
 	return newIDs, mergedSources, nil
 }
 
-// ConsolidateMemories merges sourceIDs into a single concise memory entry within MaxConsolidatedRunes.
 func (s *Service) ConsolidateMemories(ctx context.Context, rawScope, category string, sourceIDs []int64, mergedContent string, pinned bool) (int64, error) {
 	mergedContent = strings.TrimSpace(mergedContent)
 	if len(sourceIDs) < 2 || mergedContent == "" {
@@ -412,51 +402,6 @@ func synthesizeFallbackMerge(facts []domain.Fact) string {
 	return strings.Join(parts, "; ")
 }
 
-// SelectConsolidationTargets picks up to count active memories in rawScope matching category and pinned state.
-func (s *Service) SelectConsolidationTargets(ctx context.Context, rawScope, category string, pinned bool, count int) (string, []domain.Fact, error) {
-	if count < 2 {
-		return "", nil, fmt.Errorf("consolidation count must be at least 2")
-	}
-	targetScope := domain.NormalizeScope(rawScope)
-	facts, err := s.LoadActiveFacts(ctx, targetScope, targetScope, "")
-	if err != nil {
-		return "", nil, err
-	}
-
-	var matched []domain.Fact
-	cat := strings.TrimSpace(category)
-	if cat != "" {
-		cat = domain.NormalizeCategoryForScope(targetScope, cat)
-		for _, f := range facts {
-			if f.Category == cat && f.Pinned == pinned {
-				matched = append(matched, f)
-			}
-		}
-	} else {
-		byCat := make(map[string][]domain.Fact)
-		for _, f := range facts {
-			if f.Pinned == pinned {
-				byCat[f.Category] = append(byCat[f.Category], f)
-			}
-		}
-		for c, list := range byCat {
-			if len(list) > len(matched) || (len(list) == len(matched) && c < cat) {
-				cat = c
-				matched = list
-			}
-		}
-	}
-
-	if len(matched) < 2 {
-		return cat, nil, fmt.Errorf("fewer than 2 active memories match the selected criteria")
-	}
-	if len(matched) > count {
-		matched = matched[:count]
-	}
-	return cat, matched, nil
-}
-
-// SynthesizeMergedContent generates a single merged sentence for sourceIDs without mutating SQLite.
 func (s *Service) SynthesizeMergedContent(ctx context.Context, rawScope, category string, sourceIDs []int64) (string, error) {
 	if len(sourceIDs) < 2 {
 		return "", fmt.Errorf("select at least 2 memories")
@@ -500,29 +445,4 @@ func (s *Service) SynthesizeMergedContent(ctx context.Context, rawScope, categor
 		merged = synthesizeFallbackMerge(chunk)
 	}
 	return merged, nil
-}
-
-// ConsolidateByCount merges up to count active memories in the specified scope/category/pinned group.
-func (s *Service) ConsolidateByCount(ctx context.Context, rawScope, category string, pinned bool, count int, customContent string) (int64, []int64, string, error) {
-	targetScope := domain.NormalizeScope(rawScope)
-	cat, matched, err := s.SelectConsolidationTargets(ctx, targetScope, category, pinned, count)
-	if err != nil {
-		return 0, nil, "", err
-	}
-	ids := make([]int64, len(matched))
-	for i, f := range matched {
-		ids[i] = f.ID
-	}
-	merged := strings.TrimSpace(customContent)
-	if merged == "" {
-		merged, err = s.SynthesizeMergedContent(ctx, targetScope, cat, ids)
-		if err != nil {
-			return 0, nil, "", err
-		}
-	}
-	newID, err := s.ConsolidateMemories(ctx, targetScope, cat, ids, merged, pinned)
-	if err != nil {
-		return 0, nil, "", err
-	}
-	return newID, ids, merged, nil
 }

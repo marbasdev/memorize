@@ -5,9 +5,6 @@ import (
 	"strings"
 )
 
-// ProviderSpec defines metadata, config keys, env auto-detection, and
-// capabilities for an inference engine provider. Registering a new provider in
-// providerCatalog propagates it across routing, discovery, and dashboard SSR.
 type ProviderSpec struct {
 	ID                    string
 	Aliases               []string
@@ -67,7 +64,6 @@ var providerCatalog = []ProviderSpec{
 	},
 }
 
-// ProviderCatalog returns a copy of all registered inference provider specifications.
 func ProviderCatalog() []ProviderSpec {
 	out := make([]ProviderSpec, len(providerCatalog))
 	for i, spec := range providerCatalog {
@@ -76,7 +72,6 @@ func ProviderCatalog() []ProviderSpec {
 	return out
 }
 
-// FindProviderSpec returns the ProviderSpec matching a canonical provider ID or alias.
 func FindProviderSpec(provider string) (ProviderSpec, bool) {
 	norm := NormalizeProviderID(provider)
 	if norm == "" {
@@ -109,8 +104,6 @@ func NormalizeProviderID(provider string) string {
 	return p
 }
 
-// ResolveExplicitEnvProvider returns an active provider when MEMORY_PROVIDER is set
-// or when exactly one known provider environment variable group is populated.
 func ResolveExplicitEnvProvider() string {
 	if explicit := NormalizeProviderID(os.Getenv("MEMORY_PROVIDER")); explicit != "" {
 		return explicit
@@ -130,7 +123,6 @@ func ResolveExplicitEnvProvider() string {
 	return ""
 }
 
-// ProviderIDFromEvaluatorName infers the canonical provider ID from an Evaluator.Name() string.
 func ProviderIDFromEvaluatorName(name string) string {
 	low := strings.ToLower(strings.TrimSpace(name))
 	if low == "" {
@@ -146,7 +138,6 @@ func ProviderIDFromEvaluatorName(name string) string {
 	return ""
 }
 
-// ProviderModelFromConfig extracts the configured model string for provider from cfg.
 func ProviderModelFromConfig(cfg map[string]string, provider string) string {
 	spec, ok := FindProviderSpec(provider)
 	if !ok || spec.ModelConfigKey == "" || cfg == nil {

@@ -5,13 +5,11 @@ import (
 	"strings"
 )
 
-// PlaybookURI is the canonical MCP resource URI exposing the embedded curator playbook.
 const PlaybookURI = "memorize://playbook/memory-curator"
 
 //go:embed playbook/SKILL.md
 var PlaybookSkillMD string
 
-// PlaybookBodyMD returns the markdown body of the embedded playbook without YAML frontmatter.
 func PlaybookBodyMD() string {
 	s := strings.TrimSpace(PlaybookSkillMD)
 	if strings.HasPrefix(s, "---") {

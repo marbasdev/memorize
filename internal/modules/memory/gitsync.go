@@ -15,12 +15,68 @@ import (
 	"memorize/internal/infra/sqlite"
 )
 
-// GetSyncedCommit returns the recorded Git commit cursor for rawScope.
 func (s *Service) GetSyncedCommit(ctx context.Context, rawScope string) string {
 	return sqlite.GetSyncedCommit(ctx, s.db, rawScope)
 }
 
-// SetSyncedCommit updates the recorded Git commit cursor for rawScope and clears session sync dedupe state.
+// RememberRepoPath resolves and records the local Git repository root for a project:* scope.
+// In authenticated team server mode, client repository paths are never persisted on the host DB.
+func (s *Service) RememberRepoPath(ctx context.Context, rawScope, repoDir string) {
+	if s == nil || s.db == nil || domain.IsServerMode(ctx) {
+		return
+	}
+	sc := domain.NormalizeScope(rawScope)
+	if !strings.HasPrefix(sc, "project:") {
+		return
+	}
+	if root := git.ResolveRoot(repoDir); root != "" {
+		sqlite.SetStoredRepoPath(ctx, s.db, sc, root)
+	}
+}
+
+// ResolveScopeRepoPath resolves the Git root path for rawScope from explicitRepo, repo_sync, or CWD siblings.
+// In authenticated team server mode, the server never probes host-local filesystem repositories.
+func (s *Service) ResolveScopeRepoPath(ctx context.Context, rawScope, explicitRepo string) string {
+	if s == nil || s.db == nil || domain.IsServerMode(ctx) {
+		return ""
+	}
+	sc := domain.NormalizeScope(rawScope)
+	if !strings.HasPrefix(sc, "project:") {
+		return ""
+	}
+	if r := git.ResolveRoot(explicitRepo); r != "" {
+		sqlite.SetStoredRepoPath(ctx, s.db, sc, r)
+		return r
+	}
+	if stored := sqlite.GetStoredRepoPath(ctx, s.db, sc); stored != "" {
+		if r := git.ResolveRoot(stored); r != "" {
+			return r
+		}
+	}
+	projName := strings.TrimPrefix(sc, "project:")
+	if wd, err := os.Getwd(); err == nil && wd != "" {
+		if wdRoot := git.ResolveRoot(wd); wdRoot != "" {
+			if strings.EqualFold(filepath.Base(wdRoot), projName) {
+				sqlite.SetStoredRepoPath(ctx, s.db, sc, wdRoot)
+				return wdRoot
+			}
+			sib := filepath.Join(filepath.Dir(wdRoot), projName)
+			if sibRoot := git.ResolveRoot(sib); sibRoot != "" && strings.EqualFold(filepath.Base(sibRoot), projName) {
+				sqlite.SetStoredRepoPath(ctx, s.db, sc, sibRoot)
+				return sibRoot
+			}
+		}
+	}
+	return ""
+}
+
+func (s *Service) ListSyncedProjectScopes(ctx context.Context) []string {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	return sqlite.ListSyncedProjectScopes(ctx, s.db)
+}
+
 func (s *Service) SetSyncedCommit(ctx context.Context, rawScope, sha string) error {
 	if err := sqlite.SetSyncedCommit(ctx, s.db, rawScope, sha); err != nil {
 		return err
@@ -30,6 +86,7 @@ func (s *Service) SetSyncedCommit(ctx context.Context, rawScope, sha string) err
 	for k := range s.syncSeen {
 		if strings.HasSuffix(k, "|"+sc) {
 			delete(s.syncSeen, k)
+			delete(s.syncTouch, k)
 		}
 	}
 	s.mu.Unlock()
@@ -41,12 +98,15 @@ func (s *Service) shouldNotifySync(sessionID, scope, head string, refresh bool) 
 		return true
 	}
 	key := sessionID + "|" + scope
+	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !refresh && s.syncSeen[key] == head {
+		s.touchSyncSeenLocked(key, now)
 		return false
 	}
 	s.syncSeen[key] = head
+	s.touchSyncSeenLocked(key, now)
 	return true
 }
 
@@ -117,7 +177,6 @@ func (s *Service) InspectRepoSync(ctx context.Context, sessionID, rawScope, repo
 	)
 }
 
-// CommitBatch evaluates and commits one or more candidate facts concurrently (up to 4 in-flight) and optionally updates synced_commit.
 func (s *Service) CommitBatch(ctx context.Context, facts []string, category, rawScope, repoDir, syncedCommit string) (string, error) {
 	targetScope := domain.NormalizeScope(rawScope)
 	var clean []string
@@ -133,7 +192,7 @@ func (s *Service) CommitBatch(ctx context.Context, facts []string, category, raw
 	}
 	sha := strings.TrimSpace(syncedCommit)
 	if root := git.ResolveRoot(repoDir); root != "" {
-		sqlite.RememberRepoPath(ctx, s.db, targetScope, root)
+		s.RememberRepoPath(ctx, targetScope, root)
 		if sha != "" {
 			if norm := git.RevParse(ctx, root, sha); norm != "" {
 				sha = norm
@@ -338,8 +397,6 @@ func extractCommitRuleCandidates(ctx context.Context, _ domain.Evaluator, _ stri
 	return out
 }
 
-// AutoSyncRepo autonomously onboards HEAD baseline rules or processes post-baseline commits
-// and advances the synced_commit cursor without requiring agent or human tool calls.
 func (s *Service) AutoSyncRepo(ctx context.Context, sessionID, rawScope, repoDir string, refresh bool) string {
 	sc := domain.NormalizeScope(rawScope)
 	if !strings.HasPrefix(sc, "project:") {

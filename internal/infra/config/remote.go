@@ -15,13 +15,11 @@ import (
 	"memorize/internal/domain"
 )
 
-// RemoteBindingsFile persists client-side remote server targets per local repository (or default).
 type RemoteBindingsFile struct {
 	Default *domain.RemoteTargetConfig           `json:"default,omitempty"`
 	Repos   map[string]domain.RemoteTargetConfig `json:"repos,omitempty"`
 }
 
-// RemotesFilePath returns ~/.memorize/remotes.json inside dataDir.
 func RemotesFilePath(dataDir string) string {
 	dir := strings.TrimSpace(dataDir)
 	if dir == "" {
@@ -33,7 +31,6 @@ func RemotesFilePath(dataDir string) string {
 	return filepath.Join(dir, "remotes.json")
 }
 
-// LoadRemoteBindings reads the persisted remote server bindings from dataDir.
 func LoadRemoteBindings(dataDir string) RemoteBindingsFile {
 	p := RemotesFilePath(dataDir)
 	if p == "" {
@@ -62,7 +59,6 @@ func saveRemoteBindings(dataDir string, f RemoteBindingsFile) error {
 	return writeFileAtomic0600(p, append(b, '\n'))
 }
 
-// NormalizeRemoteURL trims whitespace and trailing slashes, defaulting scheme to http:// if omitted.
 func NormalizeRemoteURL(raw string) string {
 	s := strings.TrimRight(strings.TrimSpace(raw), "/")
 	if s == "" {
@@ -74,7 +70,6 @@ func NormalizeRemoteURL(raw string) string {
 	return s
 }
 
-// SaveRemoteBinding stores a remote team server connection for repoRoot (or default if global is true).
 func SaveRemoteBinding(dataDir, repoRoot string, global bool, target domain.RemoteTargetConfig) error {
 	target.URL = NormalizeRemoteURL(target.URL)
 	target.Token = strings.TrimSpace(target.Token)
@@ -98,7 +93,6 @@ func SaveRemoteBinding(dataDir, repoRoot string, global bool, target domain.Remo
 	return saveRemoteBindings(dataDir, cur)
 }
 
-// RemoveRemoteBinding removes a remote binding for repoRoot (or default if global is true).
 func RemoveRemoteBinding(dataDir, repoRoot string, global bool) (bool, error) {
 	cur := LoadRemoteBindings(dataDir)
 	removed := false
@@ -123,8 +117,6 @@ func RemoveRemoteBinding(dataDir, repoRoot string, global bool) (bool, error) {
 	return true, saveRemoteBindings(dataDir, cur)
 }
 
-// ResolveRemoteTarget resolves any remote team server target matching env overrides, cwd/repoRoot, or default.
-// Unbound personal repositories return (zero, false) so local solo daemon operation stays unchanged.
 func ResolveRemoteTarget(dataDir, cwd string) (domain.RemoteTargetConfig, bool) {
 	if envURL := NormalizeRemoteURL(os.Getenv("MEMORY_REMOTE_URL")); envURL != "" {
 		return domain.RemoteTargetConfig{
@@ -163,7 +155,6 @@ func ResolveRemoteTarget(dataDir, cwd string) (domain.RemoteTargetConfig, bool) 
 	return domain.RemoteTargetConfig{}, false
 }
 
-// ClientTurnEditEntry captures a pre-edit file baseline on the client's local filesystem for Thin Client Stop hooks.
 type ClientTurnEditEntry struct {
 	Scope           string `json:"scope"`
 	FilePath        string `json:"file_path"`
@@ -185,7 +176,6 @@ func clientTurnStatePath(dataDir, sessionID string) string {
 	return filepath.Join(dir, "client-turns", hex.EncodeToString(sum[:12])+".json")
 }
 
-// RecordClientTurnBaseline snapshots a client-local file's pre-edit contents for remote Stop diffing.
 func RecordClientTurnBaseline(dataDir, sessionID, scope, filePath, displayPath string) {
 	p := clientTurnStatePath(dataDir, sessionID)
 	if p == "" || strings.TrimSpace(filePath) == "" {
@@ -243,7 +233,6 @@ func loadClientTurnBaselines(path string) []ClientTurnEditEntry {
 	return fresh
 }
 
-// ConsumeClientTurnDiffs builds per-file diff sections on the client machine against saved baselines.
 func ConsumeClientTurnDiffs(dataDir, sessionID string, clear bool) []domain.HookDiffSection {
 	p := clientTurnStatePath(dataDir, sessionID)
 	if p == "" {

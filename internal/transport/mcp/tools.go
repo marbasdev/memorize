@@ -110,7 +110,6 @@ func resolveMCPRequest(ctx context.Context, req mcp.CallToolRequest, resolver *S
 	return ctx, sid, sc, repoDir
 }
 
-// RegisterResourcesAndPrompts exposes the embedded Memory Curator playbook resource and prompt.
 func RegisterResourcesAndPrompts(srv *server.MCPServer) {
 	srv.AddResource(
 		mcp.NewResource(
@@ -146,7 +145,6 @@ func RegisterResourcesAndPrompts(srv *server.MCPServer) {
 	)
 }
 
-// RegisterTools binds all 5 memorize MCP tools onto srv.
 func RegisterTools(srv *server.MCPServer, deps Deps, resolver *ScopeResolver) {
 	scopeDesc := "Scope: 'project:<name>' (auto-detected if omitted), 'global', or 'personal'."
 	accountDesc := "User account key isolating 'personal' scope (defaults to MEMORY_ACCOUNT/AGY_ACCOUNT/OS user)."

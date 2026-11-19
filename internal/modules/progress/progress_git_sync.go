@@ -124,8 +124,6 @@ func (s *Service) coalesceAndRecordCommitMilestones(
 		trackBuckets[msKey{date: c.Date, bucket: strings.ToLower(track)}] = true
 	}
 
-	// When syncing many commits scattered across >4 micro-tracks, roll up by (date, category)
-	// so the activity timeline summarizes milestones rather than exploding into per-commit cards.
 	rollByCategory := len(commits) >= 5 && len(trackBuckets) > 4
 
 	msMap := make(map[msKey]*commitMilestone)
@@ -175,8 +173,6 @@ func (s *Service) coalesceAndRecordCommitMilestones(
 	return synced
 }
 
-// AutoSyncProgressCommits performs fast, deterministic (<5ms, zero-LLM) incremental Git commit sync
-// into project_progress on SessionStart/PreInvocation turns.
 func (s *Service) AutoSyncProgressCommits(ctx context.Context, rawScope, repoDir string) int {
 	sc := domain.NormalizeScope(rawScope)
 	if !strings.HasPrefix(sc, "project:") {
@@ -191,8 +187,6 @@ func (s *Service) AutoSyncProgressCommits(ctx context.Context, rawScope, repoDir
 	return s.recordAutoProgressCommits(ctx, sc, head, pending)
 }
 
-// AutoSyncProgressCommitsFromPayload ingests client-collected Git commits into project_progress
-// and advances the caller's per-user commit cursor without touching host server disk.
 func (s *Service) AutoSyncProgressCommitsFromPayload(ctx context.Context, rawScope, head string, commits []domain.GitCommitBrief) int {
 	sc := domain.NormalizeScope(rawScope)
 	if !strings.HasPrefix(sc, "project:") || len(commits) == 0 {
@@ -273,8 +267,6 @@ func matchPendingCommitSHA(rawSHA string, pending []domain.GitCommitBrief, used 
 	return domain.GitCommitBrief{}, false
 }
 
-// SyncProjectProgress synchronizes unlinked active memories and unsynced Git commits (last_commit..HEAD)
-// into work-track milestones with full expandable details and advances the repo_sync cursor.
 func (s *Service) SyncProjectProgress(ctx context.Context, rawScope, explicitRepo, lang string) (domain.ProgressSyncResult, error) {
 	sc := domain.NormalizeScope(rawScope)
 	s.upgradeLegacyMemorySyncRows(ctx, sc)
@@ -284,7 +276,6 @@ func (s *Service) SyncProjectProgress(ctx context.Context, rawScope, explicitRep
 		HeadCommit: state.HeadCommit,
 	}
 
-	// 1. Baseline / incremental sync of unlinked active memories grouped by category/sub_category work track
 	unlinked, err := s.unlinkedActiveMemories(ctx, sc)
 	if err == nil && len(unlinked) > 0 {
 		type grpKey struct{ cat, sub string }
@@ -320,7 +311,6 @@ func (s *Service) SyncProjectProgress(ctx context.Context, rawScope, explicitRep
 		}
 	}
 
-	// 2. Sync pending Git commits, synthesizing cohesive milestones when multiple commits accumulate.
 	if len(state.PendingCommits) > 0 {
 		ev := s.router.EvalForTask(ctx, domain.TaskProgress)
 		pctx := domain.WithPresetCategories(ctx, s.mem.EffectiveTaxonomyJSON(ctx))
@@ -447,8 +437,6 @@ func (s *Service) distinctProjectScopes(ctx context.Context) []string {
 	return out
 }
 
-// InspectAllProjectsProgressSync aggregates sync status across all recorded project:* scopes
-// for the All-Projects unified Progress board.
 func (s *Service) InspectAllProjectsProgressSync(ctx context.Context) domain.ProgressSyncState {
 	scopes := s.distinctProjectScopes(ctx)
 	agg := domain.ProgressSyncState{
@@ -472,7 +460,6 @@ func (s *Service) InspectAllProjectsProgressSync(ctx context.Context) domain.Pro
 	return agg
 }
 
-// SyncAllProjectsProgress runs SyncProjectProgress across all recorded project:* scopes.
 func (s *Service) SyncAllProjectsProgress(ctx context.Context, lang string) (domain.ProgressSyncResult, error) {
 	scopes := s.distinctProjectScopes(ctx)
 	var total domain.ProgressSyncResult

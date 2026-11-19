@@ -363,7 +363,6 @@ func (b *progressOverviewBuilder) finalizeCategories() {
 	})
 }
 
-// GetProgressOverviewWithQuery builds the complete filtered, paginated progress activity board and timeline overview.
 func (s *Service) GetProgressOverviewWithQuery(ctx context.Context, q domain.ProgressQuery) (domain.ProgressOverview, error) {
 	rawSc := strings.TrimSpace(q.Scope)
 	sqlScope := ""

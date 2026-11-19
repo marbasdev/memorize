@@ -32,14 +32,12 @@ type resolvedWorkspace struct {
 	repoDir string
 }
 
-// ScopeResolver maps explicit arguments, MCP roots, or working directories into project scopes.
 type ScopeResolver struct {
 	srv   *server.MCPServer
 	mu    sync.Mutex
 	cache map[string][]resolvedWorkspace
 }
 
-// NewScopeResolver creates a ScopeResolver backed by srv for MCP roots discovery.
 func NewScopeResolver(srv *server.MCPServer) *ScopeResolver {
 	return &ScopeResolver{
 		srv:   srv,
@@ -159,7 +157,6 @@ func effectiveWorkDir(ctx context.Context) string {
 	return wd
 }
 
-// Resolve returns the normalized scope and matching Git repository root for the request.
 func (r *ScopeResolver) Resolve(ctx context.Context, explicitScope, explicitRepo string) (string, string) {
 	serverMode := domain.IsServerMode(ctx)
 	var hints map[string]string

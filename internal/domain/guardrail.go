@@ -9,7 +9,6 @@ const (
 	GuardrailVerdictError         = "error"
 )
 
-// GuardrailLogInput records a single guardrail or plan verification audit event.
 type GuardrailLogInput struct {
 	Scope       string
 	Account     string
@@ -25,7 +24,6 @@ type GuardrailLogInput struct {
 	ElapsedMs   float64
 }
 
-// GuardrailLogRecord represents one stored row in guardrail_logs.
 type GuardrailLogRecord struct {
 	ID          int64   `json:"id"`
 	Scope       string  `json:"scope"`
@@ -43,7 +41,6 @@ type GuardrailLogRecord struct {
 	CreatedAt   string  `json:"created_at"`
 }
 
-// GuardrailLogQuery filters guardrail audit logs.
 type GuardrailLogQuery struct {
 	Scope          string
 	Account        string
@@ -54,7 +51,6 @@ type GuardrailLogQuery struct {
 	PageSize       int
 }
 
-// GuardrailLogPage returns a paginated guardrail audit log result set.
 type GuardrailLogPage struct {
 	Records       []GuardrailLogRecord `json:"records"`
 	TotalCount    int                  `json:"total_count"`

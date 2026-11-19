@@ -11,32 +11,21 @@ import (
 )
 
 const (
-	// CfgActiveProvider stores the configured inference provider ID.
-	CfgActiveProvider = "active_provider"
-	// CfgGGUFEndpoint stores the managed or user-configured local GGUF server URL.
-	CfgGGUFEndpoint = "gguf_endpoint"
-	// CfgGGUFModel stores the selected local GGUF model filename.
-	CfgGGUFModel = "gguf_model"
-	// CfgIncludePersonalInProject controls whether project:* queries include the caller's personal memories.
+	CfgActiveProvider           = "active_provider"
+	CfgGGUFEndpoint             = "gguf_endpoint"
+	CfgGGUFModel                = "gguf_model"
 	CfgIncludePersonalInProject = "include_personal_in_project"
-	// CfgDefaultAccount stores the local fallback account name for non-server mode.
-	CfgDefaultAccount = "default_account"
-	// CfgPresetCategories stores the append-only preset category/sub-category taxonomy JSON.
-	CfgPresetCategories = "preset_categories"
-	// CfgRulePackAuthor stores the team administrator's default @git handle for team rule entries.
-	CfgRulePackAuthor = "rulepack_author"
+	CfgDefaultAccount           = "default_account"
+	CfgPresetCategories         = "preset_categories"
+	CfgRulePackAuthor           = "rulepack_author"
 
-	// CfgProgressRetentionDays stores the automatic TTL (in days) for completed progress history.
-	CfgProgressRetentionDays = "progress_retention_days"
-	// CfgGuardrailRetentionDays stores the automatic TTL (in days) for guardrail audit logs.
-	CfgGuardrailRetentionDays = "guardrail_retention_days"
-	// CfgGuardrailIncludeBlocked controls whether auto-retention also deletes blocked guardrail audit logs.
+	CfgProgressRetentionDays   = "progress_retention_days"
+	CfgGuardrailRetentionDays  = "guardrail_retention_days"
 	CfgGuardrailIncludeBlocked = "guardrail_retention_include_blocked"
 	// CfgProgressPrunedMemHWM stores the highest pruned memory ID per scope to prevent resurrection.
 	CfgProgressPrunedMemHWM = "progress_pruned_mem_hwm:"
 )
 
-// LoadRetentionPolicy reads the active retention policy from SQLite config with safe defaults.
 func LoadRetentionPolicy(ctx context.Context, db *sql.DB) domain.RetentionPolicy {
 	cfg := GetConfigMap(ctx, db)
 	progDays := 0
@@ -58,7 +47,6 @@ func LoadRetentionPolicy(ctx context.Context, db *sql.DB) domain.RetentionPolicy
 	}
 }
 
-// GetConfigMap returns all node-local key/value entries from the SQLite config table.
 func GetConfigMap(ctx context.Context, db *sql.DB) map[string]string {
 	out := make(map[string]string)
 	if db == nil {
@@ -102,8 +90,6 @@ func SaveConfig(ctx context.Context, db *sql.DB, dbPath string, pairs map[string
 	return nil
 }
 
-// SyncManagedGGUFEndpoint updates SQLite gguf_endpoint when it currently points to a managed
-// loopback GGUF server (or is unset) and LOCAL_GGUF_URL env override is not set.
 func SyncManagedGGUFEndpoint(ctx context.Context, db *sql.DB, dbPath, ep string) error {
 	if db == nil || strings.TrimSpace(ep) == "" {
 		return nil

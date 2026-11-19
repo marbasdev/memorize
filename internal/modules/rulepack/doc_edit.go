@@ -7,7 +7,6 @@ import (
 	"memorize/internal/domain"
 )
 
-// Outline returns internal-key and title summaries preserving document order for placement selection.
 func (d *Document) Outline() []domain.RuleOutlineEntry {
 	if d == nil || len(d.Rules) == 0 {
 		return nil
@@ -24,7 +23,6 @@ func (d *Document) Outline() []domain.RuleOutlineEntry {
 	return out
 }
 
-// FormatRule renders a single concise one-line TeamRule bullet without key or tier prefixes.
 func FormatRule(r domain.TeamRule) []string {
 	subPart := ""
 	if sub := domain.NormalizeSubCategory(r.SubCategory); sub != "" {
@@ -40,7 +38,6 @@ func FormatRule(r domain.TeamRule) []string {
 	}
 }
 
-// FormatSectionHeading returns the canonical Markdown section header for category slug cat.
 func FormatSectionHeading(cat string) string {
 	slug := domain.NormalizeCategoryForScope("project:team", cat)
 	return fmt.Sprintf("## %s (`%s`)", domain.FormatCategoryHeadingTitle(slug), slug)
@@ -93,8 +90,6 @@ func lastNonBlankBefore(lines []string, limit int) int {
 	return -1
 }
 
-// InsertRule surgically inserts prop into raw without reformatting or modifying any unrelated existing lines.
-// If raw is empty, it initializes a clean TEAM_RULES.md document scaffold with the rule's category section.
 func InsertRule(raw []byte, scope string, prop domain.RulePlacementProposal) ([]byte, error) {
 	rule := prop.ToTeamRule(scope)
 	if err := domain.ValidateTeamRule(rule); err != nil {
@@ -146,7 +141,6 @@ func insertIntoExistingSection(lines []string, scope string, sec DocumentSection
 }
 
 func insertNewSection(doc *Document, category string, ruleLines []string) []byte {
-	// Insert missing category section in canonical rank order while preserving all existing sections.
 	newRank := domain.CanonicalCategoryRank(category)
 	secHeading := FormatSectionHeading(category)
 	for _, sec := range doc.Sections {
@@ -175,12 +169,6 @@ func pickRuleInsertionLine(sec DocumentSection) int {
 	return sec.Rules[len(sec.Rules)-1].EndLine
 }
 
-// ReplaceRule updates a rule whose RuleKey matches updated.RuleKey in place.
-func ReplaceRule(raw []byte, scope string, updated domain.TeamRule) ([]byte, error) {
-	return ReplaceRuleByKey(raw, scope, updated.RuleKey, updated)
-}
-
-// ReplaceRuleByKey replaces the existing rule matching targetKey with updated while preserving order when Category is unchanged.
 func ReplaceRuleByKey(raw []byte, scope, targetKey string, updated domain.TeamRule) ([]byte, error) {
 	sc := domain.NormalizeScope(scope)
 	target := domain.NormalizeRuleKey(targetKey)
@@ -238,7 +226,6 @@ func ReplaceRuleByKey(raw []byte, scope, targetKey string, updated domain.TeamRu
 	return nil, fmt.Errorf("%w: %s", ErrRuleNotFound, targetKey)
 }
 
-// RemoveRule removes the rule matching key cleanly, pruning any now-empty unannotated category header.
 func RemoveRule(raw []byte, scope, key string) ([]byte, error) {
 	sc := domain.NormalizeScope(scope)
 	doc, err := ParseDocument(raw, sc)
@@ -252,7 +239,6 @@ func RemoveRule(raw []byte, scope, key string) ([]byte, error) {
 				continue
 			}
 			if len(sec.Rules) == 1 && sec.IntroEndLine == sec.StartLine {
-				// Prune empty section heading if it contains no custom intro prose or remaining rules.
 				return serializeLines(spliceRemove(doc.Lines, sec.StartLine, r.EndLine, true)), nil
 			}
 			start, end := r.StartLine, r.EndLine

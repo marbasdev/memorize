@@ -13,7 +13,6 @@ import (
 	"memorize/internal/modules/rulepack"
 )
 
-// ServerInstructions holds the protocol guidance sent to MCP clients during initialize.
 const ServerInstructions = `Memorize Protocol:
 1. Scope: 'project:<repo>', 'global', or 'personal' (auto-detected if omitted).
 2. Query: call query_project_memory on new topics (refresh=true after compaction). Follow 'memorize://playbook/memory-curator' on Git onboarding/sync.
@@ -24,7 +23,6 @@ const ServerInstructions = `Memorize Protocol:
 7. Team Rules: use team_rules for shared .memorize/TEAM_RULES.md rules (list/sync/add/promote/resolve_conflict/duplicates); NEVER hand-edit TEAM_RULES.md so workspace code stays unmixed.
 8. Verify Plan: call verify_plan_against_memory once before multi-file refactors; shell commands gate PreToolUse while file edits batch-verify on Stop.`
 
-// BridgeReqMeta carries per-request metadata forwarded by the stateless stdio HTTP bridge.
 type BridgeReqMeta struct {
 	SessionID  string
 	Cwd        string
@@ -34,12 +32,10 @@ type BridgeReqMeta struct {
 
 type bridgeMetaCtxKey struct{}
 
-// WithBridgeMeta attaches stateless stdio bridge metadata to ctx.
 func WithBridgeMeta(ctx context.Context, m BridgeReqMeta) context.Context {
 	return context.WithValue(ctx, bridgeMetaCtxKey{}, m)
 }
 
-// BridgeMetaFromContext retrieves stateless stdio bridge metadata attached by WithBridgeMeta.
 func BridgeMetaFromContext(ctx context.Context) (BridgeReqMeta, bool) {
 	if ctx != nil {
 		if v, ok := ctx.Value(bridgeMetaCtxKey{}).(BridgeReqMeta); ok {
@@ -49,7 +45,6 @@ func BridgeMetaFromContext(ctx context.Context) (BridgeReqMeta, bool) {
 	return BridgeReqMeta{}, false
 }
 
-// Deps bundles the module services and binary version wired into MCP handlers.
 type Deps struct {
 	Memory    *memory.Service
 	Progress  *progress.Service
@@ -58,7 +53,6 @@ type Deps struct {
 	Version   string
 }
 
-// NewServer constructs an MCPServer configured with Memorize resources, prompts, and tools.
 func NewServer(deps Deps) *server.MCPServer {
 	ver := deps.Version
 	if ver == "" {
@@ -90,14 +84,12 @@ const (
 	bridgeIdleTTL     = 6 * time.Hour
 )
 
-// SessionPool bounds in-process MCP sessions registered for stateless HTTP bridge callers.
 type SessionPool struct {
 	srv      *server.MCPServer
 	mu       sync.Mutex
 	sessions map[string]*bridgeSessionEntry
 }
 
-// NewSessionPool allocates a bounded SessionPool attached to srv.
 func NewSessionPool(srv *server.MCPServer) *SessionPool {
 	return &SessionPool{
 		srv:      srv,
@@ -105,7 +97,6 @@ func NewSessionPool(srv *server.MCPServer) *SessionPool {
 	}
 }
 
-// GetOrCreate returns the registered InProcessSession for sid, evicting stale entries when over capacity.
 func (p *SessionPool) GetOrCreate(sid string) *server.InProcessSession {
 	now := time.Now()
 	p.mu.Lock()
@@ -140,7 +131,6 @@ func (p *SessionPool) GetOrCreate(sid string) *server.InProcessSession {
 	return s
 }
 
-// ServeStdio blocks serving MCP JSON-RPC over stdin/stdout.
 func ServeStdio(srv *server.MCPServer) error {
 	return server.ServeStdio(srv)
 }

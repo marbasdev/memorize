@@ -480,7 +480,6 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 				p := strings.TrimSpace(r.FormValue(spec.ProviderKey))
 				m := strings.TrimSpace(r.FormValue(spec.ModelKey))
 				if p == "" && strings.HasPrefix(strings.ToLower(m), "gemini-decision") {
-					// Keep explicit decision-only model submission intact so validation rejects it on generative tasks cleanly.
 				} else if p == "" {
 					m = ""
 				}

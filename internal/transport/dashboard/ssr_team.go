@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"memorize/internal/domain"
-	"memorize/internal/infra/sqlite"
 	"memorize/internal/modules/rulepack"
 )
 
@@ -78,14 +77,8 @@ func collectProjectScopes(ctx context.Context, d Deps) []string {
 				}
 			}
 		}
-		if rows, err := d.Memory.DB().QueryContext(ctx, `SELECT DISTINCT scope FROM repo_sync WHERE COALESCE(scope, '') != ''`); err == nil {
-			for rows.Next() {
-				var sc string
-				if rows.Scan(&sc) == nil && strings.HasPrefix(sc, "project:") {
-					seen[sc] = true
-				}
-			}
-			_ = rows.Close()
+		for _, sc := range d.Memory.ListSyncedProjectScopes(ctx) {
+			seen[sc] = true
 		}
 	}
 	out := make([]string, 0, len(seen))
@@ -143,14 +136,11 @@ func buildTeamView(ctx context.Context, d Deps, lang string, q url.Values) ssrTe
 	if d.Memory != nil {
 		repoRoot := ""
 		if !view.ServerMode {
-			repoRoot = sqlite.ResolveScopeRepoPath(ctx, d.Memory.DB(), selected, "")
+			repoRoot = d.Memory.ResolveScopeRepoPath(ctx, selected, "")
 			view.RepoRoot = repoRoot
 		}
 		view.Author = d.RulePack.AuthorName(ctx, "", repoRoot)
-		_ = d.Memory.DB().QueryRowContext(ctx,
-			`SELECT COALESCE(file_hash, ''), COALESCE(last_error, '') FROM team_rule_sync WHERE scope = ?`,
-			selected,
-		).Scan(&view.FileHash, &view.LastError)
+		view.FileHash, view.LastError = d.RulePack.SyncMeta(ctx, selected)
 		if len(view.FileHash) > 12 {
 			view.ShortHash = view.FileHash[:12]
 		} else {

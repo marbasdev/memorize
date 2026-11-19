@@ -16,10 +16,8 @@ import (
 )
 
 var (
-	// ErrPushNonFastForward indicates remote advanced concurrently during push (eligible for CAS retry).
 	ErrPushNonFastForward = errors.New("git push rejected: non-fast-forward (remote advanced)")
-	// ErrBranchProtected indicates direct push is blocked by branch protection / pre-receive hook rules.
-	ErrBranchProtected = errors.New("git push blocked by branch protection rules")
+	ErrBranchProtected    = errors.New("git push blocked by branch protection rules")
 	// ErrNoCommits indicates repository has no initial commit yet to branch or worktree from.
 	ErrNoCommits = errors.New("git repository has no commits yet")
 )
@@ -43,7 +41,6 @@ func runSafe(parent context.Context, timeout time.Duration, dir string, args ...
 	return trimmed, nil
 }
 
-// HasOriginRemote reports whether root has a configured 'origin' remote.
 func HasOriginRemote(ctx context.Context, root string) bool {
 	if root == "" {
 		return false
@@ -71,8 +68,6 @@ func runGitConfig(ctx context.Context, root, key string) (string, error) {
 	return trimmed, nil
 }
 
-// AuthorIdentity resolves the contributor's Git '@handle' offline from repo or global git config
-// (github.user -> GitHub noreply email handle -> normalized user.name -> email local part).
 func AuthorIdentity(ctx context.Context, root string) string {
 	if out, err := runGitConfig(ctx, root, "github.user"); err == nil {
 		if h := domain.NormalizeGitHandle(out); h != "" {
@@ -106,7 +101,6 @@ func AuthorIdentity(ctx context.Context, root string) string {
 	return ""
 }
 
-// CurrentBranch returns the active branch name, or "" when detached or unreadable.
 func CurrentBranch(ctx context.Context, root string) string {
 	if root == "" {
 		return ""
@@ -118,7 +112,6 @@ func CurrentBranch(ctx context.Context, root string) string {
 	return strings.TrimSpace(out)
 }
 
-// DefaultTargetBranch resolves the primary shared branch name ("main", "master", or current branch fallback).
 func DefaultTargetBranch(ctx context.Context, root string) string {
 	if root == "" {
 		return ""
@@ -141,7 +134,6 @@ func DefaultTargetBranch(ctx context.Context, root string) string {
 	return "main"
 }
 
-// RemoteRefFastSHA reads a remote branch tip SHA directly from .git refs without spawning git.
 func RemoteRefFastSHA(root, remote, branch string) string {
 	if root == "" || remote == "" || branch == "" {
 		return ""
@@ -171,7 +163,6 @@ func RemoteRefFastSHA(root, remote, branch string) string {
 	return ""
 }
 
-// FetchBranch runs a non-interactive, bounded fetch of remote/branch without altering any working files.
 func FetchBranch(ctx context.Context, root, remote, branch string) error {
 	if root == "" || remote == "" || branch == "" {
 		return nil
@@ -180,7 +171,6 @@ func FetchBranch(ctx context.Context, root, remote, branch string) error {
 	return err
 }
 
-// ReadBlobAtRef reads a file directly from a Git revision/ref. Returns (nil, false, nil) if path is absent at ref.
 func ReadBlobAtRef(ctx context.Context, root, ref, relPath string) ([]byte, bool, error) {
 	if root == "" || ref == "" || relPath == "" {
 		return nil, false, nil
@@ -200,7 +190,6 @@ func ReadBlobAtRef(ctx context.Context, root, ref, relPath string) ([]byte, bool
 	return out, true, nil
 }
 
-// IsPathDirty reports whether relPath has staged or unstaged changes in the repository working tree.
 func IsPathDirty(ctx context.Context, root, relPath string) bool {
 	if root == "" || relPath == "" {
 		return false
@@ -209,7 +198,6 @@ func IsPathDirty(ctx context.Context, root, relPath string) bool {
 	return err == nil && strings.TrimSpace(out) != ""
 }
 
-// AheadCount returns how many commits localBranch is ahead of upstreamRef (0 on error/missing).
 func AheadCount(ctx context.Context, root, localBranch, upstreamRef string) int {
 	if root == "" || localBranch == "" || upstreamRef == "" {
 		return 0
@@ -244,7 +232,6 @@ func classifyPushError(err error) error {
 	}
 }
 
-// RulePackGitOptions configures isolated Rule Pack commit/push execution.
 type RulePackGitOptions struct {
 	Root          string
 	TargetBranch  string
@@ -253,7 +240,6 @@ type RulePackGitOptions struct {
 	AuthorEmail   string
 }
 
-// RulePackGitResult captures the outcome of applying, committing, and pushing TEAM_RULES.md.
 type RulePackGitResult struct {
 	TargetBranch    string
 	BranchPushed    string
@@ -282,7 +268,6 @@ func IsolatedRulePackCommit(ctx context.Context, opts RulePackGitOptions, buildF
 		return RulePackGitResult{}, errors.New("team rules require an 'origin' remote for push")
 	}
 
-	// Non-destructively fetch latest remote branch before inspecting base contents.
 	baseRef := ""
 	if err := FetchBranch(ctx, root, "origin", targetBranch); err == nil {
 		if _, verifyErr := runSafe(ctx, 2*time.Second, root, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+targetBranch); verifyErr == nil {
@@ -355,13 +340,11 @@ func IsolatedRulePackCommit(ctx context.Context, opts RulePackGitOptions, buildF
 		WrittenBytes: updatedBytes,
 	}
 
-	// Isolated push directly onto targetBranch.
 	if _, err := runSafe(ctx, 15*time.Second, tmpDir, "push", "origin", "HEAD:refs/heads/"+targetBranch); err != nil {
 		return RulePackGitResult{}, classifyPushError(err)
 	}
 	res.BranchPushed = targetBranch
 
-	// Safely fast-forward workspace targetBranch only if checked out on it, no ahead code commits exist, and TEAM_RULES.md isn't dirty.
 	curBranch := CurrentBranch(ctx, root)
 	if curBranch == targetBranch &&
 		!IsPathDirty(ctx, root, relPath) &&

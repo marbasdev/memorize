@@ -19,7 +19,6 @@ import (
 	transportmcp "memorize/internal/transport/mcp"
 )
 
-// DaemonDeps wires unified daemon HTTP routes to MCP, Guardrail, Dashboard, and process control callbacks.
 type DaemonDeps struct {
 	ServerMode    bool
 	DB            *sql.DB
@@ -57,7 +56,6 @@ func attachAuthContext(ctx context.Context, deps DaemonDeps, p domain.AuthPrinci
 	return ctx
 }
 
-// NewDaemonMux constructs the root HTTP handler combining /mcp, /api/daemon/*, and the dashboard handler.
 func NewDaemonMux(deps DaemonDeps) http.Handler {
 	mux := http.NewServeMux()
 

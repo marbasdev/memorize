@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"memorize/internal/domain"
@@ -17,7 +18,12 @@ import (
 	"memorize/internal/infra/sqlite"
 )
 
-// MutationEvent describes a committed, updated, or consolidated memory change for downstream observers.
+const (
+	maxCachedMemorySessions = 256
+	memorySessionIdleTTL    = 6 * time.Hour
+	transientSweepInterval  = 30 * time.Minute
+)
+
 type MutationEvent struct {
 	Scope       string
 	Category    string
@@ -28,30 +34,28 @@ type MutationEvent struct {
 	Content     string
 }
 
-// MutationListener receives notifications whenever active memory facts are created, updated, or consolidated.
 type MutationListener func(ctx context.Context, ev MutationEvent)
 
-// ExtraFactsProvider injects read-only external facts (such as declarative Team Rule Pack rules)
-// into retrieval queries without exposing them to local mutations, consolidation, or overwrites.
 type ExtraFactsProvider interface {
 	LoadExtraFacts(ctx context.Context, scopeA, scopeB, category string) ([]domain.Fact, error)
 }
 
-// Service owns persistent long-term memory storage, relevance retrieval, taxonomy, consolidation, and Git rule sync.
 type Service struct {
-	db             *sql.DB
-	dbPath         string
-	router         *router.Router
-	bus            *eventbus.Bus
-	mu             sync.Mutex
-	sent           map[string]map[int64]bool
-	syncSeen       map[string]string
-	autoGitSync    bool
-	mutListeners   []MutationListener
-	extraProviders []ExtraFactsProvider
+	db               *sql.DB
+	dbPath           string
+	router           *router.Router
+	bus              *eventbus.Bus
+	mu               sync.Mutex
+	sent             map[string]map[int64]bool
+	sentTouch        map[string]time.Time
+	syncSeen         map[string]string
+	syncTouch        map[string]time.Time
+	autoGitSync      bool
+	mutListeners     []MutationListener
+	extraProviders   []ExtraFactsProvider
+	lastSessionSweep atomic.Int64
 }
 
-// New constructs a memory Service from shared infrastructure components.
 func New(db *sql.DB, dbPath string, rtr *router.Router, bus *eventbus.Bus) *Service {
 	if rtr == nil {
 		rtr = router.New(db, dbPath, nil, nil)
@@ -60,16 +64,102 @@ func New(db *sql.DB, dbPath string, rtr *router.Router, bus *eventbus.Bus) *Serv
 		bus = eventbus.New()
 	}
 	return &Service{
-		db:       db,
-		dbPath:   dbPath,
-		router:   rtr,
-		bus:      bus,
-		sent:     make(map[string]map[int64]bool),
-		syncSeen: make(map[string]string),
+		db:        db,
+		dbPath:    dbPath,
+		router:    rtr,
+		bus:       bus,
+		sent:      make(map[string]map[int64]bool),
+		sentTouch: make(map[string]time.Time),
+		syncSeen:  make(map[string]string),
+		syncTouch: make(map[string]time.Time),
 	}
 }
 
-// Open opens a private SQLite database and returns a standalone memory Service using eval as fallback Evaluator.
+func (s *Service) touchSentLocked(sessionID string, now time.Time) {
+	if s.sentTouch == nil {
+		s.sentTouch = make(map[string]time.Time)
+	}
+	s.sentTouch[sessionID] = now
+	if len(s.sent) <= maxCachedMemorySessions {
+		return
+	}
+	for sid, ts := range s.sentTouch {
+		if sid != sessionID && now.Sub(ts) > memorySessionIdleTTL {
+			delete(s.sent, sid)
+			delete(s.sentTouch, sid)
+		}
+	}
+	for len(s.sent) > maxCachedMemorySessions {
+		oldestKey := ""
+		var oldestTime time.Time
+		for sid := range s.sent {
+			if sid == sessionID {
+				continue
+			}
+			ts := s.sentTouch[sid]
+			if oldestKey == "" || ts.Before(oldestTime) {
+				oldestKey = sid
+				oldestTime = ts
+			}
+		}
+		if oldestKey == "" {
+			break
+		}
+		delete(s.sent, oldestKey)
+		delete(s.sentTouch, oldestKey)
+	}
+}
+
+func (s *Service) touchSyncSeenLocked(key string, now time.Time) {
+	if s.syncTouch == nil {
+		s.syncTouch = make(map[string]time.Time)
+	}
+	s.syncTouch[key] = now
+	if len(s.syncSeen) <= maxCachedMemorySessions {
+		return
+	}
+	for k, ts := range s.syncTouch {
+		if k != key && now.Sub(ts) > memorySessionIdleTTL {
+			delete(s.syncSeen, k)
+			delete(s.syncTouch, k)
+		}
+	}
+	for len(s.syncSeen) > maxCachedMemorySessions {
+		oldestKey := ""
+		var oldestTime time.Time
+		for k := range s.syncSeen {
+			if k == key {
+				continue
+			}
+			ts := s.syncTouch[k]
+			if oldestKey == "" || ts.Before(oldestTime) {
+				oldestKey = k
+				oldestTime = ts
+			}
+		}
+		if oldestKey == "" {
+			break
+		}
+		delete(s.syncSeen, oldestKey)
+		delete(s.syncTouch, oldestKey)
+	}
+}
+
+func (s *Service) maybeSweepTransientTables(ctx context.Context) {
+	if s == nil || s.db == nil {
+		return
+	}
+	nowUnix := time.Now().Unix()
+	last := s.lastSessionSweep.Load()
+	if nowUnix-last < int64(transientSweepInterval.Seconds()) {
+		return
+	}
+	if !s.lastSessionSweep.CompareAndSwap(last, nowUnix) {
+		return
+	}
+	sqlite.SweepTransientSessionTables(ctx, s.db)
+}
+
 func Open(dbPath string, eval domain.Evaluator) (*Service, error) {
 	db, err := sqlite.Open(dbPath)
 	if err != nil {
@@ -80,7 +170,6 @@ func Open(dbPath string, eval domain.Evaluator) (*Service, error) {
 	return New(db, dbPath, rtr, bus), nil
 }
 
-// Close closes the underlying database handle and enforces 0600 file permissions on disk-backed DBs.
 func (s *Service) Close() error {
 	if s == nil || s.db == nil {
 		return nil
@@ -90,27 +179,22 @@ func (s *Service) Close() error {
 	return err
 }
 
-// DB returns the underlying SQLite connection handle.
 func (s *Service) DB() *sql.DB {
 	return s.db
 }
 
-// DBPath returns the filesystem path (or :memory:) configured for this service.
 func (s *Service) DBPath() string {
 	return s.dbPath
 }
 
-// Router returns the inference router used for task-specific evaluator selection and telemetry.
 func (s *Service) Router() *router.Router {
 	return s.router
 }
 
-// Bus returns the monotonic state change event bus.
 func (s *Service) Bus() *eventbus.Bus {
 	return s.bus
 }
 
-// AddMutationListener registers a callback invoked after CommitMemoryFull, UpdateMemoryFull, or ConsolidateMemories.
 func (s *Service) AddMutationListener(fn MutationListener) {
 	if fn == nil {
 		return
@@ -129,7 +213,6 @@ func (s *Service) emitMutation(ctx context.Context, ev MutationEvent) {
 	}
 }
 
-// AttachExtraFactsProvider registers a read-only provider whose facts participate in retrieval queries only.
 func (s *Service) AttachExtraFactsProvider(p ExtraFactsProvider) {
 	if p == nil {
 		return
@@ -139,7 +222,6 @@ func (s *Service) AttachExtraFactsProvider(p ExtraFactsProvider) {
 	s.mu.Unlock()
 }
 
-// InvalidateSessionIDs drops session delivery watermarks for ids so updated rules re-deliver cleanly.
 func (s *Service) InvalidateSessionIDs(ctx context.Context, ids ...int64) {
 	if len(ids) == 0 {
 		return
@@ -168,21 +250,18 @@ func (s *Service) InvalidateSessionIDs(ctx context.Context, ids ...int64) {
 	}
 }
 
-// SetAutoGitSync toggles autonomous HEAD/commit extraction during session/turn hooks.
 func (s *Service) SetAutoGitSync(enabled bool) {
 	s.mu.Lock()
 	s.autoGitSync = enabled
 	s.mu.Unlock()
 }
 
-// IsAutoGitSyncEnabled reports whether autonomous Git sync is enabled.
 func (s *Service) IsAutoGitSyncEnabled() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.autoGitSync
 }
 
-// IncludePersonalInProject reports whether project:* queries should also load matching account personal facts.
 func (s *Service) IncludePersonalInProject(ctx context.Context) bool {
 	if os.Getenv("MEMORY_INCLUDE_PERSONAL") == "1" {
 		return true
@@ -190,8 +269,6 @@ func (s *Service) IncludePersonalInProject(ctx context.Context) bool {
 	return s.GetConfigMap(ctx)[config.CfgIncludePersonalInProject] == "1"
 }
 
-// CurrentAccount resolves the effective user account identifier for personal scope isolation.
-// In authenticated team server mode, the verified AuthPrincipal account overrides headers/env/defaults.
 func (s *Service) CurrentAccount(ctx context.Context) string {
 	if p, ok := domain.AuthPrincipalFromContext(ctx); ok && p.ServerMode && p.Authenticated && p.Account != "" {
 		return p.Account
@@ -246,9 +323,6 @@ func (s *Service) privateScopeSQL(ctx context.Context, alias string, allowBypass
 	return fmt.Sprintf("(%s != 'personal' OR COALESCE(%s, '') = ?)", scCol, accCol), []any{curAcc}
 }
 
-// ResolveEffectiveSessionID resolves the active conversation/session ID:
-// explicit input wins, followed by non-generic context session IDs, active IDE hook turn_state
-// conversation IDs for the scope, and finally generic MCP stdio/bridge session IDs.
 func (s *Service) ResolveEffectiveSessionID(ctx context.Context, rawScope, explicit string) string {
 	if exp := strings.TrimSpace(explicit); exp != "" {
 		return domain.ScopedSessionID(ctx, exp)
@@ -276,7 +350,6 @@ func (s *Service) ResolveEffectiveSessionID(ctx context.Context, rawScope, expli
 	return domain.ScopedSessionID(ctx, ctxSID)
 }
 
-// ScopesFor expands project:* scopes to include global when includeGlobal is true.
 func ScopesFor(primary string, includeGlobal bool) (string, string) {
 	sc := domain.NormalizeScope(primary)
 	if includeGlobal && strings.HasPrefix(sc, "project:") {
@@ -294,7 +367,6 @@ func parseTagStr(raw string) []string {
 
 const factSelectColumns = `id, scope, COALESCE(account, ''), category, COALESCE(sub_category, ''), tags, content, pinned`
 
-// LoadActiveFacts loads active facts matching up to three scopes and an optional category filter.
 func (s *Service) LoadActiveFacts(ctx context.Context, scopeA, scopeB, category string, extraScopes ...string) ([]domain.Fact, error) {
 	scopeC := scopeA
 	if len(extraScopes) > 0 && strings.TrimSpace(extraScopes[0]) != "" {
@@ -349,8 +421,6 @@ func scanFactRows(rows *sql.Rows) ([]domain.Fact, error) {
 	return facts, rows.Err()
 }
 
-// loadQueryFacts combines active local memories with read-only external facts (e.g. Team Rules)
-// for query/session retrieval only, keeping write mutations strictly isolated to local memories.
 func (s *Service) loadQueryFacts(ctx context.Context, scopeA, scopeB, category string, extraScopes ...string) ([]domain.Fact, error) {
 	facts, err := s.LoadActiveFacts(ctx, scopeA, scopeB, category, extraScopes...)
 	if err != nil {
@@ -372,7 +442,6 @@ func (s *Service) loadQueryFacts(ctx context.Context, scopeA, scopeB, category s
 	return facts, nil
 }
 
-// FactsByIDs returns a map of facts keyed by ID regardless of active state, used for audit/progress correlation.
 func (s *Service) FactsByIDs(ctx context.Context, ids []int64) (map[int64]domain.Fact, error) {
 	out := make(map[int64]domain.Fact)
 	if len(ids) == 0 {
@@ -442,15 +511,6 @@ func formatFactLine(f domain.Fact, suffix string, compact bool) string {
 	return line + "\n"
 }
 
-// QueryMemory retrieves all relevant facts for currentTask across primary scope + global in stateless mode.
-func (s *Service) QueryMemory(ctx context.Context, currentTask, category string, scope ...string) (string, error) {
-	rawScope := ""
-	if len(scope) > 0 {
-		rawScope = scope[0]
-	}
-	return s.QuerySessionMemory(ctx, "", currentTask, category, rawScope, true)
-}
-
 func (s *Service) evaluateRelevance(ctx context.Context, rawScope, category, query string) (string, int, domain.Evaluator, []domain.Fact, []domain.ScoredFact, error) {
 	scA, scB := ScopesFor(rawScope, true)
 	var extraScopes []string
@@ -494,7 +554,6 @@ func (s *Service) evaluateRelevance(ctx context.Context, rawScope, category, que
 	return scA, len(facts), ev, pinned, scored, nil
 }
 
-// CommitMemory evaluates and persists candidateFact into SQLite for category and optional scope.
 func (s *Service) CommitMemory(ctx context.Context, candidateFact, category string, scope ...string) (string, error) {
 	rawScope := ""
 	if len(scope) > 0 {
@@ -503,7 +562,6 @@ func (s *Service) CommitMemory(ctx context.Context, candidateFact, category stri
 	return s.CommitMemoryFull(ctx, candidateFact, category, "", "", rawScope)
 }
 
-// CommitMemoryFull evaluates and persists candidateFact with explicit optional category, subCategory, tags, and scope.
 func (s *Service) CommitMemoryFull(ctx context.Context, candidateFact, category, subCategory, rawTags, rawScope string) (string, error) {
 	candidateFact = strings.TrimSpace(candidateFact)
 	if candidateFact == "" {

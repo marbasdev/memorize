@@ -11,12 +11,10 @@ import (
 	"memorize/internal/infra/config"
 )
 
-// GetRetentionPolicy returns the active retention policy from SQLite config with safe defaults.
 func (s *Service) GetRetentionPolicy(ctx context.Context) domain.RetentionPolicy {
 	return config.LoadRetentionPolicy(ctx, s.db)
 }
 
-// SetGuardrailRetentionPolicy updates automatic TTL for guardrail audit logs and immediately sweeps expired entries.
 func (s *Service) SetGuardrailRetentionPolicy(ctx context.Context, days int, includeBlocked *bool) (domain.RetentionPolicy, int, error) {
 	if err := domain.RequireAdmin(ctx); err != nil {
 		return s.GetRetentionPolicy(ctx), 0, err
@@ -43,9 +41,6 @@ func (s *Service) SetGuardrailRetentionPolicy(ctx context.Context, days int, inc
 	return pol, deleted, nil
 }
 
-// CleanupGuardrailLogs deletes guardrail verification audit logs matching scope and age cutoff
-// (olderThanDays == 0 deletes all ages; >0 deletes entries older than N days).
-// When includeBlocked is false, only PASS entries (blocked = 0) are removed and violation/blocked audit logs are preserved.
 func (s *Service) CleanupGuardrailLogs(ctx context.Context, rawScope string, olderThanDays int, includeBlocked bool) (int, error) {
 	if err := domain.RequireAdmin(ctx); err != nil {
 		return 0, err
@@ -82,7 +77,6 @@ func (s *Service) CleanupGuardrailLogs(ctx context.Context, rawScope string, old
 	return int(n), nil
 }
 
-// MaybeRunAutoRetention runs automatic TTL sweeps at most once per hour for both progress history and guardrail logs.
 func (s *Service) MaybeRunAutoRetention(ctx context.Context) {
 	if s == nil {
 		return

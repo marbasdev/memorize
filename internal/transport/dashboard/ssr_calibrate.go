@@ -152,7 +152,6 @@ func buildConfHistSectionData(ctx context.Context, d Deps, lang, calScope string
 	}
 }
 
-// buildGuardrailsView builds SSR state for the Guardrails tab (audit logs and plan violation checker).
 func buildGuardrailsView(ctx context.Context, d Deps, lang string, q url.Values, scopes []string) ssrGuardrailsData {
 	if len(scopes) == 0 {
 		scopes = resolveKnownScopes(ctx, d)
@@ -174,7 +173,6 @@ func buildGuardrailsView(ctx context.Context, d Deps, lang string, q url.Values,
 	}
 }
 
-// buildCalibrateView builds SSR state for the Calibration & Test tab (thresholds, confidence histogram, relevance probe).
 func buildCalibrateView(ctx context.Context, d Deps, lang string, q url.Values, scopes []string) ssrCalibrateData {
 	calScope := strings.TrimSpace(q.Get("cal_scope"))
 	return buildConfHistSectionData(ctx, d, lang, calScope, scopes)

@@ -9,21 +9,18 @@ import (
 	"memorize/internal/infra/config"
 )
 
-// SetPreferredPortFunc registers a dynamic callback returning the preferred GGUF TCP port.
 func (m *Manager) SetPreferredPortFunc(fn func() int) {
 	m.mu.Lock()
 	m.preferredPortFn = fn
 	m.mu.Unlock()
 }
 
-// SetExcludePortFunc registers a callback returning a TCP port (such as the daemon port) to skip during GGUF port fallback.
 func (m *Manager) SetExcludePortFunc(fn func() int) {
 	m.mu.Lock()
 	m.excludePortFn = fn
 	m.mu.Unlock()
 }
 
-// SetDashboardURLFunc registers a dynamic callback returning the active Web Console URL.
 func (m *Manager) SetDashboardURLFunc(fn func() string) {
 	m.mu.Lock()
 	m.dashboardURLFn = fn

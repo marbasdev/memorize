@@ -1,6 +1,7 @@
-package dashboard_test
+package dashboard
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -14,41 +15,274 @@ import (
 	"memorize/internal/domain"
 	"memorize/internal/infra/config"
 	"memorize/internal/infra/sqlite"
-	"memorize/internal/transport/dashboard"
 	thttp "memorize/internal/transport/http"
 )
 
-type noopMutEval struct{ noopEval }
-
-func (noopMutEval) EvaluateMutation(_ context.Context, _ string, _ string, _ []domain.Fact) (domain.MutationDecision, error) {
-	return domain.MutationDecision{Action: "INSERT", Category: "convention", IsPermanent: 0.9, Confidence: 0.9}, nil
-}
-
-func loginSessionCookie(t *testing.T, h http.Handler, host, token string) *http.Cookie {
-	t.Helper()
-	form := url.Values{"token": {token}}.Encode()
-	req := httptest.NewRequest(http.MethodPost, "http://"+host+"/login", strings.NewReader(form))
-	req.Host = host
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusSeeOther {
-		t.Fatalf("POST /login expected 303, got %d (%s)", rec.Code, rec.Body.String())
-	}
-	for _, c := range rec.Result().Cookies() {
-		if c.Name == domain.SessionCookieName {
-			return c
+func TestI18nENKOParity(t *testing.T) {
+	for k, v := range enTranslations {
+		if kv, ok := koTranslations[k]; !ok || kv == "" {
+			t.Errorf("en key %q (=%q) missing or empty in koTranslations", k, v)
 		}
 	}
-	t.Fatalf("missing session cookie on /login response")
-	return nil
+	for k, v := range koTranslations {
+		if ev, ok := enTranslations[k]; !ok || ev == "" {
+			t.Errorf("ko key %q (=%q) missing or empty in enTranslations", k, v)
+		}
+	}
+}
+
+func TestDashboardHTTPRoutesMutationsEnginesAndCSRF(t *testing.T) {
+	ctx := context.Background()
+	deps := newTestDeps(t, ":memory:", noopEval{}, "", thttp.DashboardHooks{})
+	svc := deps.Memory
+
+	h := NewHandler(deps)
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+
+	for _, tc := range []struct {
+		enabled string
+		wantCfg string
+	}{
+		{"1", "1"},
+		{"0", "0"},
+	} {
+		code, _ := doHX(t, http.MethodPost, ts.URL+"/ui/personal-toggle", url.Values{"enabled": {tc.enabled}})
+		if code != http.StatusOK {
+			t.Fatalf("POST /ui/personal-toggle enabled=%s -> %d", tc.enabled, code)
+		}
+		if got := svc.GetConfigMap(ctx)["include_personal_in_project"]; got != tc.wantCfg {
+			t.Fatalf("expected include_personal_in_project=%q, got %q", tc.wantCfg, got)
+		}
+	}
+
+	for _, txt := range []string{
+		"첫 번째 라우트 테스트 규칙",
+		"두 번째 라우트 테스트 규칙",
+	} {
+		cCode, _ := doHX(t, http.MethodPost, ts.URL+"/ui/memories/commit", url.Values{
+			"new_scope":        {"project:routes"},
+			"new_category":     {"architecture"},
+			"new_sub_category": {"routing"},
+			"new_account":      {"alice"},
+			"new_tags":         {"http,ssr"},
+			"candidate":        {txt},
+		})
+		if cCode != http.StatusOK {
+			t.Fatalf("POST /ui/memories/commit(%q) -> %d", txt, cCode)
+		}
+	}
+
+	uCode, _ := doHX(t, http.MethodPost, ts.URL+"/ui/memories/update", url.Values{
+		"id":           {"1"},
+		"scope":        {"project:routes"},
+		"category":     {"architecture"},
+		"sub_category": {"security"},
+		"account":      {"bob"},
+		"tags":         {"auth,csrf"},
+		"content":      {"수정된 첫 번째 라우트 테스트 규칙"},
+		"pinned":       {"1"},
+	})
+	if uCode != http.StatusOK {
+		t.Fatalf("POST /ui/memories/update -> %d", uCode)
+	}
+	detCode, detHTML := doHX(t, http.MethodGet, ts.URL+"/ui/modal/detail?id=1", nil)
+	if detCode != http.StatusOK || !strings.Contains(detHTML, "수정된 첫 번째 라우트 테스트 규칙") || !strings.Contains(detHTML, "bob") {
+		t.Fatalf("GET /ui/modal/detail?id=1 failed (%d):\n%s", detCode, detHTML)
+	}
+
+	prevCode, prevHTML := doHX(t, http.MethodPost, ts.URL+"/ui/consolidate/preview", url.Values{
+		"merge_scope":    {"project:routes"},
+		"merge_category": {"architecture"},
+		"ids":            {"1", "2"},
+	})
+	if prevCode != http.StatusOK || !strings.Contains(prevHTML, "수정된 첫 번째 라우트 테스트 규칙") {
+		t.Fatalf("POST /ui/consolidate/preview failed (%d):\n%s", prevCode, prevHTML)
+	}
+	execCode, _ := doHX(t, http.MethodPost, ts.URL+"/ui/consolidate/execute", url.Values{
+		"merge_scope":    {"project:routes"},
+		"merge_category": {"architecture"},
+		"ids":            {"1", "2"},
+		"merge_pinned":   {"1"},
+		"content":        {"라우트 테스트 규칙 통합본"},
+	})
+	if execCode != http.StatusOK {
+		t.Fatalf("POST /ui/consolidate/execute failed: %d", execCode)
+	}
+	fCode, _ := doHX(t, http.MethodPost, ts.URL+"/ui/memories/forget", url.Values{"ids": {"3"}})
+	if fCode != http.StatusOK {
+		t.Fatalf("POST /ui/memories/forget failed: %d", fCode)
+	}
+	unCode, _ := doHX(t, http.MethodPost, ts.URL+"/ui/memories/undo", url.Values{"id": {"3"}})
+	if unCode != http.StatusOK {
+		t.Fatalf("POST /ui/memories/undo failed: %d", unCode)
+	}
+	pCode, _ := doHX(t, http.MethodPost, ts.URL+"/ui/memories/purge", url.Values{"scope": {"project:routes"}})
+	if pCode != http.StatusOK {
+		t.Fatalf("POST /ui/memories/purge failed: %d", pCode)
+	}
+
+	thCode, _ := doHX(t, http.MethodPost, ts.URL+"/ui/thresholds", url.Values{
+		"min_permanent":      {"0.79"},
+		"min_confidence":     {"0.83"},
+		"pin_invariant":      {"0.91"},
+		"min_relevance":      {"3.7"},
+		"min_rel_confidence": {"0.77"},
+	})
+	if thCode != http.StatusOK {
+		t.Fatalf("POST /ui/thresholds failed: %d", thCode)
+	}
+	if th := svc.GetThresholds(ctx); th.MinPermanent != 0.79 || th.PinInvariant != 0.91 {
+		t.Fatalf("expected updated thresholds (0.79, 0.91), got %+v", th)
+	}
+	rstCode, _ := doHX(t, http.MethodPost, ts.URL+"/ui/thresholds", url.Values{"reset": {"1"}})
+	if rstCode != http.StatusOK {
+		t.Fatalf("POST /ui/thresholds reset=1 failed: %d", rstCode)
+	}
+	if th := svc.GetThresholds(ctx); th != domain.DefaultThresholds() {
+		t.Fatalf("expected reset thresholds %+v, got %+v", domain.DefaultThresholds(), th)
+	}
+
+	verCode, verHTML := doHX(t, http.MethodPost, ts.URL+"/ui/verify", url.Values{
+		"scope": {"project:routes"},
+		"plan":  {"라우트 테스트 규칙을 준수해 안전하게 반영한다"},
+	})
+	if verCode != http.StatusOK || !strings.Contains(verHTML, "PASS") {
+		t.Fatalf("POST /ui/verify failed (%d):\n%s", verCode, verHTML)
+	}
+	prbCode, prbHTML := doHX(t, http.MethodPost, ts.URL+"/ui/probe", url.Values{
+		"scope": {"project:routes"},
+		"query": {"라우트 테스트"},
+	})
+	if prbCode != http.StatusOK || !strings.Contains(prbHTML, "라우트 테스트 규칙 통합본") {
+		t.Fatalf("POST /ui/probe failed (%d):\n%s", prbCode, prbHTML)
+	}
+
+	for _, view := range []string{"gemini", "gguf&discover_hf=1"} {
+		gCode, gHTML := doHX(t, http.MethodGet, ts.URL+"/ui/engines?view="+view, nil)
+		if gCode != http.StatusOK || len(gHTML) == 0 {
+			t.Fatalf("GET /ui/engines?view=%s failed (%d)", view, gCode)
+		}
+	}
+
+	secretVal := "AIzaSuperSecretValue987654321"
+	sCode, sHTML := doHX(t, http.MethodPost, ts.URL+"/ui/engines/save", url.Values{
+		"provider":       {"gemini"},
+		"gemini_model":   {"gemini-3.5-flash-lite"},
+		"gemini_api_key": {secretVal},
+	})
+	if sCode != http.StatusOK {
+		t.Fatalf("POST /ui/engines/save failed (%d)", sCode)
+	}
+	if strings.Contains(sHTML, secretVal) {
+		t.Fatalf("security failure: raw API secret %q echoed back in /ui/engines HTML", secretVal)
+	}
+
+	discCode, discHTML := doHX(t, http.MethodPost, ts.URL+"/ui/engines/discover-gemini", url.Values{
+		"tier": {"speed"},
+	})
+	if discCode != http.StatusOK || !strings.Contains(discHTML, "gemini") {
+		t.Fatalf("POST /ui/engines/discover-gemini failed (%d)", discCode)
+	}
+
+	dlBadCode, _ := doHX(t, http.MethodPost, ts.URL+"/ui/models/download", url.Values{
+		"custom_url": {"http://evil.example/insecure.gguf"},
+	})
+	if dlBadCode != http.StatusBadRequest {
+		t.Fatalf("expected non-HTTPS/non-allowlisted custom model URL to return 400, got %d", dlBadCode)
+	}
+	dlCancelCode, _ := doHX(t, http.MethodPost, ts.URL+"/ui/models/download", url.Values{"action": {"cancel"}})
+	if dlCancelCode != http.StatusOK {
+		t.Fatalf("POST /ui/models/download cancel -> %d", dlCancelCode)
+	}
+	srvStopCode, _ := doHX(t, http.MethodPost, ts.URL+"/ui/models/server", url.Values{"action": {"stop"}})
+	if srvStopCode != http.StatusOK {
+		t.Fatalf("POST /ui/models/server stop -> %d", srvStopCode)
+	}
+	srvBadCode, _ := doHX(t, http.MethodPost, ts.URL+"/ui/models/server", url.Values{"action": {"invalid"}})
+	if srvBadCode != http.StatusBadRequest {
+		t.Fatalf("POST /ui/models/server invalid -> expected 400, got %d", srvBadCode)
+	}
+}
+
+func TestProgressAndGuardrailCleanupJSONCSRF(t *testing.T) {
+	ctx := context.Background()
+	deps := newTestDeps(t, ":memory:", noopEval{}, "", thttp.DashboardHooks{})
+
+	if _, err := deps.Progress.RecordProgress(ctx, domain.ProgressInput{
+		Scope:   "project:csrf",
+		Track:   "Track Alpha",
+		Summary: "First activity entry for older_than_days=0 cleanup",
+		Source:  "agent",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := deps.Progress.RecordProgress(ctx, domain.ProgressInput{
+		Scope:   "project:csrf",
+		Track:   "Track Beta",
+		Summary: "Second activity entry for older_than_days=0 cleanup",
+		Source:  "agent",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	h := NewHandler(deps)
+
+	getReq := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:18095/api/progress/cleanup", nil)
+	getRec := httptest.NewRecorder()
+	h.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405 for GET /api/progress/cleanup, got %d", getRec.Code)
+	}
+
+	plainReq := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:18095/api/progress/cleanup", bytes.NewBufferString(`{"scope":"project:csrf"}`))
+	plainReq.Header.Set("Content-Type", "text/plain")
+	plainRec := httptest.NewRecorder()
+	h.ServeHTTP(plainRec, plainReq)
+	if plainRec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("expected 415 for text/plain POST, got %d", plainRec.Code)
+	}
+
+	evilOrigReq := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:18095/api/progress/cleanup", bytes.NewBufferString(`{"scope":"project:csrf","older_than_days":0}`))
+	evilOrigReq.Header.Set("Content-Type", "application/json")
+	evilOrigReq.Header.Set("Origin", "https://evil.example")
+	evilOrigRec := httptest.NewRecorder()
+	h.ServeHTTP(evilOrigRec, evilOrigReq)
+	if evilOrigRec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for cross-origin POST, got %d", evilOrigRec.Code)
+	}
+
+	okReq := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:18095/api/progress/cleanup", bytes.NewBufferString(`{"scope":"project:csrf","older_than_days":0}`))
+	okReq.Header.Set("Content-Type", "application/json")
+	okRec := httptest.NewRecorder()
+	h.ServeHTTP(okRec, okReq)
+	if okRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for valid JSON POST, got %d (%s)", okRec.Code, okRec.Body.String())
+	}
+	var res struct {
+		Deleted int `json:"deleted"`
+	}
+	if err := json.NewDecoder(okRec.Body).Decode(&res); err != nil {
+		t.Fatalf("decode cleanup response: %v", err)
+	}
+	if res.Deleted != 2 {
+		t.Fatalf("expected 2 deleted entries, got %d", res.Deleted)
+	}
+
+	ov, err := deps.Progress.GetProgressOverviewWithQuery(ctx, domain.ProgressQuery{Scope: "project:csrf"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ov.TotalCount != 0 || len(ov.RecentHistory) != 0 {
+		t.Fatalf("expected empty activity history after older_than_days=0 cleanup, got %+v", ov)
+	}
 }
 
 func TestDashboardServerModeAuthRBACAndPersonalIsolation(t *testing.T) {
 	d := newTestDeps(t, "", noopMutEval{}, "", thttp.DashboardHooks{})
 	d.ServerMode = true
 	d.DB = d.Memory.DB()
-	h := dashboard.NewHandler(d)
+	h := NewHandler(d)
 	host := "team.example.com:18095"
 
 	ctx := context.Background()
@@ -61,7 +295,6 @@ func TestDashboardServerModeAuthRBACAndPersonalIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Unauthenticated GET / redirects to /login; HTMX gets 401 + HX-Redirect; JSON API gets 401.
 	{
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "http://"+host+"/", nil)
@@ -89,7 +322,6 @@ func TestDashboardServerModeAuthRBACAndPersonalIsolation(t *testing.T) {
 		}
 	}
 
-	// Invalid login returns 401 HTML.
 	{
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "http://"+host+"/login", strings.NewReader("token=bad"))
@@ -103,7 +335,6 @@ func TestDashboardServerModeAuthRBACAndPersonalIsolation(t *testing.T) {
 
 	adminCookie := loginSessionCookie(t, h, host, adminIss.PlainToken)
 
-	// Admin creates member Alice via /ui/users/create and receives 1-time plaintext token.
 	createForm := url.Values{"account": {"alice"}, "role": {"member"}}.Encode()
 	recCreate := httptest.NewRecorder()
 	reqCreate := httptest.NewRequest(http.MethodPost, "http://"+host+"/ui/users/create", strings.NewReader(createForm))
@@ -116,7 +347,6 @@ func TestDashboardServerModeAuthRBACAndPersonalIsolation(t *testing.T) {
 		t.Fatalf("admin user create failed (expected token and MCP snippet): %d %s", recCreate.Code, recCreate.Body.String())
 	}
 
-	// Admin sees Accounts button and admin tabs.
 	recAdminHome := httptest.NewRecorder()
 	reqAdminHome := httptest.NewRequest(http.MethodGet, "http://"+host+"/", nil)
 	reqAdminHome.Host = host
@@ -126,7 +356,6 @@ func TestDashboardServerModeAuthRBACAndPersonalIsolation(t *testing.T) {
 		t.Fatalf("expected admin dashboard to expose users modal & engines tab")
 	}
 
-	// Cannot delete last active admin via /ui/users/delete.
 	recDelLast := httptest.NewRecorder()
 	reqDelLast := httptest.NewRequest(http.MethodPost, "http://"+host+"/ui/users/delete", strings.NewReader("account=admin"))
 	reqDelLast.Host = host
@@ -138,7 +367,6 @@ func TestDashboardServerModeAuthRBACAndPersonalIsolation(t *testing.T) {
 		t.Fatalf("expected deleting last admin via dashboard to fail 400, got %d", recDelLast.Code)
 	}
 
-	// Rotate alice token via admin UI to get alice's live plaintext token cleanly.
 	recRot := httptest.NewRecorder()
 	reqRot := httptest.NewRequest(http.MethodPost, "http://"+host+"/ui/users/rotate", strings.NewReader("account=alice"))
 	reqRot.Host = host
@@ -152,7 +380,6 @@ func TestDashboardServerModeAuthRBACAndPersonalIsolation(t *testing.T) {
 	aliceUsers, _ := sqlite.ListUsers(ctx, d.DB)
 	_ = aliceUsers
 
-	// Bob signs in as member: hidden admin UI & 403 on all admin routes.
 	bobCookie := loginSessionCookie(t, h, host, bobIss.PlainToken)
 	recBobHome := httptest.NewRecorder()
 	reqBobHome := httptest.NewRequest(http.MethodGet, "http://"+host+"/", nil)
@@ -189,7 +416,6 @@ func TestDashboardServerModeAuthRBACAndPersonalIsolation(t *testing.T) {
 		}
 	}
 
-	// Bob commits a personal memory via dashboard UI; neither admin nor anyone else sees it.
 	commitForm := url.Values{
 		"candidate":   {"BOB_PRIVATE_NOTE_123"},
 		"new_scope":   {"personal"},
@@ -215,7 +441,6 @@ func TestDashboardServerModeAuthRBACAndPersonalIsolation(t *testing.T) {
 		t.Fatalf("admin should never see bob personal memory in /ui/memories")
 	}
 
-	// Rotating bob's token invalidates bob's cookie immediately.
 	if _, err := sqlite.RotateUserToken(ctx, d.DB, "bob"); err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +453,6 @@ func TestDashboardServerModeAuthRBACAndPersonalIsolation(t *testing.T) {
 		t.Fatalf("expected rotated member cookie to fail 401 immediately, got %d", recRevoked.Code)
 	}
 
-	// /ui/modal/remotes is disabled in ServerMode (returns 404).
 	recRemSrv := httptest.NewRecorder()
 	reqRemSrv := httptest.NewRequest(http.MethodGet, "http://"+host+"/ui/modal/remotes", nil)
 	reqRemSrv.Host = host
@@ -244,9 +468,8 @@ func TestDashboardLocalRemoteConnectionsUI(t *testing.T) {
 	t.Setenv("MEMORY_DATA_DIR", tmp)
 	dbPath := filepath.Join(tmp, "memories.db")
 	d := newTestDeps(t, dbPath, noopMutEval{}, filepath.Join(tmp, "models"), thttp.DashboardHooks{})
-	h := dashboard.NewHandler(d)
+	h := NewHandler(d)
 
-	// Start a mock verified team server for /api/daemon/status Bearer checks.
 	teamSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/daemon/status" {
 			http.NotFound(w, r)
@@ -265,7 +488,6 @@ func TestDashboardLocalRemoteConnectionsUI(t *testing.T) {
 	}))
 	defer teamSrv.Close()
 
-	// Solo dashboard shows Team Server button (#btnOpenRemotes).
 	recHome := httptest.NewRecorder()
 	reqHome := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:18095/", nil)
 	h.ServeHTTP(recHome, reqHome)
@@ -273,7 +495,6 @@ func TestDashboardLocalRemoteConnectionsUI(t *testing.T) {
 		t.Fatalf("expected solo dashboard to render btnOpenRemotes, code=%d", recHome.Code)
 	}
 
-	// Reject bad token on /ui/remotes/connect cleanly (400).
 	badForm := url.Values{"mode": {"global"}, "url": {teamSrv.URL}, "token": {"wrong"}}.Encode()
 	recBad := httptest.NewRecorder()
 	reqBad := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:18095/ui/remotes/connect", strings.NewReader(badForm))
@@ -284,7 +505,6 @@ func TestDashboardLocalRemoteConnectionsUI(t *testing.T) {
 		t.Fatalf("expected bad token connect to return 400, got %d", recBad.Code)
 	}
 
-	// Valid repo binding succeeds, omits plaintext token in HTML, updates OOB nav badge, and saves remotes.json.
 	teamRepo := filepath.Join(tmp, "team-project")
 	goodForm := url.Values{"mode": {"repo"}, "repo_path": {teamRepo}, "url": {teamSrv.URL}, "token": {"mem_valid_team"}}.Encode()
 	recGood := httptest.NewRecorder()
@@ -303,7 +523,6 @@ func TestDashboardLocalRemoteConnectionsUI(t *testing.T) {
 		t.Fatalf("expected saved remote binding for %s, got ok=%v target=%+v", teamRepo, ok, got)
 	}
 
-	// Disconnect removes binding and updates OOB badge back to 0.
 	discForm := url.Values{"mode": {"repo"}, "repo_path": {teamRepo}}.Encode()
 	recDisc := httptest.NewRecorder()
 	reqDisc := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:18095/ui/remotes/disconnect", strings.NewReader(discForm))
@@ -322,7 +541,7 @@ func TestDashboardServerModeTeamReadOnlyConfigRBACAndSharedToPersonalGuard(t *te
 	d := newTestDeps(t, "", noopMutEval{}, "", thttp.DashboardHooks{})
 	d.ServerMode = true
 	d.DB = d.Memory.DB()
-	h := dashboard.NewHandler(d)
+	h := NewHandler(d)
 
 	ctx := context.Background()
 	adminIssue, _, err := sqlite.EnsureBootstrapAdmin(ctx, d.DB, "admin", "")
@@ -337,7 +556,6 @@ func TestDashboardServerModeTeamReadOnlyConfigRBACAndSharedToPersonalGuard(t *te
 	adminCookie := loginSessionCookie(t, h, host, adminIssue.PlainToken)
 	aliceCookie := loginSessionCookie(t, h, host, aliceIssue.PlainToken)
 
-	// Seed a shared project memory via admin context so /ui/team has a project scope and modal_detail can inspect it.
 	ctxAdmin := domain.WithAuthPrincipal(ctx, domain.AuthPrincipal{
 		Account:       "admin",
 		Role:          domain.RoleAdmin,
@@ -352,7 +570,6 @@ func TestDashboardServerModeTeamReadOnlyConfigRBACAndSharedToPersonalGuard(t *te
 		t.Fatalf("lookup seeded project memory ID: id=%d err=%v", projMemID, err)
 	}
 
-	// GET /ui/team as member renders ServerMode read-only notice, hides host-git buttons & #teamAuthorForm.
 	recTeamAlice := httptest.NewRecorder()
 	reqTeamAlice := httptest.NewRequest(http.MethodGet, "http://"+host+"/ui/team?team_scope=project:teamapp", nil)
 	reqTeamAlice.Host = host
@@ -364,7 +581,6 @@ func TestDashboardServerModeTeamReadOnlyConfigRBACAndSharedToPersonalGuard(t *te
 		t.Fatalf("unexpected member /ui/team HTML (%d):\n%s", recTeamAlice.Code, bodyAlice)
 	}
 
-	// GET /ui/team as admin includes #teamAuthorForm while still hiding server-local git buttons.
 	recTeamAdmin := httptest.NewRecorder()
 	reqTeamAdmin := httptest.NewRequest(http.MethodGet, "http://"+host+"/ui/team?team_scope=project:teamapp", nil)
 	reqTeamAdmin.Host = host
@@ -376,7 +592,6 @@ func TestDashboardServerModeTeamReadOnlyConfigRBACAndSharedToPersonalGuard(t *te
 		t.Fatalf("unexpected admin /ui/team HTML (%d):\n%s", recTeamAdmin.Code, bodyAdmin)
 	}
 
-	// POST /ui/team/config rejects member (403) and accepts admin (200).
 	cfgForm := url.Values{"team_scope": {"project:teamapp"}, "author": {"lead"}}.Encode()
 	recCfgAlice := httptest.NewRecorder()
 	reqCfgAlice := httptest.NewRequest(http.MethodPost, "http://"+host+"/ui/team/config", strings.NewReader(cfgForm))
@@ -400,7 +615,6 @@ func TestDashboardServerModeTeamReadOnlyConfigRBACAndSharedToPersonalGuard(t *te
 		t.Fatalf("expected admin POST /ui/team/config 200 with @lead, got %d %s", recCfgAdmin.Code, recCfgAdmin.Body.String())
 	}
 
-	// Server-local git team rule mutation endpoints reject requests in ServerMode cleanly (400).
 	for _, ep := range []string{"/ui/team/sync", "/ui/modal/team-draft", "/ui/team/publish", "/ui/team/delete"} {
 		form := url.Values{"team_scope": {"project:teamapp"}, "rule_key": {"k"}, "raw_rule": {"test rule"}}.Encode()
 		rec := httptest.NewRecorder()
@@ -415,8 +629,6 @@ func TestDashboardServerModeTeamReadOnlyConfigRBACAndSharedToPersonalGuard(t *te
 		}
 	}
 
-	// GET /ui/modal/detail for shared project memory omits BOTH "personal" and "global" target scopes & promote button in ServerMode,
-	// and POST /ui/memories/update moving shared project memory into personal OR global fails.
 	recDetail := httptest.NewRecorder()
 	reqDetail := httptest.NewRequest(http.MethodGet, "http://"+host+"/ui/modal/detail?id="+url.QueryEscape(strings.TrimSpace(strconv.FormatInt(projMemID, 10))), nil)
 	reqDetail.Host = host
@@ -445,7 +657,6 @@ func TestDashboardServerModeTeamReadOnlyConfigRBACAndSharedToPersonalGuard(t *te
 		}
 	}
 
-	// Team Rule Pack conflicts cannot use local_override in ServerMode; Progress hides host sync button and gates /ui/progress/sync to admin.
 	recConf := httptest.NewRecorder()
 	reqConf := httptest.NewRequest(http.MethodPost, "http://"+host+"/ui/team/conflict", strings.NewReader(url.Values{
 		"team_scope": {"project:teamapp"},
@@ -479,5 +690,38 @@ func TestDashboardServerModeTeamReadOnlyConfigRBACAndSharedToPersonalGuard(t *te
 	h.ServeHTTP(recProgSync, reqProgSync)
 	if recProgSync.Code != http.StatusForbidden {
 		t.Fatalf("expected member POST /ui/progress/sync 403 in ServerMode, got %d", recProgSync.Code)
+	}
+
+	for i := 1; i <= 10; i++ {
+		recBad := httptest.NewRecorder()
+		reqBad := httptest.NewRequest(http.MethodPost, "http://"+host+"/login", strings.NewReader("token=wrong"))
+		reqBad.Host = host
+		reqBad.RemoteAddr = "198.51.100.42:12345"
+		reqBad.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		h.ServeHTTP(recBad, reqBad)
+		if i < 10 && recBad.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d expected 401, got %d", i, recBad.Code)
+		}
+		if i == 10 && recBad.Code != http.StatusTooManyRequests {
+			t.Fatalf("attempt 10 expected 429 lockout, got %d", recBad.Code)
+		}
+	}
+	recLockedValid := httptest.NewRecorder()
+	reqLockedValid := httptest.NewRequest(http.MethodPost, "http://"+host+"/login", strings.NewReader(url.Values{"token": {adminIssue.PlainToken}}.Encode()))
+	reqLockedValid.Host = host
+	reqLockedValid.RemoteAddr = "198.51.100.42:12345"
+	reqLockedValid.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	h.ServeHTTP(recLockedValid, reqLockedValid)
+	if recLockedValid.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected locked-out IP to stay 429, got %d", recLockedValid.Code)
+	}
+	recOtherIP := httptest.NewRecorder()
+	reqOtherIP := httptest.NewRequest(http.MethodPost, "http://"+host+"/login", strings.NewReader(url.Values{"token": {adminIssue.PlainToken}}.Encode()))
+	reqOtherIP.Host = host
+	reqOtherIP.RemoteAddr = "198.51.100.77:12345"
+	reqOtherIP.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	h.ServeHTTP(recOtherIP, reqOtherIP)
+	if recOtherIP.Code != http.StatusSeeOther {
+		t.Fatalf("expected non-throttled IP login 303, got %d", recOtherIP.Code)
 	}
 }

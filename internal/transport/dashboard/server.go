@@ -24,7 +24,6 @@ import (
 //go:embed templates/*.html assets/styles.css assets/ui.js assets/theme.js assets/vendor/*
 var embeddedFS embed.FS
 
-// Deps supplies the module services and optional daemon hooks required to serve the dashboard UI.
 type Deps struct {
 	ServerMode bool
 	DB         *sql.DB
@@ -36,7 +35,6 @@ type Deps struct {
 	Hooks      thttp.DashboardHooks
 }
 
-// NewHandler builds the dashboard HTTP handler backed by the supplied module services and hooks.
 func NewHandler(d Deps) http.Handler {
 	if d.LocalModel == nil {
 		d.LocalModel = localmodel.NewManager("")

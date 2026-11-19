@@ -13,7 +13,6 @@ import (
 	"memorize/internal/domain"
 )
 
-// IsPersistentDBPath reports whether dbPath refers to a disk-backed SQLite file rather than in-memory storage.
 func IsPersistentDBPath(dbPath string) bool {
 	p := strings.TrimSpace(dbPath)
 	if p == "" || p == ":memory:" || strings.HasPrefix(p, "file:") {
@@ -22,7 +21,6 @@ func IsPersistentDBPath(dbPath string) bool {
 	return true
 }
 
-// DataDirForDBPath returns the directory containing dbPath when it is disk-backed.
 func DataDirForDBPath(dbPath string) string {
 	if !IsPersistentDBPath(dbPath) {
 		return ""
@@ -30,7 +28,6 @@ func DataDirForDBPath(dbPath string) string {
 	return filepath.Dir(filepath.Clean(strings.TrimSpace(dbPath)))
 }
 
-// DefaultDataDir resolves the memorize runtime directory from MEMORY_DATA_DIR, MEMORY_DB_PATH, or ~/.memorize.
 func DefaultDataDir() string {
 	if v := strings.TrimSpace(os.Getenv("MEMORY_DATA_DIR")); v != "" {
 		return filepath.Clean(v)
@@ -45,7 +42,6 @@ func DefaultDataDir() string {
 	return filepath.Join(home, ".memorize")
 }
 
-// PortsFilePath returns the ports.json path next to dbPath.
 func PortsFilePath(dbPath string) string {
 	dir := DataDirForDBPath(dbPath)
 	if dir == "" {
@@ -54,7 +50,6 @@ func PortsFilePath(dbPath string) string {
 	return filepath.Join(dir, "ports.json")
 }
 
-// DaemonStateFilePath returns the daemon.json runtime descriptor path next to dbPath.
 func DaemonStateFilePath(dbPath string) string {
 	dir := DataDirForDBPath(dbPath)
 	if dir == "" {
@@ -63,7 +58,6 @@ func DaemonStateFilePath(dbPath string) string {
 	return filepath.Join(dir, "daemon.json")
 }
 
-// DaemonLogPath returns the daemon log path from MEMORY_DAEMON_LOG, adjacent to dbPath, or OS temp fallback.
 func DaemonLogPath(dbPath string) string {
 	if p := strings.TrimSpace(os.Getenv("MEMORY_DAEMON_LOG")); p != "" {
 		return p
@@ -79,7 +73,6 @@ func DaemonLogPath(dbPath string) string {
 	return filepath.Join(os.TempDir(), fmt.Sprintf("memorize-daemon-%d.log", os.Getuid()))
 }
 
-// LoadPortConfigDir loads persisted port preferences from dataDir, falling back to defaults.
 func LoadPortConfigDir(dataDir string) domain.PortConfig {
 	cfg := domain.DefaultPortConfig()
 	dir := strings.TrimSpace(dataDir)
@@ -106,7 +99,6 @@ func LoadPortConfigDir(dataDir string) domain.PortConfig {
 	return cfg
 }
 
-// LoadPortConfig loads persisted port preferences for the data directory holding dbPath.
 func LoadPortConfig(dbPath string) domain.PortConfig {
 	return LoadPortConfigDir(DataDirForDBPath(dbPath))
 }
@@ -186,7 +178,6 @@ func SavePortConfig(dbPath string, cfg domain.PortConfig) error {
 	return writeFileAtomic0600(path, append(b, '\n'))
 }
 
-// ReadDaemonStateDir reads daemon.json from dataDir.
 func ReadDaemonStateDir(dataDir string) (domain.DaemonRuntimeState, bool) {
 	dir := strings.TrimSpace(dataDir)
 	if dir == "" {
@@ -207,12 +198,10 @@ func ReadDaemonStateDir(dataDir string) (domain.DaemonRuntimeState, bool) {
 	return st, true
 }
 
-// ReadDaemonState reads daemon.json adjacent to dbPath.
 func ReadDaemonState(dbPath string) (domain.DaemonRuntimeState, bool) {
 	return ReadDaemonStateDir(DataDirForDBPath(dbPath))
 }
 
-// WriteDaemonState writes daemon.json atomically next to dbPath.
 func WriteDaemonState(dbPath string, st domain.DaemonRuntimeState) error {
 	path := DaemonStateFilePath(dbPath)
 	if path == "" {
@@ -225,7 +214,6 @@ func WriteDaemonState(dbPath string, st domain.DaemonRuntimeState) error {
 	return writeFileAtomic0600(path, append(b, '\n'))
 }
 
-// RemoveDaemonStateIfPID removes daemon.json when empty or matching pid.
 func RemoveDaemonStateIfPID(dbPath string, pid int) {
 	path := DaemonStateFilePath(dbPath)
 	if path == "" {
@@ -239,7 +227,6 @@ func RemoveDaemonStateIfPID(dbPath string, pid int) {
 	_ = os.Remove(path)
 }
 
-// ActiveDaemonURL resolves the best HTTP base URL for reaching the local Web Console.
 func ActiveDaemonURL(dbPath string) string {
 	dir := DataDirForDBPath(dbPath)
 	if dir == "" {
@@ -255,7 +242,6 @@ func ActiveDaemonURL(dbPath string) string {
 	return "http://" + domain.DefaultDaemonAddr
 }
 
-// SamePathClean canonicalizes two paths including symlinks and checks equality.
 func SamePathClean(a, b string) bool {
 	ca, cb := strings.TrimSpace(a), strings.TrimSpace(b)
 	if ca == "" || cb == "" {
@@ -276,7 +262,6 @@ func SamePathClean(a, b string) bool {
 	return filepath.Clean(ca) == filepath.Clean(cb)
 }
 
-// IsLoopbackPortFree reports whether host:port can currently be bound via TCP.
 func IsLoopbackPortFree(host string, port int) bool {
 	if port < 1 || port > 65535 {
 		return false

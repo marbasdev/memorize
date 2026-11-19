@@ -28,7 +28,6 @@ func formatMemoryIDsStr(ids []int64) string {
 	return strings.Join(parts, " ")
 }
 
-// ParseMemoryIDsStr extracts positive, deduplicated memory IDs from whitespace/punctuation-delimited text.
 func ParseMemoryIDsStr(raw string) []int64 {
 	seen := make(map[int64]bool)
 	var out []int64
@@ -56,7 +55,6 @@ func splitDetailLines(details, summary string) []string {
 	return lines
 }
 
-// ParseProgressTimestamp parses SQLite CURRENT_TIMESTAMP (UTC) or ISO/RFC3339 strings into local time.
 func ParseProgressTimestamp(raw string) (time.Time, bool) {
 	s := strings.TrimSpace(raw)
 	if s == "" {
@@ -111,7 +109,6 @@ func extractProgressDateTime(r *domain.ProgressRecord) {
 	}
 }
 
-// RecordProgress validates and inserts a new entry into project_progress.
 func (s *Service) RecordProgress(ctx context.Context, in domain.ProgressInput) (domain.ProgressRecord, error) {
 	summary := strings.TrimSpace(in.Summary)
 	if summary == "" {
@@ -167,7 +164,6 @@ func (s *Service) RecordProgress(ctx context.Context, in domain.ProgressInput) (
 	return s.GetProgressByID(ctx, id)
 }
 
-// GetProgressByID loads one project_progress entry by primary key.
 func (s *Service) GetProgressByID(ctx context.Context, id int64) (domain.ProgressRecord, error) {
 	var r domain.ProgressRecord
 	var memStr string
@@ -205,7 +201,6 @@ func authorizeProgressMutation(ctx context.Context, cur domain.ProgressRecord) e
 	return nil
 }
 
-// UpdateProgress updates mutable fields of an existing project_progress entry.
 func (s *Service) UpdateProgress(ctx context.Context, id int64, in domain.ProgressInput) error {
 	cur, err := s.GetProgressByID(ctx, id)
 	if err != nil {
@@ -283,7 +278,6 @@ func (s *Service) UpdateProgress(ctx context.Context, id int64, in domain.Progre
 	return err
 }
 
-// DeleteProgress removes one project_progress entry by ID.
 func (s *Service) DeleteProgress(ctx context.Context, id int64) error {
 	cur, err := s.GetProgressByID(ctx, id)
 	if err != nil {
@@ -303,17 +297,10 @@ func (s *Service) DeleteProgress(ctx context.Context, id int64) error {
 	return nil
 }
 
-// GetProgressOverview returns the progress activity board/timeline for rawScope filtered by category and repo.
-func (s *Service) GetProgressOverview(ctx context.Context, rawScope, categoryFilter, explicitRepo string) (domain.ProgressOverview, error) {
-	return s.GetProgressOverviewByTrack(ctx, rawScope, "", categoryFilter, explicitRepo)
-}
-
-// GetProgressOverviewByTrack returns a track-filtered progress activity overview (up to 200 items).
 func (s *Service) GetProgressOverviewByTrack(ctx context.Context, rawScope, trackFilter, categoryFilter, explicitRepo string) (domain.ProgressOverview, error) {
 	return s.GetProgressOverviewPaged(ctx, rawScope, trackFilter, categoryFilter, explicitRepo, 1, 200)
 }
 
-// GetProgressOverviewPaged returns a paginated progress activity overview for rawScope (defaulting to TopProjectScope when empty).
 func (s *Service) GetProgressOverviewPaged(ctx context.Context, rawScope, trackFilter, categoryFilter, explicitRepo string, page, pageSize int) (domain.ProgressOverview, error) {
 	sc := strings.TrimSpace(rawScope)
 	if sc == "" {

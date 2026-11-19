@@ -8,7 +8,6 @@ import (
 
 	"memorize/internal/domain"
 	"memorize/internal/infra/git"
-	"memorize/internal/infra/sqlite"
 )
 
 const maxPublishAttempts = 3 // 1 initial attempt + up to 2 CAS retries on concurrent push conflicts
@@ -18,7 +17,6 @@ var (
 	errAbortSemanticConflict = errors.New("rulepack publish paused: policy conflict with latest team rules")
 )
 
-// ConflictEvaluator checks a candidate rule against the latest Team Rules document (used during CAS re-evaluation).
 type ConflictEvaluator func(ctx context.Context, rule domain.TeamRule, latestDoc *Document) (alreadyCovered bool, conflictReason string, err error)
 
 // PublishInput configures promoting or adding a Team Rule cleanly via isolated Git worktree push.
@@ -52,7 +50,6 @@ type RemoveInput struct {
 	CommitMessage string
 }
 
-// PublishResult reports the outcome of PublishProposal, UpdateRule, or RemoveRuleRemote.
 type PublishResult struct {
 	Status          string // "published" | "updated" | "removed" | "already_covered" | "conflict_pending"
 	Rule            domain.TeamRule
@@ -80,11 +77,7 @@ func (s *Service) resolveMutationTarget(ctx context.Context, rawScope, repoDir s
 	if !strings.HasPrefix(sc, "project:") {
 		return "", "", fmt.Errorf("team rule pack requires a project:* scope (got %q)", sc)
 	}
-	if s != nil && s.db != nil {
-		root = sqlite.ResolveScopeRepoPath(ctx, s.db, sc, repoDir)
-	} else {
-		root = git.ResolveRoot(repoDir)
-	}
+	root = s.resolveScopeRepoPath(ctx, sc, repoDir)
 	if root == "" {
 		return "", "", errors.New("could not resolve Git repository root for scope " + sc)
 	}
@@ -199,9 +192,6 @@ func checkConflictEvaluator(ctx context.Context, check ConflictEvaluator, rule d
 	return nil
 }
 
-// PublishProposal drafts, validates, and publishes a Team Rule without mixing staged or feature-branch code.
-// If remote advances concurrently or push receives non-fast-forward, it fetches latest, re-evaluates conflicts,
-// and retries up to 2 times cleanly without polluting the developer's workspace.
 func (s *Service) PublishProposal(ctx context.Context, in PublishInput) (PublishResult, error) {
 	sc, root, err := s.resolveMutationTarget(ctx, in.Scope, in.RepoDir)
 	if err != nil {

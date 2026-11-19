@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-// HookPhase represents the lifecycle stage of an agent or VCS hook invocation.
 type HookPhase string
 
 const (
@@ -28,9 +27,6 @@ var validHookPhases = map[HookPhase]bool{
 	HookPhaseCompact:      true,
 }
 
-// AgentSpec describes a supported coding agent or VCS hook integration.
-// Adding a new agent in agentCatalog wires hook mode parsing, timeout manifest
-// discovery, and dashboard source labeling from a single registry.
 type AgentSpec struct {
 	ID                string
 	DisplayName       string
@@ -80,7 +76,6 @@ var agentCatalog = []AgentSpec{
 	},
 }
 
-// AllAgentSpecs returns a copy of all registered coding agent and hook specs.
 func AllAgentSpecs() []AgentSpec {
 	out := make([]AgentSpec, len(agentCatalog))
 	for i, spec := range agentCatalog {
@@ -89,7 +84,6 @@ func AllAgentSpecs() []AgentSpec {
 	return out
 }
 
-// FindAgentSpec returns the AgentSpec for a canonical agent ID.
 func FindAgentSpec(id string) (AgentSpec, bool) {
 	norm := strings.ToLower(strings.TrimSpace(id))
 	for _, spec := range agentCatalog {
@@ -100,12 +94,10 @@ func FindAgentSpec(id string) (AgentSpec, bool) {
 	return AgentSpec{}, false
 }
 
-// ModeForAgentPhase formats the canonical hook mode flag string (e.g. "claude-pretool").
 func ModeForAgentPhase(agentID string, phase HookPhase) string {
 	return strings.ToLower(strings.TrimSpace(agentID)) + "-" + string(phase)
 }
 
-// ParseHookMode parses a "-hook <mode>" identifier into its agent ID and HookPhase.
 func ParseHookMode(mode string) (agentID string, phase HookPhase, ok bool) {
 	m := strings.ToLower(strings.TrimSpace(mode))
 	rawAgent, rawPhase, hasDash := strings.Cut(m, "-")
@@ -128,7 +120,6 @@ func ParseHookMode(mode string) (agentID string, phase HookPhase, ok bool) {
 	return "", "", false
 }
 
-// ModesForPhase returns all canonical "<agent>-<phase>" mode identifiers supporting phase.
 func ModesForPhase(phase HookPhase) []string {
 	var modes []string
 	for _, spec := range agentCatalog {
@@ -142,7 +133,6 @@ func ModesForPhase(phase HookPhase) []string {
 	return modes
 }
 
-// FormatHookSourceLabel returns a human-readable dashboard label for a hook log source.
 func FormatHookSourceLabel(source string) string {
 	agentID, phase, ok := ParseHookMode(source)
 	if !ok {

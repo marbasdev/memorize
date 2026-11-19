@@ -45,17 +45,16 @@ func TestDynamicResolverAndPerFeatureRouting(t *testing.T) {
 	defer srv.Close()
 	t.Setenv("GEMINI_API_BASE", srv.URL)
 
-	resolver := NewDynamicResolver()
-	resolved := resolver(map[string]string{
+	res := NewTaskResolverWithEndpoint(nil)
+	resolved, ok := res(map[string]string{
 		"active_provider": "jev",
 		"jev_api_url":     srv.URL,
 		"jev_model":       "OmniJev/OneJev1.6-0.8B",
-	})
-	if resolved == nil || resolved.Name() != "flide:OmniJev/OneJev1.6-0.8B" {
+	}, "")
+	if !ok || resolved == nil || resolved.Name() != "flide:OmniJev/OneJev1.6-0.8B" {
 		t.Fatalf("expected resolver to instantiate flide:OmniJev/OneJev1.6-0.8B, got %v", resolved)
 	}
 
-	res := NewTaskResolver()
 	baseCfg := map[string]string{
 		"active_provider":  "gemini",
 		"gemini_model":     "gemini-decision-1",
@@ -139,7 +138,7 @@ func TestRouterCircuitBreakerCooldownAndFallback(t *testing.T) {
 	defer srv.Close()
 	t.Setenv("GEMINI_API_BASE", srv.URL)
 
-	res := NewTaskResolver()
+	res := NewTaskResolverWithEndpoint(nil)
 	cfg := map[string]string{
 		"active_provider":      "gemini",
 		"gemini_model":         "gemini-3.5-flash-lite",
@@ -164,7 +163,6 @@ func TestRouterCircuitBreakerCooldownAndFallback(t *testing.T) {
 		t.Fatalf("expected 1 fast-fail hit on decisions and 1 fallback hit on flash-lite, got dec=%d flash=%d", decHits.Load(), flashHits.Load())
 	}
 
-	// Second call while gemini-decision-1 is in cooldown must skip /v1beta/decisions completely (0ms wasted).
 	ev2, _ := res(cfg, domain.TaskRelevance)
 	scored2, err := ev2.ScoreRelevance(context.Background(), "database setup", facts)
 	if err != nil || len(scored2) != 1 {
@@ -177,9 +175,8 @@ func TestRouterCircuitBreakerCooldownAndFallback(t *testing.T) {
 
 func TestFallbackEvaluatorInputTokenLimitPropagation(t *testing.T) {
 	t.Setenv("GEMINI_API_BASE", "")
-	res := NewTaskResolver()
+	res := NewTaskResolverWithEndpoint(nil)
 
-	// Gemini primary (262144) + Gemini fallback (1048576) -> min = 262144
 	cfgBoth := map[string]string{
 		"active_provider":      "gemini",
 		"gemini_model":         "gemini-3.5-flash-lite",
@@ -194,7 +191,6 @@ func TestFallbackEvaluatorInputTokenLimitPropagation(t *testing.T) {
 		t.Fatalf("expected min known limit=262144 across primary+fallback, got %d", got)
 	}
 
-	// Gemini primary (262144) + unknown local fallback (0) -> 0 (safe conservative ceiling)
 	srv := httptest.NewServer(http.NotFoundHandler())
 	defer srv.Close()
 	cfgUnknownFB := map[string]string{

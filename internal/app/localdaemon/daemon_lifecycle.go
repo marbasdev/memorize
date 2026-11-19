@@ -25,7 +25,6 @@ type reexecSpec struct {
 	addr string
 }
 
-// daemonLifecycle manages HTTP serving, port updates, binary hot-reload watching, and clean stop/re-exec for one bound daemon listener.
 type daemonLifecycle struct {
 	version   string
 	bundle    *runtimeBundle
@@ -92,8 +91,15 @@ func (d *daemonLifecycle) close() error {
 	var cerr error
 	d.closeOnce.Do(func() {
 		close(d.stopWatch)
+		if d.bundle != nil && d.bundle.mem != nil {
+			d.bundle.mem.Bus().Close()
+		}
 		if d.srv != nil {
-			cerr = d.srv.Close()
+			shutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if err := d.srv.Shutdown(shutCtx); err != nil {
+				cerr = d.srv.Close()
+			}
 		}
 	})
 	return cerr

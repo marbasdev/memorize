@@ -42,8 +42,6 @@ func NewGGUFAdapter(endpoint, model string, ensureFn ...func(context.Context) er
 	return newGGUFAdapter(endpoint, model, fn, nil)
 }
 
-// NewGGUFAdapterWithEndpoint behaves like NewGGUFAdapter while accepting an auto-wake callback
-// that returns the dynamically chosen endpoint (for example, after an automatic port fallback).
 func NewGGUFAdapterWithEndpoint(endpoint, model string, wakeEPFn func(context.Context) (string, error)) *BatchEvaluator {
 	return newGGUFAdapter(endpoint, model, nil, wakeEPFn)
 }
@@ -68,9 +66,6 @@ func newGGUFAdapter(endpoint, model string, fn func(context.Context) error, wake
 	return NewBatchEvaluator("gguf:"+m, newSchemaEvaluator(tr), 20, 2)
 }
 
-// NewOpenAICompatibleAdapter connects to any OpenAI-compatible /v1/chat/completions server
-// (Ollama, LM Studio, vLLM, llama.cpp, OpenRouter, or corporate OpenAI gateway),
-// while preserving legacy /v1/systemone compatibility if explicitly configured.
 func NewOpenAICompatibleAdapter(endpoint, model, apiKey string) *BatchEvaluator {
 	ep := strings.TrimSpace(endpoint)
 	if ep == "" {
@@ -272,8 +267,6 @@ func (g *GGUFAdapter) probeEndpointContextTokens(ctx context.Context, ep string)
 	return 0, false
 }
 
-// InputTokenLimit returns the verified active server context limit (e.g. llama-server /props n_ctx
-// or vLLM max_model_len), or 0 when the endpoint does not expose a runtime context cap.
 func (g *GGUFAdapter) InputTokenLimit(ctx context.Context) int {
 	if g == nil {
 		return 0

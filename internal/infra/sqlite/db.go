@@ -41,10 +41,29 @@ func dropProgressStatusColumnIfPresent(db *sql.DB) {
 	_, _ = db.Exec(`ALTER TABLE project_progress DROP COLUMN status`)
 }
 
-// Open initializes a single-writer WAL SQLite connection with 0600 file permissions and schema migrations.
+const maxDiskOpenConns = 4
+
+func isMemoryDSN(dbPath string) bool {
+	s := strings.TrimSpace(strings.ToLower(dbPath))
+	return s == "" || s == ":memory:" || strings.HasPrefix(s, "file::memory:") || strings.Contains(s, "mode=memory")
+}
+
+func buildSQLiteDSN(dbPath string) string {
+	if isMemoryDSN(dbPath) {
+		return dbPath
+	}
+	sep := "?"
+	if strings.Contains(dbPath, "?") {
+		sep = "&"
+	}
+	return dbPath + sep + "_busy_timeout=10000&_journal_mode=WAL&_synchronous=NORMAL&_txlock=immediate"
+}
+
+// Open initializes a WAL SQLite database with 0600 file permissions, schema migrations,
+// and concurrent WAL read pooling (immediate write locking + 10s busy_timeout) on disk-backed DBs.
 func Open(dbPath string) (*sql.DB, error) {
 	config.EnsurePrivateDBFile(dbPath)
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sql.Open("sqlite", buildSQLiteDSN(dbPath))
 	if err != nil {
 		return nil, err
 	}
@@ -52,6 +71,10 @@ func Open(dbPath string) (*sql.DB, error) {
 	if err := InitSchema(db); err != nil {
 		_ = db.Close()
 		return nil, err
+	}
+	if !isMemoryDSN(dbPath) {
+		db.SetMaxOpenConns(maxDiskOpenConns)
+		db.SetMaxIdleConns(maxDiskOpenConns)
 	}
 	config.RestrictDBPermissions(dbPath)
 	return db, nil
@@ -254,7 +277,6 @@ func InitSchema(db *sql.DB) error {
 			val TEXT NOT NULL
 		);
 	`)
-	// One-time migration moving legacy session HMAC secrets out of the user config table.
 	_, _ = db.Exec(`
 		INSERT INTO internal_secrets (key, val)
 		SELECT key, val FROM config WHERE key = ?
@@ -277,18 +299,25 @@ func InitSchema(db *sql.DB) error {
 	_, _ = db.Exec(`ALTER TABLE turn_state ADD COLUMN partial_notice TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE turn_state ADD COLUMN stop_retry INTEGER NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(`ALTER TABLE session_sent ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`)
-	_, _ = db.Exec(`DELETE FROM session_sent WHERE updated_at < datetime('now', '-2 days')`)
-	_, _ = db.Exec(`DELETE FROM session_sent_rules WHERE updated_at < datetime('now', '-2 days')`)
-	_, _ = db.Exec(`DELETE FROM session_updates WHERE updated_at < datetime('now', '-2 days')`)
-	_, _ = db.Exec(`DELETE FROM turn_state WHERE updated_at < ?`, time.Now().Add(-domain.TurnBaselineTTL).Unix())
-	_, _ = db.Exec(`DELETE FROM turn_pending_edits WHERE updated_at < ?`, time.Now().Add(-domain.TurnBaselineTTL).Unix())
-	_, _ = db.Exec(`DELETE FROM onboarding_prompts WHERE updated_at < ?`, time.Now().Add(-6*time.Hour).Unix())
-	_, _ = db.Exec(`DELETE FROM session_compacts WHERE updated_at < ?`, time.Now().Add(-48*time.Hour).Unix())
+	SweepTransientSessionTables(context.Background(), db)
 	_, _ = db.Exec(`DELETE FROM project_progress WHERE source = 'session_auto'`)
 	return nil
 }
 
-// WithTx executes fn inside a SQLite transaction, rolling back on error or panic and committing on success.
+func SweepTransientSessionTables(ctx context.Context, db *sql.DB) {
+	if db == nil {
+		return
+	}
+	now := time.Now()
+	_, _ = db.ExecContext(ctx, `DELETE FROM session_sent WHERE updated_at < datetime('now', '-2 days')`)
+	_, _ = db.ExecContext(ctx, `DELETE FROM session_sent_rules WHERE updated_at < datetime('now', '-2 days')`)
+	_, _ = db.ExecContext(ctx, `DELETE FROM session_updates WHERE updated_at < datetime('now', '-2 days')`)
+	_, _ = db.ExecContext(ctx, `DELETE FROM turn_state WHERE updated_at < ?`, now.Add(-domain.TurnBaselineTTL).Unix())
+	_, _ = db.ExecContext(ctx, `DELETE FROM turn_pending_edits WHERE updated_at < ?`, now.Add(-domain.TurnBaselineTTL).Unix())
+	_, _ = db.ExecContext(ctx, `DELETE FROM onboarding_prompts WHERE updated_at < ?`, now.Add(-6*time.Hour).Unix())
+	_, _ = db.ExecContext(ctx, `DELETE FROM session_compacts WHERE updated_at < ?`, now.Add(-48*time.Hour).Unix())
+}
+
 func WithTx(ctx context.Context, db *sql.DB, fn func(tx *sql.Tx) error) error {
 	if db == nil {
 		return sql.ErrConnDone

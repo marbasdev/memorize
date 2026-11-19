@@ -13,13 +13,10 @@ const (
 	DefaultProgressRetentionDays  = 0
 	DefaultGuardrailRetentionDays = 0
 
-	// TurnBaselineTTL bounds how long active turn baselines and session turn state remain valid.
 	TurnBaselineTTL = 2 * time.Hour
-	// TurnInputTTL bounds how long the latest turn prompt remains active for pre-mutation gating.
-	TurnInputTTL = 15 * time.Minute
+	TurnInputTTL    = 15 * time.Minute
 )
 
-// Thresholds configures read/write gate thresholds for memory ingestion and retrieval.
 type Thresholds struct {
 	MinPermanent     float64 `json:"min_permanent"`
 	MinConfidence    float64 `json:"min_confidence"`
@@ -28,7 +25,6 @@ type Thresholds struct {
 	MinRelConfidence float64 `json:"min_rel_confidence"`
 }
 
-// DefaultThresholds returns the default memory gate thresholds.
 func DefaultThresholds() Thresholds {
 	return Thresholds{
 		MinPermanent:     0.75, // Write Gate
@@ -39,7 +35,6 @@ func DefaultThresholds() Thresholds {
 	}
 }
 
-// Fact represents an active stored memory entry passed to inference evaluators.
 type Fact struct {
 	ID          int64    `json:"id"`
 	Scope       string   `json:"scope"`
@@ -54,19 +49,16 @@ type Fact struct {
 	Superseded  []string `json:"superseded,omitempty"`
 }
 
-// IsTeam reports whether f originates from a repository Team Rule Pack rather than local SQLite memories.
 func (f Fact) IsTeam() bool {
 	return f.Origin == RuleOriginTeam || f.RuleKey != ""
 }
 
-// ScoredFact pairs a retrieved Fact with evaluator relevance and confidence scores.
 type ScoredFact struct {
 	Fact
 	Score      float64 `json:"score"`      // 0.0 ~ 5.0
 	Confidence float64 `json:"confidence"` // 0.0 ~ 1.0
 }
 
-// MutationDecision captures the gatekeeper verdict for committing a candidate fact.
 type MutationDecision struct {
 	Category          string   `json:"category"`
 	SubCategory       string   `json:"sub_category,omitempty"`
@@ -81,8 +73,6 @@ type MutationDecision struct {
 	Confidence        float64  `json:"confidence"`            // 0.0 ~ 1.0
 }
 
-// ApplyDecisionSemantics enforces structural consistency across the LLM's own
-// schema fields (Tier, Cardinality, Action) without hardcoded keyword rules.
 func ApplyDecisionSemantics(dec *MutationDecision) {
 	switch strings.ToLower(strings.TrimSpace(dec.Tier)) {
 	case "preference":
@@ -106,14 +96,12 @@ func ApplyDecisionSemantics(dec *MutationDecision) {
 	}
 }
 
-// PlanViolation represents a rule conflict flagged during plan verification.
 type PlanViolation struct {
 	Fact
 	Probability float64 `json:"probability"` // 0.0 ~ 1.0
 	Confidence  float64 `json:"confidence"`  // 0.0 ~ 1.0
 }
 
-// ConsolidationProposal describes one recommended merge of overlapping active memories.
 type ConsolidationProposal struct {
 	SourceIDs     []int64 `json:"source_ids"`
 	Category      string  `json:"category"`
@@ -123,7 +111,6 @@ type ConsolidationProposal struct {
 	Sources       []Fact  `json:"sources,omitempty"`
 }
 
-// TaxonomyRebalanceItem describes a proposed non-destructive category/sub-category relabeling.
 type TaxonomyRebalanceItem struct {
 	ID             int64  `json:"id"`
 	OldCategory    string `json:"old_category"`
@@ -136,7 +123,6 @@ type TaxonomyRebalanceItem struct {
 	Content        string `json:"content,omitempty"`
 }
 
-// CleanupPlan combines AI consolidation and taxonomy rebalancing recommendations.
 type CleanupPlan struct {
 	Scope          string                  `json:"scope"`
 	CategoryFilter string                  `json:"category_filter,omitempty"`
@@ -145,7 +131,6 @@ type CleanupPlan struct {
 	RebalanceItems []TaxonomyRebalanceItem `json:"rebalance_items"`
 }
 
-// MemoryRecord represents a full stored row from the memories table.
 type MemoryRecord struct {
 	ID           int64    `json:"id"`
 	Scope        string   `json:"scope"`
@@ -162,7 +147,6 @@ type MemoryRecord struct {
 	CreatedAt    string   `json:"created_at"`
 }
 
-// DashboardStats summarizes memory counts and confidence buckets for a scope.
 type DashboardStats struct {
 	TotalCount     int   `json:"total_count"`
 	ActiveCount    int   `json:"active_count"`
@@ -171,7 +155,6 @@ type DashboardStats struct {
 	ConfidenceBins []int `json:"confidence_bins"`
 }
 
-// SessionSummary aggregates per-session delivery/progress counts.
 type SessionSummary struct {
 	SessionID string `json:"session_id"`
 	Scope     string `json:"scope,omitempty"`
@@ -179,7 +162,6 @@ type SessionSummary struct {
 	UpdatedAt string `json:"updated_at,omitempty"`
 }
 
-// DashboardFacets provides filter dropdown values for the web console.
 type DashboardFacets struct {
 	Scopes        []string            `json:"scopes"`
 	Accounts      []string            `json:"accounts"`
@@ -188,7 +170,6 @@ type DashboardFacets struct {
 	Sessions      []SessionSummary    `json:"sessions"`
 }
 
-// RecordQuery filters paginated memory records.
 type RecordQuery struct {
 	Scope       string
 	SessionID   string
@@ -201,7 +182,6 @@ type RecordQuery struct {
 	PageSize    int
 }
 
-// RecordPage holds a paginated memory query result.
 type RecordPage struct {
 	Records             []MemoryRecord `json:"records"`
 	TotalRecords        int            `json:"total_records"`
@@ -212,7 +192,6 @@ type RecordPage struct {
 	TotalPages          int            `json:"total_pages"`
 }
 
-// ProbeResult captures diagnostic relevance evaluation timings and scores.
 type ProbeResult struct {
 	Provider   string       `json:"provider"`
 	ElapsedMs  float64      `json:"elapsed_ms"`
@@ -221,7 +200,6 @@ type ProbeResult struct {
 	Scored     []ScoredFact `json:"scored"`
 }
 
-// SubCategoryDistItem holds treemap metrics for one sub-category block.
 type SubCategoryDistItem struct {
 	SubCategory         string  `json:"sub_category"`
 	IsUncategorized     bool    `json:"is_uncategorized,omitempty"`
@@ -237,7 +215,6 @@ type SubCategoryDistItem struct {
 	DuplicateAcrossCats bool    `json:"duplicate_across_cats,omitempty"`
 }
 
-// CategoryDistItem holds treemap metrics for one category block.
 type CategoryDistItem struct {
 	Category           string                `json:"category"`
 	ActiveCount        int                   `json:"active_count"`
@@ -254,7 +231,6 @@ type CategoryDistItem struct {
 	SubItems           []SubCategoryDistItem `json:"sub_items,omitempty"`
 }
 
-// ScopeDistribution represents the 2D category/sub-category distribution of memories in a scope.
 type ScopeDistribution struct {
 	Scope                  string             `json:"scope"`
 	TotalActive            int                `json:"total_active"`
@@ -265,14 +241,12 @@ type ScopeDistribution struct {
 	Categories             []CategoryDistItem `json:"categories"`
 }
 
-// RetentionPolicy defines automatic TTL retention settings for completed progress history and guardrail audit logs.
 type RetentionPolicy struct {
 	ProgressDays            int  `json:"progress_days"`             // 0 = keep forever; >0 = auto-prune done entries older than N days
 	GuardrailDays           int  `json:"guardrail_days"`            // 0 = keep forever; >0 = auto-prune logs older than N days
 	GuardrailIncludeBlocked bool `json:"guardrail_include_blocked"` // false = auto-prune PASS logs only (protect blocked violations)
 }
 
-// NormalizeRetentionDays clamps retention days to 0 (keep forever) or [1..3650].
 func NormalizeRetentionDays(days int) int {
 	if days <= 0 {
 		return 0
@@ -283,8 +257,6 @@ func NormalizeRetentionDays(days int) int {
 	return days
 }
 
-// FactPriorityRank assigns scope-tier ordering for shared prompt/KV prefix caching across teammates:
-// Team Rule Pack (0) -> shared project:* (1) -> user global (2) -> user personal (3).
 func FactPriorityRank(f Fact) int {
 	if f.IsTeam() {
 		return 0
@@ -300,7 +272,6 @@ func FactPriorityRank(f Fact) int {
 	}
 }
 
-// SortFactsByPrefixTier stably orders facts by FactPriorityRank while preserving relative ID order inside each tier.
 func SortFactsByPrefixTier(facts []Fact) {
 	if len(facts) < 2 {
 		return

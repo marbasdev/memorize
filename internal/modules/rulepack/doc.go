@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -18,13 +17,10 @@ const DefaultDocumentPreamble = `# Team Rules (` + "`memorize`" + `)
 > Shared repository rules managed via Git. Mirrored read-only into local ` + "`memorize`" + ` daemons.`
 
 var (
-	// ErrRuleKeyExists indicates an attempt to insert a rule that already exists in the document.
 	ErrRuleKeyExists = errors.New("rule already exists in rule pack")
-	// ErrRuleNotFound indicates an attempt to update or remove a missing rule.
-	ErrRuleNotFound = errors.New("rule not found in rule pack")
+	ErrRuleNotFound  = errors.New("rule not found in rule pack")
 )
 
-// ParseError reports an exact 1-based line syntax or validation problem in .memorize/TEAM_RULES.md.
 type ParseError struct {
 	Line    int
 	Message string
@@ -37,14 +33,12 @@ func (e *ParseError) Error() string {
 	return ".memorize/TEAM_RULES.md: " + e.Message
 }
 
-// DocumentRule pairs a parsed TeamRule with its inclusive [StartLine..EndLine] range in Document.Lines.
 type DocumentRule struct {
 	domain.TeamRule
 	StartLine int
 	EndLine   int
 }
 
-// DocumentSection represents one top-level ## Category section in .memorize/TEAM_RULES.md.
 type DocumentSection struct {
 	Category     string
 	Heading      string
@@ -54,7 +48,6 @@ type DocumentSection struct {
 	Rules        []DocumentRule
 }
 
-// Document holds the parsed sections, line spans, and canonical SHA-256 hash of a TEAM_RULES.md file.
 type Document struct {
 	Exists        bool
 	Hash          string
@@ -64,7 +57,6 @@ type Document struct {
 	Rules         []domain.TeamRule
 }
 
-// DocPath returns the canonical .memorize/TEAM_RULES.md path under repoRoot.
 func DocPath(repoRoot string) string {
 	root := strings.TrimSpace(repoRoot)
 	if root == "" {
@@ -73,30 +65,12 @@ func DocPath(repoRoot string) string {
 	return filepath.Join(root, filepath.FromSlash(domain.RulePackRelPath))
 }
 
-// CanonicalHash computes the SHA-256 hex digest of raw after normalizing CRLF line endings to LF.
 func CanonicalHash(raw []byte) string {
 	norm := strings.ReplaceAll(string(raw), "\r\n", "\n")
 	sum := sha256.Sum256([]byte(norm))
 	return hex.EncodeToString(sum[:])
 }
 
-// ParseFile reads and parses <repoRoot>/.memorize/TEAM_RULES.md. A missing file yields Exists=false cleanly.
-func ParseFile(repoRoot, scope string) (*Document, error) {
-	path := DocPath(repoRoot)
-	if path == "" {
-		return &Document{}, nil
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return &Document{Exists: false}, nil
-		}
-		return nil, err
-	}
-	return ParseDocument(raw, scope)
-}
-
-// ParseDocument deterministically parses TEAM_RULES.md contents without NLP heuristics.
 func ParseDocument(raw []byte, scope string) (*Document, error) {
 	norm := strings.ReplaceAll(string(raw), "\r\n", "\n")
 	hadNL := strings.HasSuffix(norm, "\n")
@@ -314,7 +288,6 @@ func parseCategoryHeading(line, scope string) (string, string, error) {
 		return "", "", errors.New("category heading cannot be empty")
 	}
 	sc := domain.NormalizeScope(scope)
-	// Preferred canonical grammar: `## Title (`slug`)`
 	if openIdx := strings.LastIndex(body, "(`"); openIdx > 0 && strings.HasSuffix(body, "`)") {
 		slugRaw := body[openIdx+2 : len(body)-2]
 		cat := domain.NormalizeCategoryForScope(sc, slugRaw)
@@ -415,7 +388,6 @@ func parseCompactRuleLine(trimmed, scope, category, fileHash string) (domain.Tea
 	}
 	rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
 
-	// Backward compatibility: legacy "- `key` `[invariant|rule]` ..." lines.
 	if strings.HasPrefix(rest, "`") {
 		if endKey := strings.IndexByte(rest[1:], '`'); endKey > 0 {
 			keyRaw := strings.TrimSpace(rest[1 : 1+endKey])
@@ -440,7 +412,6 @@ func parseCompactRuleLine(trimmed, scope, category, fileHash string) (domain.Tea
 		}
 	}
 
-	// Canonical format: "- [(`sub`) ]<Title> · `@author` · `YYYY-MM-DD`"
 	const sep = " · "
 	dateSep := strings.LastIndex(rest, sep)
 	if dateSep <= 0 {

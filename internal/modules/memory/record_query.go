@@ -12,29 +12,6 @@ import (
 
 const recordSelectColumns = `m.id, m.scope, COALESCE(m.account, ''), m.category, COALESCE(m.sub_category, ''), m.tags, m.content, m.confidence, m.pinned, m.active, m.superseded_by, COALESCE(m.replaces_text, ''), COALESCE(m.created_at, '')`
 
-// ListRecords returns all memory records matching scopeFilter (or all scopes if empty).
-func (s *Service) ListRecords(ctx context.Context, scopeFilter string) ([]domain.MemoryRecord, error) {
-	sc := strings.TrimSpace(scopeFilter)
-	visSQL, visArgs := s.memoryVisibilitySQL(ctx, "m")
-	args := append([]any{sc, sc}, visArgs...)
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT `+recordSelectColumns+`
-		FROM memories m
-		WHERE (? = '' OR m.scope = ?) AND `+visSQL+`
-		ORDER BY active DESC, pinned DESC, id DESC`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	out, err := scanMemoryRecordRows(rows)
-	if err != nil {
-		return nil, err
-	}
-	s.attachRecordReplaces(ctx, out)
-	return out, nil
-}
-
 func escapeSQLLike(raw string) string {
 	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 	return r.Replace(raw)
@@ -245,7 +222,6 @@ func (s *Service) attachRecordReplaces(ctx context.Context, out []domain.MemoryR
 	}
 }
 
-// QueryRecordsPage returns a paginated, filtered slice of memory records for the dashboard table.
 func (s *Service) QueryRecordsPage(ctx context.Context, q domain.RecordQuery) (domain.RecordPage, error) {
 	visSQL, visArgs := s.memoryVisibilitySQL(ctx, "m")
 	var totalAll int
@@ -324,7 +300,6 @@ func (s *Service) QueryRecordsPage(ctx context.Context, q domain.RecordQuery) (d
 	}, nil
 }
 
-// QueryMatchingActiveIDs returns active memory IDs matching q up to limit.
 func (s *Service) QueryMatchingActiveIDs(ctx context.Context, q domain.RecordQuery, limit int) ([]int64, error) {
 	if limit <= 0 || limit > 10000 {
 		limit = 5000
@@ -350,7 +325,6 @@ func (s *Service) QueryMatchingActiveIDs(ctx context.Context, q domain.RecordQue
 	return ids, rows.Err()
 }
 
-// GetRecordsByIDs fetches full MemoryRecord details for up to 500 memory IDs.
 func (s *Service) GetRecordsByIDs(ctx context.Context, ids []int64) ([]domain.MemoryRecord, error) {
 	if len(ids) == 0 {
 		return []domain.MemoryRecord{}, nil

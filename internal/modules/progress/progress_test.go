@@ -102,7 +102,6 @@ func TestProgressOverviewFilteringAndMutationListener(t *testing.T) {
 	mem, svc := openTestProgressService(t)
 	ctx := domain.WithAdminBypass(context.Background())
 
-	// CommitMemory automatically publishes a MutationEvent that records a memory_sync milestone.
 	if _, err := mem.CommitMemory(ctx, "Always keep unit tests hermetic", "testing", "project:alpha"); err != nil {
 		t.Fatalf("CommitMemory: %v", err)
 	}
@@ -158,7 +157,6 @@ func TestProgressRetentionCleanupAndWatermarks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RecordProgress: %v", err)
 	}
-	// Backdate updated_at so day-based retention triggers cleanly.
 	if _, err := svc.db.ExecContext(ctx, `UPDATE project_progress SET created_at = datetime('now', '-10 days'), updated_at = datetime('now', '-10 days') WHERE id = ?`, rec.ID); err != nil {
 		t.Fatalf("backdate row: %v", err)
 	}
@@ -176,7 +174,6 @@ func TestProgressRetentionCleanupAndWatermarks(t *testing.T) {
 	if sha := mem.GetSyncedCommit(ctx, "project:alpha"); sha != "abcdef123456" {
 		t.Fatalf("expected synced commit HWM preserved, got %q", sha)
 	}
-	// Calling CleanupProgressHistory with invalid days rejects cleanly.
 	if _, err := svc.CleanupProgressHistory(ctx, "project:alpha", -1); err == nil {
 		t.Fatalf("expected error on negative retention days")
 	}
@@ -285,7 +282,6 @@ func TestAutoSyncProgressCommitsRollsUpManyCommitsIntoMilestones(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetProgressOverviewWithQuery: %v", err)
 	}
-	// Rolled up across categories instead of 6+ tiny per-track cards or raw git-log concatenation.
 	if len(ov.Records) == 0 || len(ov.Records) > 4 {
 		t.Fatalf("expected 7 multi-area commits to roll up into <=4 milestone entries, got %d", len(ov.Records))
 	}
@@ -408,7 +404,6 @@ func TestServerModeProgressUpdateAuthorization(t *testing.T) {
 		t.Fatalf("alice RecordProgress personal: %v", err)
 	}
 
-	// Strict per-account isolation in ServerMode for BOTH personal AND global progress (hidden from Bob & Admin).
 	for _, scFilter := range []string{"", "global", "personal"} {
 		for name, callerCtx := range map[string]context.Context{"bob": ctxBob, "admin": ctxAdmin} {
 			ov, err := svc.GetProgressOverviewWithQuery(callerCtx, domain.ProgressQuery{

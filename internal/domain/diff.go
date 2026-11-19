@@ -10,7 +10,6 @@ import (
 // so one line cannot crowd out surrounding code changes.
 const MaxDiffSingleLineBytes = 800
 
-// TruncateUTF8Bytes truncates s to at most maxBytes without splitting a multi-byte UTF-8 rune.
 func TruncateUTF8Bytes(s string, maxBytes int) string {
 	if maxBytes <= 0 || len(s) <= maxBytes {
 		return s
@@ -22,7 +21,6 @@ func TruncateUTF8Bytes(s string, maxBytes int) string {
 	return s[:b] + "..."
 }
 
-// CompactDiffLine caps an individual diff line to maxBytes (default MaxDiffSingleLineBytes) on a UTF-8 boundary.
 func CompactDiffLine(line string, maxBytes int) string {
 	if maxBytes <= 0 {
 		maxBytes = MaxDiffSingleLineBytes
@@ -44,8 +42,6 @@ func normalizeDiffTokens(lines []string) []string {
 	return out
 }
 
-// IsWhitespaceOnlyDiffHunk reports whether oldLines and newLines are identical once blank lines
-// and horizontal whitespace differences are normalized away.
 func IsWhitespaceOnlyDiffHunk(oldLines, newLines []string) bool {
 	normOld := normalizeDiffTokens(oldLines)
 	normNew := normalizeDiffTokens(newLines)
@@ -60,8 +56,6 @@ func IsWhitespaceOnlyDiffHunk(oldLines, newLines []string) bool {
 	return true
 }
 
-// CompactUnifiedDiffBody strips git header boilerplate from a single file's unified diff,
-// collapses whitespace/blank-line-only hunks, and caps single giant lines.
 func CompactUnifiedDiffBody(raw string) (body string, whitespaceOnly bool) {
 	lines := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
 
@@ -187,15 +181,11 @@ func formatEdgeDiff(oldMid, newMid []string, addPrefix string, maxBytes int) str
 	return TruncateUTF8Bytes("Removed:\n"+formatDiffLines("", oldMid), maxBytes)
 }
 
-// DiffEditSnippet builds a bounded changed-line summary between oldRaw and newRaw for tool fallback snippets.
 func DiffEditSnippet(oldRaw, newRaw string) string {
 	oldMid, newMid := trimChangedLineEdges(oldRaw, newRaw)
 	return formatEdgeDiff(oldMid, newMid, "", 950)
 }
 
-// FormatChangedLineHunks emits only added/removed line hunks between oldRaw and newRaw
-// using unique matching anchors (patience LIS) in O(m+n) time and space, collapsing
-// pure whitespace-only formatting hunks.
 func FormatChangedLineHunks(oldRaw, newRaw string, maxBytes int) string {
 	oldMid, newMid := trimChangedLineEdges(oldRaw, newRaw)
 	m, n := len(oldMid), len(newMid)

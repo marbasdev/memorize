@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/mark3labs/mcp-go/server"
@@ -208,7 +209,6 @@ func openDaemonLogFile(logPath string) *os.File {
 	return f
 }
 
-// EnsureRunning returns the live daemon status matching dbPath, spawning it in the background if needed.
 func EnsureRunning(addr, dbPath, modelsDir string) (*thttp.DaemonStatus, bool) {
 	if !config.IsPersistentDBPath(dbPath) {
 		return nil, false
@@ -281,7 +281,6 @@ func EnsureRunning(addr, dbPath, modelsDir string) (*thttp.DaemonStatus, bool) {
 	return nil, false
 }
 
-// RunDaemonWithBundle serves the unified daemon over an already initialized runtime bundle.
 func RunDaemonWithBundle(version, addr, dbPath, modelsDir string, b *runtimeBundle) int {
 	targetAddr, _ := thttp.ResolveDaemonTargetAddr(addr, dbPath)
 	portCfg := config.LoadPortConfig(dbPath)
@@ -300,7 +299,6 @@ func RunDaemonWithBundle(version, addr, dbPath, modelsDir string, b *runtimeBund
 	return lc.serve(ln)
 }
 
-// RunServer initializes runtime dependencies and runs the unified daemon until stop or re-exec.
 func RunServer(version, explicitAddr, dbPath, modelsDir string) int {
 	b, err := openRuntime(dbPath, modelsDir, true)
 	if err != nil {
@@ -311,7 +309,6 @@ func RunServer(version, explicitAddr, dbPath, modelsDir string) int {
 	return RunDaemonWithBundle(version, explicitAddr, dbPath, modelsDir, b)
 }
 
-// RunTeamServer starts an authenticated multi-user team server listening on explicitAddr (default 0.0.0.0:18095).
 func RunTeamServer(version, explicitAddr, dbPath, modelsDir string) int {
 	b, err := openRuntime(dbPath, modelsDir, true)
 	if err != nil {
@@ -377,7 +374,7 @@ func RunTeamServer(version, explicitAddr, dbPath, modelsDir string) int {
 	}
 
 	sigCh := make(chan os.Signal, 2)
-	signal.Notify(sigCh, os.Interrupt)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 	go func() {
 		if _, ok := <-sigCh; ok {
@@ -392,7 +389,6 @@ func RunTeamServer(version, explicitAddr, dbPath, modelsDir string) int {
 	return lc.serve(ln)
 }
 
-// RunInlineHook executes a lifecycle hook directly against SQLite when daemon delegation is disabled or unavailable.
 func RunInlineHook(ctx context.Context, dbPath, modelsDir, mode string, rawStdin []byte) (string, int) {
 	b, err := openRuntime(dbPath, modelsDir, false)
 	if err != nil {
@@ -404,7 +400,6 @@ func RunInlineHook(ctx context.Context, dbPath, modelsDir, mode string, rawStdin
 	return out, code
 }
 
-// ServeInlineStdio serves MCP over stdin/stdout directly (with optional background dashboard) without daemon RPC.
 func ServeInlineStdio(version, dbPath, modelsDir string, withDashboard bool, dashAddr string) int {
 	b, err := openRuntime(dbPath, modelsDir, true)
 	if err != nil {
@@ -432,7 +427,6 @@ func ServeInlineStdio(version, dbPath, modelsDir string, withDashboard bool, das
 	return 0
 }
 
-// Hooks returns the cli.RuntimeHooks implementation backed by localdaemon.
 func Hooks(version string) cli.RuntimeHooks {
 	return cli.RuntimeHooks{
 		EnsureDaemonRunning: EnsureRunning,

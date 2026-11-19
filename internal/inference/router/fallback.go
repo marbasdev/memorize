@@ -111,7 +111,6 @@ func (f *fallbackEvaluator) SupportsTask(task domain.EvalTask) bool {
 	return domain.EvaluatorSupportsTask(f.primary, task)
 }
 
-// InputTokenLimit returns the safe verified context token ceiling across active primary and fallback evaluators.
 func (f *fallbackEvaluator) InputTokenLimit(ctx context.Context) int {
 	if f == nil {
 		return 0
@@ -130,7 +129,6 @@ func (f *fallbackEvaluator) InputTokenLimit(ctx context.Context) int {
 	return min(pLim, fLim)
 }
 
-// RuleBatchSize returns the conservative per-call rule chunk limit across primary and fallback evaluators.
 func (f *fallbackEvaluator) RuleBatchSize() int {
 	if f == nil {
 		return 0

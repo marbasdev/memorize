@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -17,6 +18,96 @@ import (
 	thttp "memorize/internal/transport/http"
 	transportmcp "memorize/internal/transport/mcp"
 )
+
+func TestSecurityGuardsAndDaemonMux(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:18095/mcp", nil)
+	req.Host = "127.0.0.1:18095"
+	req.Header.Set("Content-Type", "application/json")
+	if !thttp.IsJSONPost(req, false) {
+		t.Fatalf("expected localhost JSON POST to be accepted")
+	}
+
+	reqCross := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:18095/mcp", nil)
+	reqCross.Host = "127.0.0.1:18095"
+	reqCross.Header.Set("Sec-Fetch-Site", "cross-site")
+	reqCross.Header.Set("Content-Type", "application/json")
+	if thttp.IsJSONPost(reqCross, false) {
+		t.Fatalf("expected cross-site request to be rejected")
+	}
+
+	reqEvilOrigin := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:18095/", nil)
+	reqEvilOrigin.Host = "127.0.0.1:18095"
+	reqEvilOrigin.Header.Set("Origin", "https://evil.example")
+	if thttp.IsAllowedOrigin(reqEvilOrigin, false) {
+		t.Fatalf("expected foreign Origin to be rejected")
+	}
+
+	t.Setenv("MEMORY_DAEMON_ADDR", "127.0.0.1:29999")
+	if got := thttp.ResolveDaemonAddrForDB("", ""); got != "127.0.0.1:29999" {
+		t.Fatalf("ResolveDaemonAddrForDB env = %q", got)
+	}
+
+	dbPath := filepath.Join(t.TempDir(), "http.db")
+	mem, err := memory.Open(dbPath, nil)
+	if err != nil {
+		t.Fatalf("memory.Open: %v", err)
+	}
+	defer mem.Close()
+	prog := progress.New(mem)
+	gr := guardrail.New(mem, prog)
+	mcpSrv := transportmcp.NewServer(transportmcp.Deps{Memory: mem, Progress: prog, Guardrail: gr, Version: "test"})
+
+	mux := thttp.NewDaemonMux(thttp.DaemonDeps{
+		Guardrail: gr,
+		MCPServer: mcpSrv,
+		BuildStatusFn: func() thttp.DaemonStatus {
+			return thttp.DaemonStatus{Running: true, PID: 123, Version: "test", DBPath: dbPath}
+		},
+	})
+
+	rebindReq := httptest.NewRequest(http.MethodGet, "http://evil.local/api/daemon/status", nil)
+	rebindReq.Host = "evil.local:18095"
+	rebindRec := httptest.NewRecorder()
+	mux.ServeHTTP(rebindRec, rebindReq)
+	if rebindRec.Code != http.StatusForbidden {
+		t.Fatalf("expected DNS rebinding Host to fail with 403, got %d", rebindRec.Code)
+	}
+
+	stReq := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:18095/api/daemon/status", nil)
+	stReq.Host = "127.0.0.1:18095"
+	stRec := httptest.NewRecorder()
+	mux.ServeHTTP(stRec, stReq)
+	if stRec.Code != http.StatusOK || !strings.Contains(stRec.Body.String(), `"running":true`) {
+		t.Fatalf("unexpected /api/daemon/status response: %d %s", stRec.Code, stRec.Body.String())
+	}
+	if stRec.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("expected SecurityHeadersMiddleware nosniff header")
+	}
+
+	rpcReq := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:18095/api/daemon/mcp",
+		bytes.NewReader([]byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)))
+	rpcReq.Host = "127.0.0.1:18095"
+	rpcReq.Header.Set("Content-Type", "application/json")
+	rpcReq.Header.Set("X-Memorize-Session", "http-test-sess")
+	rpcRec := httptest.NewRecorder()
+	mux.ServeHTTP(rpcRec, rpcReq)
+	if rpcRec.Code != http.StatusOK || !strings.Contains(rpcRec.Body.String(), "query_project_memory") {
+		t.Fatalf("unexpected /api/daemon/mcp response: %d %s", rpcRec.Code, rpcRec.Body.String())
+	}
+
+	hookBody, _ := json.Marshal(map[string]any{
+		"mode":  "claude-pretool",
+		"stdin": `{"cwd":"/tmp/demo","tool_name":"Read","tool_input":{"file_path":"a.go"}}`,
+	})
+	hookReq := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:18095/api/daemon/hook", bytes.NewReader(hookBody))
+	hookReq.Host = "127.0.0.1:18095"
+	hookReq.Header.Set("Content-Type", "application/json")
+	hookRec := httptest.NewRecorder()
+	mux.ServeHTTP(hookRec, hookReq)
+	if hookRec.Code != http.StatusOK || !strings.Contains(hookRec.Body.String(), `"exit_code":0`) {
+		t.Fatalf("unexpected /api/daemon/hook response: %d %s", hookRec.Code, hookRec.Body.String())
+	}
+}
 
 type noopEval struct{}
 
@@ -36,7 +127,6 @@ func (noopEval) VerifyPlan(_ context.Context, _ string, _ []domain.Fact) ([]doma
 }
 
 func TestIsAllowedOriginModes(t *testing.T) {
-	// Local solo mode blocks external host headers.
 	reqExt := httptest.NewRequest(http.MethodGet, "http://team.example.com:18095/", nil)
 	reqExt.Host = "team.example.com:18095"
 	if thttp.IsAllowedOrigin(reqExt, false) {
@@ -46,7 +136,6 @@ func TestIsAllowedOriginModes(t *testing.T) {
 		t.Fatalf("expected server mode to accept non-loopback host without cross-site Origin")
 	}
 
-	// Cross-site Sec-Fetch-Site blocked in both modes.
 	reqCross := httptest.NewRequest(http.MethodPost, "http://team.example.com:18095/ui/test", nil)
 	reqCross.Host = "team.example.com:18095"
 	reqCross.Header.Set("Sec-Fetch-Site", "cross-site")
@@ -54,8 +143,8 @@ func TestIsAllowedOriginModes(t *testing.T) {
 		t.Fatalf("expected cross-site Sec-Fetch-Site blocked in server mode")
 	}
 
-	// Matching Origin or X-Forwarded-Host allowed; mismatched Origin blocked.
 	reqSameOrig := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:18095/login", nil)
+	reqSameOrig.RemoteAddr = "127.0.0.1:54321"
 	reqSameOrig.Host = "127.0.0.1:18095"
 	reqSameOrig.Header.Set("Origin", "https://team.company.com")
 	if thttp.IsAllowedOrigin(reqSameOrig, true) {
@@ -63,7 +152,16 @@ func TestIsAllowedOriginModes(t *testing.T) {
 	}
 	reqSameOrig.Header.Set("X-Forwarded-Host", "team.company.com")
 	if !thttp.IsAllowedOrigin(reqSameOrig, true) {
-		t.Fatalf("expected matching X-Forwarded-Host accepted in server mode")
+		t.Fatalf("expected matching X-Forwarded-Host from trusted proxy accepted in server mode")
+	}
+
+	reqUntrustedProxy := httptest.NewRequest(http.MethodPost, "http://team.example.com:18095/login", nil)
+	reqUntrustedProxy.RemoteAddr = "203.0.113.9:54321"
+	reqUntrustedProxy.Host = "team.example.com:18095"
+	reqUntrustedProxy.Header.Set("Origin", "https://evil.example.com")
+	reqUntrustedProxy.Header.Set("X-Forwarded-Host", "evil.example.com")
+	if thttp.IsAllowedOrigin(reqUntrustedProxy, true) {
+		t.Fatalf("expected X-Forwarded-Host from untrusted public IP to be ignored")
 	}
 }
 
@@ -112,7 +210,6 @@ func TestDaemonMuxServerAuthAndAntiSpoofing(t *testing.T) {
 		},
 	})
 
-	// Unauthenticated requests fail with 401.
 	for _, path := range []string{"/api/daemon/status", "/mcp"} {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "http://team.local:18095"+path, nil)
@@ -122,7 +219,6 @@ func TestDaemonMuxServerAuthAndAntiSpoofing(t *testing.T) {
 		}
 	}
 
-	// Member status redacts server host paths; admin status preserves them.
 	recMemSt := httptest.NewRecorder()
 	reqMemSt := httptest.NewRequest(http.MethodGet, "http://team.local:18095/api/daemon/status", nil)
 	reqMemSt.Header.Set("Authorization", "Bearer "+aliceIss.PlainToken)
@@ -146,7 +242,6 @@ func TestDaemonMuxServerAuthAndAntiSpoofing(t *testing.T) {
 		t.Fatalf("expected admin status to keep DBPath & account, got %+v", stAdm)
 	}
 
-	// Member blocked from /api/daemon/port, /restart, /stop (403).
 	for _, path := range []string{"/api/daemon/port", "/api/daemon/restart", "/api/daemon/stop"} {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "http://team.local:18095"+path, strings.NewReader(`{}`))
@@ -158,7 +253,6 @@ func TestDaemonMuxServerAuthAndAntiSpoofing(t *testing.T) {
 		}
 	}
 
-	// Anti-spoofing on /api/daemon/mcp: Alice attempts X-Memorize-Account=bob & args.account=bob on personal scope.
 	rpcBody := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"commit_memory","arguments":{"candidate_fact":"Prefer dark mode","scope":"personal","account":"bob","category":"preference"}}}`
 	recMCP := httptest.NewRecorder()
 	reqMCP := httptest.NewRequest(http.MethodPost, "http://team.local:18095/api/daemon/mcp", bytes.NewBufferString(rpcBody))

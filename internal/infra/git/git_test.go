@@ -38,7 +38,6 @@ func TestCanonicalScopeWorktreesAndOriginRemote(t *testing.T) {
 	runGitCmd(t, mainRepo, "add", "README.md")
 	runGitCmd(t, mainRepo, "commit", "-m", "init")
 
-	// Linked worktree with a completely different folder name without origin remote -> resolves via git-common-dir.
 	wtDir := filepath.Join(baseDir, "wt-feature-xyz")
 	runGitCmd(t, mainRepo, "worktree", "add", "-b", "feat/x", wtDir)
 
@@ -51,7 +50,6 @@ func TestCanonicalScopeWorktreesAndOriginRemote(t *testing.T) {
 		t.Fatalf("expected non-empty repo roots: main=%q wt=%q", rootMain, rootWT)
 	}
 
-	// Adding origin remote canonicalizes scope by repository slug regardless of local folder name.
 	runGitCmd(t, mainRepo, "remote", "add", "origin", "git@github.com:acme-org/Team-Service.git")
 	scRemoteMain, _ := git.CanonicalScope(ctx, mainRepo)
 	scRemoteWT, _ := git.CanonicalScope(ctx, wtDir)
@@ -59,7 +57,6 @@ func TestCanonicalScopeWorktreesAndOriginRemote(t *testing.T) {
 		t.Fatalf("expected origin slug scope project:team-service, got main=%q wt=%q", scRemoteMain, scRemoteWT)
 	}
 
-	// Test StagedDiffFiles against real git index.
 	if err := os.WriteFile(filepath.Join(wtDir, "app.go"), []byte("package main\nfunc secret() {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

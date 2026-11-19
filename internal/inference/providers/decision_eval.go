@@ -42,8 +42,6 @@ func (a decisionAnswer) conf() float64 {
 	if a.Choice != "" {
 		return 0.50
 	}
-	// Winning Bernoulli class probability max(p, 1-p) in [0.5, 1.0]:
-	// 0.50 at total uncertainty (noul=0.5), 0.95 at high certainty (noul=0.95 or 0.05).
 	return 0.5 + abs(a.Noul-0.5)
 }
 
@@ -61,15 +59,12 @@ type decisionTransport interface {
 	CallDecisions(ctx context.Context, input string, questions map[string]decisionQuestion) (map[string]decisionAnswer, error)
 }
 
-// decisionEvaluator implements memorization scoring, mutation gating, guardrail verification,
-// and 5-band confidence calibration using a non-generative decisionTransport (0 output tokens).
 type decisionEvaluator struct {
 	tr decisionTransport
 }
 
 func (d *decisionEvaluator) Name() string { return d.tr.Name() }
 
-// InputTokenLimit forwards the underlying decision transport's verified context limit when available.
 func (d *decisionEvaluator) InputTokenLimit(ctx context.Context) int {
 	if p, ok := d.tr.(domain.ContextWindowProvider); ok {
 		return p.InputTokenLimit(ctx)
@@ -81,8 +76,6 @@ func (d *decisionEvaluator) ScoreRelevance(ctx context.Context, currentTask stri
 	if len(facts) == 0 {
 		return nil, nil
 	}
-	// Place stable Active Facts at byte 0 and per-turn Current Task at the end so prefix/context
-	// caching hits on repeated queries across turns.
 	var sb strings.Builder
 	sb.WriteString("Active Facts:\n")
 	q := make(map[string]decisionQuestion, len(facts))
@@ -355,7 +348,6 @@ func (d *decisionEvaluator) VerifyPlan(ctx context.Context, proposedPlan string,
 	if len(rules) == 0 {
 		return nil, nil
 	}
-	// Place stable Project Rules at byte 0 and per-call Proposed Plan at the end for prefix cache hits.
 	var sb strings.Builder
 	sb.WriteString("Project Rules:\n")
 	q := make(map[string]decisionQuestion, len(rules))

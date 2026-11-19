@@ -35,7 +35,6 @@ func classifyEvalStatus(err, ctxErr error) string {
 	return "error"
 }
 
-// RecordTelemetry persists a bounded runtime latency/outcome sample into eval_telemetry.
 func (r *Router) RecordTelemetry(ctx context.Context, task domain.EvalTask, ev domain.Evaluator, start time.Time, itemCount int, evalErr error) {
 	if r == nil || r.db == nil || task == "" || ev == nil {
 		return
@@ -89,7 +88,6 @@ func nearestRankP95(samples []float64) float64 {
 	return sorted[idx]
 }
 
-// SummarizeTelemetry aggregates measured per-task and per-engine inference latency across windowHours.
 func SummarizeTelemetry(ctx context.Context, db *sql.DB, windowHours int) (domain.EvalTelemetryReport, error) {
 	specs := domain.AllEvalTasks()
 	out := domain.EvalTelemetryReport{
@@ -256,7 +254,6 @@ func SummarizeTelemetry(ctx context.Context, db *sql.DB, windowHours int) (domai
 	return out, nil
 }
 
-// SummarizeTelemetry returns aggregated per-task and per-engine inference telemetry from the router's DB.
 func (r *Router) SummarizeTelemetry(ctx context.Context, windowHours int) (domain.EvalTelemetryReport, error) {
 	if r == nil {
 		return domain.EvalTelemetryReport{WindowHours: windowHours}, nil
@@ -264,7 +261,6 @@ func (r *Router) SummarizeTelemetry(ctx context.Context, windowHours int) (domai
 	return SummarizeTelemetry(ctx, r.db, windowHours)
 }
 
-// ResetTelemetry clears all recorded inference telemetry rows.
 func (r *Router) ResetTelemetry(ctx context.Context) error {
 	if r == nil || r.db == nil {
 		return nil

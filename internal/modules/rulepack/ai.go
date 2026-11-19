@@ -8,26 +8,21 @@ import (
 	"time"
 
 	"memorize/internal/domain"
-	"memorize/internal/infra/sqlite"
 )
 
 const maxTrimmedLocalRunes = 180
 
-// DuplicateCleanupAction represents one user-approved cleanup step for a redundant local memory.
 type DuplicateCleanupAction struct {
 	LocalMemoryID  int64  `json:"local_memory_id"`
 	Action         string `json:"action"` // "delete" | "trim"
 	TrimmedContent string `json:"trimmed_content,omitempty"`
 }
 
-// DuplicateCleanupResult summarizes applied cleanup mutations against local memories.
 type DuplicateCleanupResult struct {
 	DeletedIDs []int64 `json:"deleted_ids,omitempty"`
 	TrimmedIDs []int64 `json:"trimmed_ids,omitempty"`
 }
 
-// LoadExtraFacts implements memory.ExtraFactsProvider so non-overridden Team Rules participate
-// read-only in session and stateless retrieval queries without entering local write/overwrite pools.
 func (s *Service) LoadExtraFacts(ctx context.Context, scopeA, scopeB, category string) ([]domain.Fact, error) {
 	if s == nil || s.db == nil {
 		return nil, nil
@@ -99,13 +94,9 @@ func (s *Service) normalizeAttribution(ctx context.Context, root, addedBy, added
 	return by, at
 }
 
-// DocOutline returns the lightweight ordered rule outline and baseline hash for rawScope.
 func (s *Service) DocOutline(ctx context.Context, rawScope, repoDir string) ([]domain.RuleOutlineEntry, string, error) {
 	sc := domain.NormalizeScope(rawScope)
-	root := ""
-	if s != nil && s.db != nil {
-		root = sqlite.ResolveScopeRepoPath(ctx, s.db, sc, repoDir)
-	}
+	root := s.resolveScopeRepoPath(ctx, sc, repoDir)
 	if root != "" {
 		if raw, rerr := os.ReadFile(DocPath(root)); rerr == nil {
 			if doc, perr := ParseDocument(raw, sc); perr == nil && doc.Exists {
@@ -122,8 +113,6 @@ func (s *Service) DocOutline(ctx context.Context, rawScope, repoDir string) ([]d
 	return toOutlineEntries(rules), storedHash, nil
 }
 
-// DraftProposalFromText invokes the configured generative RulePackPlanner to produce a concise single-line
-// Team Rule proposal with surgical placement ordering and populated Git handle/date metadata.
 func (s *Service) DraftProposalFromText(ctx context.Context, rawScope, repoDir, rawRuleText, sourceCat, sourceSub string) (domain.RulePlacementProposal, error) {
 	sc := domain.NormalizeScope(rawScope)
 	if !strings.HasPrefix(sc, "project:") {
@@ -168,8 +157,8 @@ func (s *Service) DraftProposalFromText(ctx context.Context, rawScope, repoDir, 
 	prop.RuleKey = domain.ComputeRuleKey(prop.Category, prop.Title)
 	prop.Pinned = true
 	root := repoDir
-	if strings.TrimSpace(prop.AddedBy) == "" && s.db != nil {
-		if resolved := sqlite.ResolveScopeRepoPath(ctx, s.db, sc, repoDir); resolved != "" {
+	if strings.TrimSpace(prop.AddedBy) == "" {
+		if resolved := s.resolveScopeRepoPath(ctx, sc, repoDir); resolved != "" {
 			root = resolved
 		}
 	}
@@ -178,7 +167,6 @@ func (s *Service) DraftProposalFromText(ctx context.Context, rawScope, repoDir, 
 	return prop, nil
 }
 
-// PromoteLocalMemory loads an active local memory by ID and drafts a Team Rule Pack proposal for targetScope.
 func (s *Service) PromoteLocalMemory(ctx context.Context, localMemoryID int64, rawScope, repoDir string) (domain.RulePlacementProposal, domain.Fact, error) {
 	if s == nil || s.mem == nil || s.db == nil {
 		return domain.RulePlacementProposal{}, domain.Fact{}, fmt.Errorf("memory service is unavailable")
@@ -221,7 +209,6 @@ func (s *Service) PromoteLocalMemory(ctx context.Context, localMemoryID int64, r
 	return prop, src, err
 }
 
-// DefaultConflictEvaluator returns a ConflictEvaluator for PublishProposal CAS retries using TaskMutation.
 func (s *Service) DefaultConflictEvaluator(rawScope string) ConflictEvaluator {
 	sc := domain.NormalizeScope(rawScope)
 	return func(ctx context.Context, rule domain.TeamRule, latestDoc *Document) (bool, string, error) {
@@ -288,7 +275,6 @@ func (s *Service) PublishWithDefaults(ctx context.Context, in PublishInput, reti
 	return res, nil
 }
 
-// UpdateWithDefaults fills default CAS conflict checking before replacing an existing Team Rule remotely.
 func (s *Service) UpdateWithDefaults(ctx context.Context, in UpdateInput) (PublishResult, error) {
 	if in.ConflictCheck == nil {
 		in.ConflictCheck = s.DefaultConflictEvaluator(in.Scope)
@@ -296,8 +282,6 @@ func (s *Service) UpdateWithDefaults(ctx context.Context, in UpdateInput) (Publi
 	return s.UpdateRule(ctx, in)
 }
 
-// ScanConflictsForSyncedRules inspects changedKeys (or all non-overridden Team Rules if changedKeys is nil)
-// against active local memories in rawScope, persisting any policy contradictions as conflict_pending.
 func (s *Service) ScanConflictsForSyncedRules(ctx context.Context, rawScope string, changedKeys []string) ([]domain.RulePackConflict, error) {
 	if s == nil || s.db == nil || s.mem == nil || s.router == nil {
 		return nil, nil
@@ -390,8 +374,6 @@ func (s *Service) ScanConflictsForSyncedRules(ctx context.Context, rawScope stri
 	return detected, nil
 }
 
-// SyncTurnAndScanConflicts runs the sub-ms disk mirror sync and scans only changed rules for local conflicts,
-// returning a pause/decision banner whenever unresolved conflicts require attention.
 func (s *Service) SyncTurnAndScanConflicts(ctx context.Context, rawScope, repoDir string) (SyncStatus, string, error) {
 	status, err := s.SyncTurn(ctx, rawScope, repoDir)
 	if err != nil {
@@ -405,13 +387,11 @@ func (s *Service) SyncTurnAndScanConflicts(ctx context.Context, rawScope, repoDi
 	return status, s.FormatPendingConflictNotice(ctx, status.Scope), nil
 }
 
-// SyncTurnNotice satisfies guardrail's thin hook sync contract without introducing circular imports.
 func (s *Service) SyncTurnNotice(ctx context.Context, rawScope, repoDir string) (string, error) {
 	_, notice, err := s.SyncTurnAndScanConflicts(ctx, rawScope, repoDir)
 	return notice, err
 }
 
-// FormatPendingConflictNotice renders a clear stop-and-decide warning when unresolved team-vs-local conflicts exist.
 func (s *Service) FormatPendingConflictNotice(ctx context.Context, rawScope string) string {
 	if s == nil || s.db == nil {
 		return ""
@@ -438,8 +418,6 @@ func (s *Service) FormatPendingConflictNotice(ctx context.Context, rawScope stri
 	return sb.String()
 }
 
-// DetectRedundantLocalMemories uses the generative RulePackPlanner to find local memories that are
-// exact duplicates or partially overlap active Team Rules so users can review and clean or trim them.
 func (s *Service) DetectRedundantLocalMemories(ctx context.Context, rawScope string) ([]domain.RuleDuplicateSuggestion, string, error) {
 	if s == nil || s.db == nil || s.mem == nil || s.router == nil {
 		return nil, "", nil
@@ -501,7 +479,6 @@ func (s *Service) DetectRedundantLocalMemories(ctx context.Context, rawScope str
 	return clean, ev.Name(), nil
 }
 
-// ApplyDuplicateCleanup executes user-confirmed duplicate deletions or partial-overlap trims on local memories.
 func (s *Service) ApplyDuplicateCleanup(ctx context.Context, rawScope string, actions []DuplicateCleanupAction) (DuplicateCleanupResult, error) {
 	var res DuplicateCleanupResult
 	if s == nil || s.mem == nil || s.db == nil {

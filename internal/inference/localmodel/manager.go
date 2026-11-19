@@ -116,8 +116,6 @@ type StatusSnapshot struct {
 	Download         DownloadJob      `json:"download"`
 }
 
-// SelectManagedContextSize picks a safe runtime -c window for managed llama-server instances
-// based on optional MEMORY_GGUF_CTX override, detected system RAM, and model size.
 func SelectManagedContextSize(hw HardwareSpec, modelSizeBytes int64) int {
 	if raw := strings.TrimSpace(os.Getenv("MEMORY_GGUF_CTX")); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n >= 2048 && n <= 65536 {

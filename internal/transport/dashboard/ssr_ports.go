@@ -119,7 +119,6 @@ func registerSSRPortRoutes(mux *http.ServeMux, d Deps) {
 			return
 		}
 
-		// ApplyDaemonPortFn handles coordinated GGUF restart/sync + daemon port rebind when inside daemon.
 		if d.Hooks.ApplyDaemonPortFn != nil {
 			res, err := d.Hooks.ApplyDaemonPortFn(r.Context(), dp, gp)
 			if err != nil {
@@ -148,7 +147,6 @@ func registerSSRPortRoutes(mux *http.ServeMux, d Deps) {
 			return
 		}
 
-		// Standalone handler mode (e.g., tests or -dashboard without daemon wrapper).
 		effGGUFPort := gp
 		if d.LocalModel != nil {
 			lm := d.LocalModel.Status(gp)

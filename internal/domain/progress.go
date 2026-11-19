@@ -10,7 +10,6 @@ const (
 	ProgressKindGit    = "git"
 )
 
-// ProgressWorkKind classifies a progress entry into work, memory, or git.
 func ProgressWorkKind(source, commitSHA string, memoryIDs []int64) string {
 	switch strings.ToLower(strings.TrimSpace(source)) {
 	case "git_sync", "git":
@@ -25,7 +24,6 @@ func ProgressWorkKind(source, commitSHA string, memoryIDs []int64) string {
 	}
 }
 
-// ProjectShortName strips the "project:" prefix for compact display.
 func ProjectShortName(scope string) string {
 	sc := strings.TrimSpace(scope)
 	if strings.HasPrefix(sc, "project:") {
@@ -37,7 +35,6 @@ func ProjectShortName(scope string) string {
 	return sc
 }
 
-// EffectiveProgressTrack resolves a human-readable work stream / topic name.
 func EffectiveProgressTrack(track, category, subCategory string) string {
 	if t := strings.TrimSpace(track); t != "" {
 		return t
@@ -56,7 +53,6 @@ func EffectiveProgressTrack(track, category, subCategory string) string {
 	return "general"
 }
 
-// NormalizeDoneWindow normalizes the time window for the Recently Completed lane.
 func NormalizeDoneWindow(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "24h", "1d", "today":
@@ -70,7 +66,6 @@ func NormalizeDoneWindow(raw string) string {
 	}
 }
 
-// GitCommitBrief summarizes one Git commit passed to progress categorization.
 type GitCommitBrief struct {
 	SHA     string   `json:"sha"`
 	Date    string   `json:"date"`
@@ -78,7 +73,6 @@ type GitCommitBrief struct {
 	Files   []string `json:"files,omitempty"`
 }
 
-// CommitProgressItem holds a categorized summary for a Git commit.
 type CommitProgressItem struct {
 	SHA         string `json:"sha"`
 	Track       string `json:"track,omitempty"`
@@ -87,7 +81,6 @@ type CommitProgressItem struct {
 	Summary     string `json:"summary"`
 }
 
-// GitMilestoneSummary holds a cohesive synthesized milestone spanning one or more Git commits.
 type GitMilestoneSummary struct {
 	Track       string   `json:"track"`
 	Category    string   `json:"category"`
@@ -97,7 +90,6 @@ type GitMilestoneSummary struct {
 	CommitSHAs  []string `json:"commit_shas"`
 }
 
-// ProgressRecord represents one persisted entry in project_progress.
 type ProgressRecord struct {
 	ID           int64    `json:"id"`
 	Scope        string   `json:"scope"`
@@ -121,7 +113,6 @@ type ProgressRecord struct {
 	UpdatedAt    string   `json:"updated_at"`
 }
 
-// ProgressInput captures fields to insert or update in project_progress.
 type ProgressInput struct {
 	Scope       string
 	Account     string
@@ -137,7 +128,6 @@ type ProgressInput struct {
 	Source      string
 }
 
-// ProgressTrackSummary aggregates activity counts for one work track.
 type ProgressTrackSummary struct {
 	Scope             string `json:"scope"`
 	ProjectName       string `json:"project_name"`
@@ -154,13 +144,11 @@ type ProgressTrackSummary struct {
 	LinkedMemoryCount int    `json:"linked_memory_count"`
 }
 
-// ProgressDateGroup groups progress records under one YYYY-MM-DD header.
 type ProgressDateGroup struct {
 	Date    string           `json:"date"`
 	Records []ProgressRecord `json:"records"`
 }
 
-// ProgressCategorySummary summarizes progress by category.
 type ProgressCategorySummary struct {
 	Category          string   `json:"category"`
 	SubCategories     []string `json:"sub_categories,omitempty"`
@@ -171,7 +159,6 @@ type ProgressCategorySummary struct {
 	LinkedMemoryCount int      `json:"linked_memory_count"`
 }
 
-// ProgressSyncState reports repo_sync alignment and pending Git commits for a project.
 type ProgressSyncState struct {
 	Scope               string           `json:"scope"`
 	RepoPath            string           `json:"repo_path,omitempty"`
@@ -182,7 +169,6 @@ type ProgressSyncState struct {
 	InSync              bool             `json:"in_sync"`
 }
 
-// ProgressSyncResult reports the items processed during SyncProjectProgress.
 type ProgressSyncResult struct {
 	Scope          string `json:"scope"`
 	HeadCommit     string `json:"head_commit,omitempty"`
@@ -190,7 +176,6 @@ type ProgressSyncResult struct {
 	SyncedCommits  int    `json:"synced_commits"`
 }
 
-// ProgressProjectSummary aggregates recent activity counts and flow for one project scope.
 type ProgressProjectSummary struct {
 	Scope           string           `json:"scope"`
 	ProjectName     string           `json:"project_name"`
@@ -202,7 +187,6 @@ type ProgressProjectSummary struct {
 	RecentHistory   []ProgressRecord `json:"recent_history,omitempty"`
 }
 
-// ProgressQuery filters progress activity board and timeline queries.
 type ProgressQuery struct {
 	Scope        string
 	Account      string
@@ -216,7 +200,6 @@ type ProgressQuery struct {
 	PageSize     int
 }
 
-// ProgressOverview holds the complete dashboard/MCP payload for project progress.
 type ProgressOverview struct {
 	Scope           string                    `json:"scope"`
 	TotalCount      int                       `json:"total_count"`

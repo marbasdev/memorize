@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 
 	"memorize/internal/domain"
@@ -15,7 +16,6 @@ import (
 )
 
 func TestPortConfigValidationPersistenceAndIsolation(t *testing.T) {
-	// 1. In-memory DB never writes ports.json to disk and defaults cleanly.
 	if p := config.PortsFilePath(":memory:"); p != "" {
 		t.Fatalf("expected empty PortsFilePath for :memory:, got %q", p)
 	}
@@ -26,7 +26,6 @@ func TestPortConfigValidationPersistenceAndIsolation(t *testing.T) {
 		t.Fatalf("expected default ports for :memory:, got %+v", got)
 	}
 
-	// 2. Reject invalid ranges and matching daemon/GGUF ports.
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "memories.db")
 	for _, tc := range [][2]int{
@@ -40,7 +39,6 @@ func TestPortConfigValidationPersistenceAndIsolation(t *testing.T) {
 		}
 	}
 
-	// 3. Persist valid config with 0600 permissions and reload cleanly.
 	want := domain.PortConfig{DaemonPort: 19195, GGUFPort: 19188}
 	if err := config.SavePortConfig(dbPath, want); err != nil {
 		t.Fatalf("SavePortConfig failed: %v", err)
@@ -75,7 +73,6 @@ func TestDaemonRuntimeStatePIDGuardAndFallbackPortPicker(t *testing.T) {
 		t.Fatalf("expected ActiveDaemonURL http://127.0.0.1:19501, got %q", u)
 	}
 
-	// Older PID must NOT erase a newer PID's daemon.json during restart handover.
 	config.RemoveDaemonStateIfPID(dbPath, 9999)
 	if _, stillOK := config.ReadDaemonState(dbPath); !stillOK {
 		t.Fatalf("expected daemon.json to remain when mismatched PID attempts cleanup")
@@ -85,7 +82,6 @@ func TestDaemonRuntimeStatePIDGuardAndFallbackPortPicker(t *testing.T) {
 		t.Fatalf("expected matching PID cleanup to remove daemon.json")
 	}
 
-	// Occupy a loopback port and exclude the next consecutive port to verify fallback + exclusion.
 	busyLn, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen busy port: %v", err)
@@ -124,7 +120,6 @@ func TestSyncManagedGGUFEndpointRespectsExternalURLAndEnv(t *testing.T) {
 		t.Fatalf("expected gguf_endpoint synced to http://127.0.0.1:19088, got %q", got)
 	}
 
-	// Non-loopback external endpoint must NOT be overwritten when managed GGUF port changes.
 	extURL := "https://gpu.internal.example:8080"
 	if err := config.SaveConfig(domain.WithAdminBypass(ctx), db, ":memory:", map[string]string{"gguf_endpoint": extURL}); err != nil {
 		t.Fatalf("SaveConfig external URL: %v", err)
@@ -159,5 +154,104 @@ func TestDefaultDataDirUsesNeutralHomeDirectory(t *testing.T) {
 	t.Setenv("MEMORY_DATA_DIR", customRoot)
 	if got := config.DefaultDataDir(); got != customRoot {
 		t.Fatalf("DefaultDataDir() with MEMORY_DATA_DIR = %q, want %q", got, customRoot)
+	}
+}
+
+func TestRemoteBindingsRepoVsGlobalAndSoloMode(t *testing.T) {
+	dataDir := t.TempDir()
+	teamRepo := t.TempDir()
+	personalRepo := t.TempDir()
+
+	if _, ok := config.ResolveRemoteTarget(dataDir, personalRepo); ok {
+		t.Fatalf("expected unbound repo to stay in solo mode")
+	}
+
+	if err := config.SaveRemoteBinding(dataDir, teamRepo, false, domain.RemoteTargetConfig{
+		URL:   "https://team.example.com:18095/",
+		Token: "mmz_team_tok",
+	}); err != nil {
+		t.Fatalf("SaveRemoteBinding repo: %v", err)
+	}
+
+	subDir := filepath.Join(teamRepo, "services", "api")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := config.ResolveRemoteTarget(dataDir, subDir)
+	if !ok {
+		t.Fatalf("expected nested dir inside bound repo to resolve remote target")
+	}
+	if got.URL != "https://team.example.com:18095" || got.Token != "mmz_team_tok" {
+		t.Fatalf("unexpected resolved target: %+v", got)
+	}
+
+	if _, ok := config.ResolveRemoteTarget(dataDir, personalRepo); ok {
+		t.Fatalf("expected unbound personal repo to remain local")
+	}
+
+	if err := config.SaveRemoteBinding(dataDir, "", true, domain.RemoteTargetConfig{
+		URL:   "http://default.example.com:18095",
+		Token: "mmz_default",
+	}); err != nil {
+		t.Fatalf("SaveRemoteBinding global: %v", err)
+	}
+	gotDef, ok := config.ResolveRemoteTarget(dataDir, personalRepo)
+	if !ok || gotDef.Token != "mmz_default" {
+		t.Fatalf("expected global default fallback, got %+v (ok=%v)", gotDef, ok)
+	}
+	gotTeam, ok := config.ResolveRemoteTarget(dataDir, teamRepo)
+	if !ok || gotTeam.Token != "mmz_team_tok" {
+		t.Fatalf("expected per-repo binding to win over global default, got %+v", gotTeam)
+	}
+
+	removed, err := config.RemoveRemoteBinding(dataDir, teamRepo, false)
+	if err != nil || !removed {
+		t.Fatalf("RemoveRemoteBinding repo failed: removed=%v err=%v", removed, err)
+	}
+	removed, err = config.RemoveRemoteBinding(dataDir, "", true)
+	if err != nil || !removed {
+		t.Fatalf("RemoveRemoteBinding global failed: removed=%v err=%v", removed, err)
+	}
+	if _, ok := config.ResolveRemoteTarget(dataDir, teamRepo); ok {
+		t.Fatalf("expected all remote bindings disconnected")
+	}
+}
+
+func TestClientTurnBaselinesAndDiffSections(t *testing.T) {
+	dataDir := t.TempDir()
+	workDir := t.TempDir()
+	sid := "sess-diff-1"
+	fileA := filepath.Join(workDir, "main.go")
+	if err := os.WriteFile(fileA, []byte("package main\nfunc run() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	config.RecordClientTurnBaseline(dataDir, sid, "project:app", fileA, "main.go")
+	if err := os.WriteFile(fileA, []byte("package main\nfunc run() { println(\"hi\") }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config.RecordClientTurnBaseline(dataDir, sid, "project:app", fileA, "main.go")
+
+	newFile := filepath.Join(workDir, "helper.go")
+	config.RecordClientTurnBaseline(dataDir, sid, "project:app", newFile, "helper.go")
+	if err := os.WriteFile(newFile, []byte("package main\nvar x = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	diffs := config.ConsumeClientTurnDiffs(dataDir, sid, false)
+	if len(diffs) != 2 {
+		t.Fatalf("expected 2 client diff sections, got %d (%+v)", len(diffs), diffs)
+	}
+	joined := diffs[0].Body + "\n" + diffs[1].Body
+	if !strings.Contains(joined, "println") || !strings.Contains(joined, "var x = 1") {
+		t.Fatalf("unexpected diff bodies: %s", joined)
+	}
+
+	diffs2 := config.ConsumeClientTurnDiffs(dataDir, sid, true)
+	if len(diffs2) != 2 {
+		t.Fatalf("expected diffs on clear=true consume, got %d", len(diffs2))
+	}
+	if rem := config.ConsumeClientTurnDiffs(dataDir, sid, false); len(rem) != 0 {
+		t.Fatalf("expected cleared baselines, got %d", len(rem))
 	}
 }

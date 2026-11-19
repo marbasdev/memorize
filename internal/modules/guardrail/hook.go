@@ -134,8 +134,6 @@ type teamRuleDocIngester interface {
 	IngestTeamRuleDoc(ctx context.Context, rawScope, rawMarkdown string) error
 }
 
-// ExecuteHook executes zero-touch context injection (start/turn) or PreToolUse plan verification
-// directly from lifecycle hooks without requiring an extra MCP tool-call roundtrip.
 func (s *Service) ExecuteHook(ctx context.Context, mode string, rawStdin []byte, fallbackCwd string) (string, int, error) {
 	ev := decodeHookEvent(mode, rawStdin)
 	if !ev.Valid {
@@ -254,7 +252,6 @@ func (s *Service) collectTargetContext(
 ) ([]string, bool, bool) {
 	localCtx, localCancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	s.rememberRepo(localCtx, t.Scope, t.RepoDir)
-	// Record turn state locally before remote inference; mark ephemeral live session heartbeat.
 	if explicitSID != "" {
 		if !isStart && rawUserPrompt != "" {
 			s.mem.RecordTurnState(localCtx, explicitSID, t.Scope, rawUserPrompt)

@@ -74,7 +74,6 @@ func formatViolationDetails(violations []domain.PlanViolation) ([]int64, string)
 	return ids, sb.String()
 }
 
-// RecordGuardrailLog appends an audit entry for a guardrail or plan verification evaluation.
 func (s *Service) RecordGuardrailLog(ctx context.Context, inp domain.GuardrailLogInput) (int64, error) {
 	sc := domain.NormalizeScope(inp.Scope)
 	acc := domain.NormalizeAccount(inp.Account)
@@ -123,7 +122,6 @@ func (s *Service) RecordGuardrailLog(ctx context.Context, inp domain.GuardrailLo
 		return 0, err
 	}
 	newID, _ := res.LastInsertId()
-	// Keep audit table bounded to the latest 5000 entries.
 	_, _ = s.db.ExecContext(ctx, `
 		DELETE FROM guardrail_logs
 		WHERE id <= COALESCE((SELECT id FROM guardrail_logs ORDER BY id DESC LIMIT 1 OFFSET 5000), 0)`)
@@ -190,7 +188,6 @@ func buildGuardrailWhereClause(q domain.GuardrailLogQuery) (string, []any) {
 	return strings.Join(conds, " AND "), args
 }
 
-// QueryGuardrailLogsPage performs SQLite server-side filtering and LIMIT/OFFSET pagination over guardrail_logs.
 func (s *Service) QueryGuardrailLogsPage(ctx context.Context, q domain.GuardrailLogQuery) (domain.GuardrailLogPage, error) {
 	curAcc := ""
 	if s.mem != nil {

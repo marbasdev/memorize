@@ -11,7 +11,6 @@ import (
 	"memorize/internal/inference/providers"
 )
 
-// NormalizePresetCategoriesJSON parses, normalizes, and deduplicates category/sub-category presets.
 func NormalizePresetCategoriesJSON(raw string) string {
 	s := strings.TrimSpace(raw)
 	if s == "" || s == "reset" {
@@ -49,7 +48,6 @@ func NormalizePresetCategoriesJSON(raw string) string {
 	return string(b)
 }
 
-// EnvOrDefault resolves raw, then envVar, then fallback.
 func EnvOrDefault(raw, envVar, fallback string) string {
 	if s := strings.TrimSpace(raw); s != "" {
 		return s
@@ -60,7 +58,6 @@ func EnvOrDefault(raw, envVar, fallback string) string {
 	return fallback
 }
 
-// MaskSecret formats a non-sensitive masked display string for an API key.
 func MaskSecret(raw, envVar string) string {
 	s := strings.TrimSpace(raw)
 	src := "Stored in DB"
@@ -77,12 +74,6 @@ func MaskSecret(raw, envVar string) string {
 	return src + " (" + s[:4] + "••••" + s[len(s)-4:] + ")"
 }
 
-// PublicConfig builds a redacted public engine configuration map using the default GGUF port.
-func PublicConfig(raw map[string]string, providerName string) map[string]string {
-	return PublicConfigWithGGUFPort(raw, providerName, domain.DefaultGGUFPort)
-}
-
-// PublicConfigWithGGUFPort builds a redacted public engine configuration map with ggufPort filled in.
 func PublicConfigWithGGUFPort(raw map[string]string, providerName string, ggufPort int) map[string]string {
 	if ggufPort < 1 || ggufPort > 65535 {
 		ggufPort = domain.DefaultGGUFPort
@@ -138,7 +129,6 @@ func PublicConfigWithGGUFPort(raw map[string]string, providerName string, ggufPo
 	return res
 }
 
-// GeminiModelOption represents one available Gemini model entry for engine selection UI.
 type GeminiModelOption struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
@@ -150,7 +140,6 @@ type GeminiModelOption struct {
 	Desc          string `json:"desc"`
 }
 
-// ValidateAndApplyRoutingPairs validates generative companion and per-task route selections into pairs.
 func ValidateAndApplyRoutingPairs(genProv, genMod string, applyGen bool, routes map[domain.EvalTask][2]string, pairs map[string]string) error {
 	if applyGen {
 		gp := domain.NormalizeProviderID(genProv)

@@ -90,7 +90,6 @@ func (s *Service) ForgetMemories(ctx context.Context, ids []int64) (int64, error
 	return total, nil
 }
 
-// UndoMemory reverts an overwrite (deactivating the replacement and restoring children) or reactivates a deactivated memory.
 func (s *Service) UndoMemory(ctx context.Context, id int64) (string, error) {
 	var act int
 	var recScope, recAcc string
@@ -162,12 +161,6 @@ func (s *Service) UndoMemory(ctx context.Context, id int64) (string, error) {
 	return msg, nil
 }
 
-// UpdateMemory updates a memory's category, content, and pinned state.
-func (s *Service) UpdateMemory(ctx context.Context, id int64, category, content string, pinned bool) error {
-	return s.UpdateMemoryFull(ctx, id, "", category, nil, content, &pinned)
-}
-
-// UpdateMemoryFull updates mutable fields of memory id; nil pinned and nil subCategory preserve existing values.
 func (s *Service) UpdateMemoryFull(ctx context.Context, id int64, rawScope, category string, subCategory *string, content string, pinned *bool) error {
 	var curScope, curAcc, curCat, curSub, curContent string
 	var curPin int
@@ -247,7 +240,6 @@ func (s *Service) UpdateMemoryFull(ctx context.Context, id int64, rawScope, cate
 	return nil
 }
 
-// UpdateMemoryAccount reassigns the owning account for memory id.
 func (s *Service) UpdateMemoryAccount(ctx context.Context, id int64, rawAccount string) error {
 	recScope, _, err := s.loadOwnedScope(ctx, id)
 	if err != nil {
@@ -273,7 +265,6 @@ func (s *Service) UpdateMemoryAccount(ctx context.Context, id int64, rawAccount 
 	return nil
 }
 
-// UpdateMemoryTags normalizes and overwrites tags for memory id.
 func (s *Service) UpdateMemoryTags(ctx context.Context, id int64, rawTags string) error {
 	scope, _, err := s.loadOwnedScope(ctx, id)
 	if err != nil {
@@ -296,7 +287,6 @@ func (s *Service) UpdateMemoryTags(ctx context.Context, id int64, rawTags string
 	return nil
 }
 
-// PurgeTombstones permanently deletes inactive memories while preserving superseded lineage on active parent records.
 func (s *Service) PurgeTombstones(ctx context.Context, scopeFilter string) (int64, error) {
 	sc := strings.TrimSpace(scopeFilter)
 	if domain.IsServerMode(ctx) && !domain.IsUserPrivateScope(ctx, sc) {
@@ -307,7 +297,6 @@ func (s *Service) PurgeTombstones(ctx context.Context, scopeFilter string) (int6
 	privSQL, privArgs := s.privateScopeSQL(ctx, "", true)
 	var n int64
 	if err := s.withTx(ctx, func(tx *sql.Tx) error {
-		// Snapshot direct superseded lineage into parent's replaces_text before deleting inactive rows
 		selArgs := append([]any{sc, sc}, privArgs...)
 		rows, err := tx.QueryContext(ctx, `
 			SELECT superseded_by, content FROM memories
@@ -371,7 +360,6 @@ func boolToInt(v bool) int {
 	return 0
 }
 
-// RecalibrateConfidence re-evaluates semantic confidence [0.0, 1.0] for active memories using the configured AI evaluator.
 func (s *Service) RecalibrateConfidence(ctx context.Context, scopeFilter string) (int, error) {
 	if err := domain.RequireAdmin(ctx); err != nil {
 		return 0, err

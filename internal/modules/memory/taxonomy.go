@@ -79,8 +79,6 @@ func encodePresetTaxonomyMap(m map[string]map[string]bool) string {
 	return string(b)
 }
 
-// EffectiveTaxonomyJSON merges configured preset_categories with all active categories and
-// sub-categories currently stored in SQLite so LLM classification reuses consistent slugs.
 func (s *Service) EffectiveTaxonomyJSON(ctx context.Context) string {
 	tax := parsePresetTaxonomyMap(s.GetConfigMap(ctx)[config.CfgPresetCategories])
 	rows, err := s.db.QueryContext(ctx, `
@@ -132,8 +130,6 @@ func (s *Service) RegisterTaxonomyAppendOnly(ctx context.Context, rawScope, rawC
 	})
 }
 
-// SuggestTaxonomyRebalance analyzes active memories in rawScope (and optional categoryFilter)
-// and proposes non-destructive category/sub_category adjustments.
 func (s *Service) SuggestTaxonomyRebalance(ctx context.Context, rawScope, categoryFilter string) ([]domain.TaxonomyRebalanceItem, string, error) {
 	targetScope := domain.NormalizeScope(rawScope)
 	facts, err := s.LoadActiveFacts(ctx, targetScope, targetScope, strings.TrimSpace(categoryFilter))
@@ -275,7 +271,6 @@ func suggestLexicalSubCategories(targetScope string, facts []domain.Fact, preset
 	return out
 }
 
-// ApplyTaxonomyRebalance updates ONLY category and sub_category for approved memory IDs.
 func (s *Service) ApplyTaxonomyRebalance(ctx context.Context, rawScope string, items []domain.TaxonomyRebalanceItem) (int, error) {
 	if len(items) == 0 {
 		return 0, fmt.Errorf("select at least 1 taxonomy adjustment to apply")
@@ -323,8 +318,6 @@ func (s *Service) ApplyTaxonomyRebalance(ctx context.Context, rawScope string, i
 	return updated, nil
 }
 
-// SuggestCleanupPlanFiltered runs AI merge analysis and AI category/sub-category rebalance
-// concurrently and returns a unified, disjoint cleanup plan for rawScope.
 func (s *Service) SuggestCleanupPlanFiltered(ctx context.Context, rawScope, categoryFilter string) (domain.CleanupPlan, error) {
 	targetScope := domain.NormalizeScope(rawScope)
 	catFilter := strings.TrimSpace(categoryFilter)
@@ -387,7 +380,6 @@ func (s *Service) SuggestCleanupPlanFiltered(ctx context.Context, rawScope, cate
 	}, nil
 }
 
-// ApplyCleanupPlan executes approved merge proposals and non-destructive category adjustments in one batch.
 func (s *Service) ApplyCleanupPlan(ctx context.Context, rawScope string, proposals []domain.ConsolidationProposal, items []domain.TaxonomyRebalanceItem) ([]int64, int, int, error) {
 	if len(proposals) == 0 && len(items) == 0 {
 		return nil, 0, 0, fmt.Errorf("select at least 1 merge group or category adjustment to apply")

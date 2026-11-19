@@ -19,7 +19,6 @@ var geminiCatalogClient = &http.Client{
 	},
 }
 
-// DefaultGeminiModels returns the built-in Gemini model preset catalog.
 func DefaultGeminiModels() []GeminiModelOption {
 	return defaultGeminiModels()
 }
@@ -80,7 +79,6 @@ func isCanonicalGeminiAlias(id string) bool {
 	return true
 }
 
-// DiscoverGeminiModels queries the Gemini models catalog or returns builtin defaults.
 func DiscoverGeminiModels(ctx context.Context, rawCfg map[string]string, overrideKey string) ([]GeminiModelOption, string, string) {
 	apiKey := EnvOrDefault(overrideKey, "", EnvOrDefault(rawCfg["gemini_api_key"], "GEMINI_API_KEY", ""))
 	if apiKey == "" {

@@ -271,8 +271,6 @@ func hookBudgetContext(procStart time.Time, mode string) (context.Context, conte
 	return ctx, cancel, timeoutMs, true
 }
 
-// runStdioDaemonBridge runs a lightweight stateless stdio <-> HTTP bridge
-// targeting either a bound remote team server or the unified local daemon.
 func runStdioDaemonBridge(addr, dbPath, modelsDir string, ensureFn ensureDaemonFn) error {
 	sid := fmt.Sprintf("stdio-%d-%d", os.Getpid(), time.Now().UnixNano()%100000)
 	cwd, _ := os.Getwd()
@@ -343,7 +341,6 @@ func runStdioDaemonBridge(addr, dbPath, modelsDir string, ensureFn ensureDaemonF
 				}
 				continue
 			}
-			// Other JSON-RPC notifications (no id) require no response.
 			if len(env.ID) == 0 || string(env.ID) == "null" {
 				continue
 			}
@@ -375,7 +372,6 @@ func runStdioDaemonBridge(addr, dbPath, modelsDir string, ensureFn ensureDaemonF
 				}
 			}
 		} else {
-			// Up to 2 attempts so an in-flight local daemon hot-reload/restart is invisible to the IDE.
 			for attempt := 0; attempt < 2; attempt++ {
 				if attempt > 0 {
 					time.Sleep(250 * time.Millisecond)
@@ -788,7 +784,6 @@ func runHookViaDaemon(addr, dbPath, modelsDir, mode string, rawStdin []byte, pro
 	}
 	ctx, cancel, timeoutMs, alive := hookBudgetContext(procStart, mode)
 	if !alive {
-		// Caller deadline is nearly exhausted; fail open cleanly before IDE SIGKILL fires.
 		return "", 0, true
 	}
 	defer cancel()

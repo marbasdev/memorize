@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"memorize/internal/domain"
 	"memorize/internal/infra/config"
@@ -66,7 +68,6 @@ func dashboardAuthMiddleware(d Deps, next http.Handler) http.Handler {
 			return
 		}
 
-		// Public static assets & login page remain accessible without session cookie.
 		if (r.URL.Path == "/login" && (r.Method == http.MethodGet || r.Method == http.MethodPost)) ||
 			(strings.HasPrefix(r.URL.Path, "/assets/") && r.Method == http.MethodGet) {
 			next.ServeHTTP(w, r)
@@ -119,10 +120,7 @@ func resolveRequestBaseURL(r *http.Request) string {
 	if thttp.IsSecureRequest(r) {
 		scheme = "https"
 	}
-	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
-	if host != "" {
-		host = strings.TrimSpace(strings.Split(host, ",")[0])
-	}
+	host := thttp.TrustedForwardedHost(r)
 	if host == "" {
 		host = strings.TrimSpace(r.Host)
 	}
@@ -130,6 +128,94 @@ func resolveRequestBaseURL(r *http.Request) string {
 		host = domain.DefaultDaemonAddr
 	}
 	return scheme + "://" + host
+}
+
+const (
+	loginRateWindow      = 5 * time.Minute
+	loginMaxFailures     = 10
+	loginMaxTrackedPeers = 512
+)
+
+type loginAttemptBucket struct {
+	failures    int
+	windowStart time.Time
+	lastSeen    time.Time
+}
+
+type loginRateLimiter struct {
+	mu      sync.Mutex
+	buckets map[string]*loginAttemptBucket
+}
+
+func newLoginRateLimiter() *loginRateLimiter {
+	return &loginRateLimiter{buckets: make(map[string]*loginAttemptBucket)}
+}
+
+func (l *loginRateLimiter) isBlocked(ip string, now time.Time) bool {
+	if l == nil || ip == "" {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	b, ok := l.buckets[ip]
+	if !ok {
+		return false
+	}
+	if now.Sub(b.windowStart) > loginRateWindow {
+		delete(l.buckets, ip)
+		return false
+	}
+	b.lastSeen = now
+	return b.failures >= loginMaxFailures
+}
+
+func (l *loginRateLimiter) recordFailure(ip string, now time.Time) bool {
+	if l == nil || ip == "" {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	b, ok := l.buckets[ip]
+	if !ok || now.Sub(b.windowStart) > loginRateWindow {
+		b = &loginAttemptBucket{windowStart: now}
+		l.buckets[ip] = b
+	}
+	b.failures++
+	b.lastSeen = now
+	if len(l.buckets) > loginMaxTrackedPeers {
+		for k, entry := range l.buckets {
+			if k != ip && now.Sub(entry.windowStart) > loginRateWindow {
+				delete(l.buckets, k)
+			}
+		}
+		for len(l.buckets) > loginMaxTrackedPeers {
+			oldestKey := ""
+			var oldestTime time.Time
+			for k, entry := range l.buckets {
+				if k == ip {
+					continue
+				}
+				if oldestKey == "" || entry.lastSeen.Before(oldestTime) {
+					oldestKey = k
+					oldestTime = entry.lastSeen
+				}
+			}
+			if oldestKey == "" {
+				break
+			}
+			delete(l.buckets, oldestKey)
+		}
+	}
+	return b.failures >= loginMaxFailures
+}
+
+func (l *loginRateLimiter) reset(ip string) {
+	if l == nil || ip == "" {
+		return
+	}
+	l.mu.Lock()
+	delete(l.buckets, ip)
+	l.mu.Unlock()
 }
 
 func buildUsersModalData(r *http.Request, d Deps, lang string, issued *domain.UserTokenIssue) (ssrUsersModalData, error) {
@@ -265,6 +351,7 @@ func renderUsersModalWithToast(w http.ResponseWriter, r *http.Request, d Deps, l
 }
 
 func registerSSRAuthRoutes(mux *http.ServeMux, d Deps) {
+	limiter := newLoginRateLimiter()
 	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
 		if !thttp.IsAllowedOrigin(r, d.ServerMode) {
 			thttp.WriteJSON(w, http.StatusForbidden, map[string]any{"error": "cross-origin request blocked"})
@@ -304,14 +391,12 @@ func registerSSRAuthRoutes(mux *http.ServeMux, d Deps) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
-		_ = r.ParseForm()
-		tok := strings.TrimSpace(r.FormValue("token"))
-		p, ok := sqlite.AuthenticateToken(r.Context(), db, tok)
-		if !ok {
+		now := time.Now()
+		peerIP := thttp.ClientPeerIP(r)
+		if limiter.isBlocked(peerIP, now) {
 			body, err := renderSSRTemplate("login", ssrLoginData{
 				Lang:  lang,
-				Error: langText(lang, "Invalid or disabled access token.", "액세스 토큰이 유효하지 않거나 비활성화되었습니다."),
+				Error: langText(lang, "Too many failed login attempts. Please wait a few minutes and try again.", "로그인 실패 횟수가 너무 많습니다. 잠시 후 다시 시도해 주세요."),
 			})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -319,10 +404,37 @@ func registerSSRAuthRoutes(mux *http.ServeMux, d Deps) {
 			}
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
-			w.WriteHeader(http.StatusUnauthorized)
+			w.WriteHeader(http.StatusTooManyRequests)
 			_, _ = w.Write(body)
 			return
 		}
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
+		_ = r.ParseForm()
+		tok := strings.TrimSpace(r.FormValue("token"))
+		p, ok := sqlite.AuthenticateToken(r.Context(), db, tok)
+		if !ok {
+			throttled := limiter.recordFailure(peerIP, now)
+			status := http.StatusUnauthorized
+			errMsg := langText(lang, "Invalid or disabled access token.", "액세스 토큰이 유효하지 않거나 비활성화되었습니다.")
+			if throttled {
+				status = http.StatusTooManyRequests
+				errMsg = langText(lang, "Too many failed login attempts. Please wait a few minutes and try again.", "로그인 실패 횟수가 너무 많습니다. 잠시 후 다시 시도해 주세요.")
+			}
+			body, err := renderSSRTemplate("login", ssrLoginData{
+				Lang:  lang,
+				Error: errMsg,
+			})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+			w.WriteHeader(status)
+			_, _ = w.Write(body)
+			return
+		}
+		limiter.reset(peerIP)
 		cookieVal, err := sqlite.IssueSessionCookieValue(r.Context(), db, p, domain.DefaultSessionTTL)
 		if err != nil {
 			http.Error(w, "failed to create session", http.StatusInternalServerError)

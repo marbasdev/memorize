@@ -10,8 +10,6 @@ import (
 
 const maxTrimmedRuleRunes = 180
 
-// DraftRulePackProposal synthesizes a concise single-line Team Rule Pack summary
-// for appending to the end of its category section.
 func (e *schemaEvaluator) DraftRulePackProposal(ctx context.Context, scope, rawRuleText, sourceCat, sourceSub string, outline []domain.RuleOutlineEntry) (domain.RulePlacementProposal, error) {
 	raw := strings.TrimSpace(rawRuleText)
 	if raw == "" {
@@ -89,8 +87,6 @@ Convert the Candidate Rule below into ONE clean, self-contained single-line Team
 	}, nil
 }
 
-// FindRedundantLocalMemories identifies local memories that are completely duplicated or partially overlapped
-// by active Team Rules so users can clean up redundant local state via review.
 func (e *schemaEvaluator) FindRedundantLocalMemories(ctx context.Context, scope string, teamRules []domain.TeamRule, localFacts []domain.Fact) ([]domain.RuleDuplicateSuggestion, error) {
 	if len(teamRules) == 0 || len(localFacts) == 0 {
 		return nil, nil

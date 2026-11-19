@@ -18,7 +18,6 @@ import (
 	thttp "memorize/internal/transport/http"
 )
 
-// RuntimeHooks decouples CLI flag dispatch from application-layer daemon composition.
 type RuntimeHooks struct {
 	EnsureDaemonRunning func(explicitAddr, dbPath, modelsDir string) (*thttp.DaemonStatus, bool)
 	RunDaemonServer     func(explicitAddr, dbPath, modelsDir string) int
@@ -216,8 +215,6 @@ func executeArgs(args []string, version string, hooks RuntimeHooks) int {
 		return runHookCommand(m, explicitAddr, dbPath, modelsDir, readHookStdin(), procStart, hooks)
 	}
 
-	// Default MCP stdio mode runs as a lightweight stateless bridge to the unified daemon
-	// (or configured remote team server), so all sessions stay consistent transparently.
 	cwd, _ := os.Getwd()
 	_, hasRemote := config.ResolveRemoteTarget(resolveClientDataDir(dbPath), cwd)
 	if !*daemonMode && strings.TrimSpace(*dashAddr) == "" && !isInlineModeForced(dbPath) && (hasRemote || hooks.EnsureDaemonRunning != nil) {
@@ -246,7 +243,6 @@ func executeArgs(args []string, version string, hooks RuntimeHooks) int {
 	return hooks.ServeInlineStdio(dbPath, modelsDir, withDash, os.Getenv("MEMORY_DASHBOARD_ADDR"))
 }
 
-// Execute parses CLI flags/subcommands from os.Args and returns the process exit code.
 func Execute(version string, hooks RuntimeHooks) int {
 	return executeArgs(os.Args[1:], version, hooks)
 }

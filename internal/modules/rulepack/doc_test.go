@@ -77,8 +77,6 @@ func TestInsertRule_SurgicalOrderingAndBytePreservation(t *testing.T) {
 		"",
 	}, "\n")
 
-	// 1) Inserting Security places ## Security between ## Architecture and ## Testing (canonical rank),
-	//    leaving all existing prose and legacy rules untouched verbatim.
 	withSec, err := InsertRule([]byte(initial), "project:demo", domain.RulePlacementProposal{
 		Category: "security",
 		Title:    "Bind daemon strictly to loopback",
@@ -100,7 +98,6 @@ func TestInsertRule_SurgicalOrderingAndBytePreservation(t *testing.T) {
 		t.Fatalf("existing intro notes were mutated")
 	}
 
-	// 2) Inserting into Architecture always appends at the bottom of the Architecture section.
 	withSub, err := InsertRule(withSec, "project:demo", domain.RulePlacementProposal{
 		Category:    "architecture",
 		SubCategory: "ui",
@@ -119,7 +116,6 @@ func TestInsertRule_SurgicalOrderingAndBytePreservation(t *testing.T) {
 		t.Fatalf("expected new rule appended at bottom of Architecture section:\n%s", subText)
 	}
 
-	// 3) Inserting another rule in Architecture appends after the previous last Architecture rule.
 	withAfter, err := InsertRule(withSub, "project:demo", domain.RulePlacementProposal{
 		Category: "architecture",
 		Title:    "Follow-up rule at bottom of architecture",
@@ -150,7 +146,6 @@ func TestInsertRule_SurgicalOrderingAndBytePreservation(t *testing.T) {
 }
 
 func TestParseAndSecurityValidation(t *testing.T) {
-	// Duplicate rules (same category + normalized title) rejected with ParseError.
 	dupDoc := strings.Join([]string{
 		"## Architecture (`architecture`)",
 		"",
@@ -161,7 +156,6 @@ func TestParseAndSecurityValidation(t *testing.T) {
 		t.Fatal("expected duplicate rule parse error")
 	}
 
-	// Non-rule intro bullets inside a section are preserved harmlessly without failing parse.
 	withNotes := strings.Join([]string{
 		"## Architecture (`architecture`)",
 		"",
@@ -174,7 +168,6 @@ func TestParseAndSecurityValidation(t *testing.T) {
 		t.Fatalf("expected intro bullet preserved and 1 rule parsed, got doc=%+v err=%v", docNotes, err)
 	}
 
-	// Secret detection blocks export.
 	_, err = InsertRule(nil, "project:demo", domain.RulePlacementProposal{
 		Category: "security",
 		Title:    "Never embed AIzaSyDummySecretValue12345678901234",
@@ -185,7 +178,6 @@ func TestParseAndSecurityValidation(t *testing.T) {
 		t.Fatalf("expected security guard rejection, got %v", err)
 	}
 
-	// Duplicate insert error uses ErrRuleKeyExists sentinel.
 	base, err := InsertRule(nil, "project:demo", domain.RulePlacementProposal{
 		Category: "testing",
 		Title:    "Rule one",
@@ -245,7 +237,6 @@ func TestReplaceAndRemoveRuleAndCRLFHash(t *testing.T) {
 		t.Fatalf("expected in-place tight bullet update, got:\n%s", updated)
 	}
 
-	// Moving category via ReplaceRuleByKey removes empty source or keeps other rule and inserts in new section.
 	walKey := domain.ComputeRuleKey("database", "Enable SQLite WAL mode")
 	moved, err := ReplaceRuleByKey(updated, "project:demo", walKey, domain.TeamRule{
 		Category:    "architecture",
@@ -266,7 +257,6 @@ func TestReplaceAndRemoveRuleAndCRLFHash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RemoveRule failed: %v", err)
 	}
-	// Pruning empty ## Database section when its only rule is deleted without intro prose.
 	if strings.Contains(string(removed), "## Database (`database`)") {
 		t.Fatalf("expected empty Database heading to be pruned after deleting its only rule:\n%s", removed)
 	}

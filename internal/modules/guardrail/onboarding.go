@@ -10,7 +10,6 @@ import (
 	"memorize/internal/infra/config"
 )
 
-// GetOnboardingStatus reports "pending", "skipped", or "completed" for rawScope.
 func (s *Service) GetOnboardingStatus(ctx context.Context, rawScope string) string {
 	sc := domain.NormalizeScope(rawScope)
 	var st string
@@ -24,7 +23,6 @@ func (s *Service) GetOnboardingStatus(ctx context.Context, rawScope string) stri
 	return "pending"
 }
 
-// SkipOnboarding marks a cold-start project scope as skipped so onboarding offers cease.
 func (s *Service) SkipOnboarding(ctx context.Context, rawScope string) error {
 	sc := domain.NormalizeScope(rawScope)
 	_, err := s.db.ExecContext(ctx, `
@@ -70,8 +68,6 @@ func (s *Service) tryClaimSessionNoticeCooldown(ctx context.Context, sessionID, 
 	return true
 }
 
-// ConsumeEngineSetupOffer returns a once-per-session notice when no inference engine is ready,
-// pointing the user directly to the Web Console Engines tab without running doomed LLM calls.
 func (s *Service) ConsumeEngineSetupOffer(ctx context.Context, sessionID, reason string) string {
 	if !s.tryClaimSessionNoticeCooldown(ctx, sessionID, "__engine_setup__", 3600) {
 		return ""
@@ -87,8 +83,6 @@ func (s *Service) ConsumeEngineSetupOffer(ctx context.Context, sessionID, reason
 	return fmt.Sprintf("[MEMORIZE ENGINE SETUP REQUIRED] Inference engine is not ready (%s). Do NOT run commit_memory or rule onboarding yet; guide the user to open %s (Web Console -> Engines tab) to download Local GGUF in 1 click or connect Ollama/LM Studio, Gemini, or System 1.", detail, setupURL)
 }
 
-// ConsumeOnboardingOffer checks with zero LLM/file overhead whether a cold-start project:<repo>
-// has 0 stored memories and pending onboarding, emitting a 1-time prompt per session.
 func (s *Service) ConsumeOnboardingOffer(ctx context.Context, sessionID, rawScope string) string {
 	sc := domain.NormalizeScope(rawScope)
 	if !strings.HasPrefix(sc, "project:") {

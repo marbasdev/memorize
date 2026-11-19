@@ -10,8 +10,6 @@ import (
 	"memorize/internal/modules/memory"
 )
 
-// Service owns persistent project_progress tracking, Git/memory sync milestones,
-// and completion retention TTL.
 type Service struct {
 	mem                *memory.Service
 	db                 *sql.DB
@@ -21,8 +19,6 @@ type Service struct {
 	lastRetentionSweep atomic.Int64
 }
 
-// New constructs a progress Service attached to mem and subscribes to memory mutations
-// so committed, updated, and consolidated project:* facts automatically record milestones.
 func New(mem *memory.Service) *Service {
 	var (
 		db     *sql.DB
@@ -54,7 +50,6 @@ func New(mem *memory.Service) *Service {
 	return s
 }
 
-// Memory returns the underlying memory Service.
 func (s *Service) Memory() *memory.Service {
 	return s.mem
 }

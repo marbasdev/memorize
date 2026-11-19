@@ -88,7 +88,6 @@ type GeminiAdapter struct {
 	cooldownUntil map[string]time.Time
 }
 
-// InputTokenLimit returns the model's verified inputTokenLimit from Gemini metadata or known catalog specs.
 func (g *GeminiAdapter) InputTokenLimit(ctx context.Context) int {
 	if g == nil {
 		return 0
@@ -226,7 +225,6 @@ func (g *GeminiAdapter) CallJSON(ctx context.Context, prompt string, schema map[
 		if err == nil {
 			return conf, nil
 		}
-		// On per-model quota exhaustion (429) or retired fallback alias (404), advance to the next Flash-Lite / Flash bucket.
 		if strings.Contains(err.Error(), "status 429") {
 			g.markCooldown(model, 10*time.Minute)
 			if idx+1 < len(candidates) {

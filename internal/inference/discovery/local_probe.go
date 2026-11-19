@@ -10,14 +10,12 @@ import (
 	"time"
 )
 
-// LocalProbeTarget describes a standard local inference endpoint for protocol probing.
 type LocalProbeTarget struct {
 	Label    string
 	Provider string // "local" or "jev"
 	BaseURL  string
 }
 
-// DetectedLocalServer represents an already-running local inference server verified via HTTP API.
 type DetectedLocalServer struct {
 	Label    string
 	Provider string
@@ -150,8 +148,6 @@ func probeSingleLocalTarget(ctx context.Context, target LocalProbeTarget) (Detec
 	}, true
 }
 
-// ProbeLocalInferenceServers sends parallel HTTP API handshakes to standard local inference
-// ports (or explicit test targets) and returns only actively responding servers.
 func ProbeLocalInferenceServers(ctx context.Context, targets ...LocalProbeTarget) []DetectedLocalServer {
 	list := targets
 	if len(list) == 0 {

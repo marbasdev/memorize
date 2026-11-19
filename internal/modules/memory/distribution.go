@@ -9,8 +9,6 @@ import (
 	"memorize/internal/domain"
 )
 
-// GetCategoryDistribution computes purely factual 2-level category and sub-category
-// memory proportions (including unclassified items) directly in SQLite without hardcoded cleanup heuristics.
 func (s *Service) GetCategoryDistribution(ctx context.Context, scopeFilter string) (domain.ScopeDistribution, error) {
 	sc := strings.TrimSpace(scopeFilter)
 	visSQL, visArgs := s.memoryVisibilitySQL(ctx, "")

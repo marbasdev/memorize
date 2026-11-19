@@ -1,4 +1,4 @@
-package guardrail_test
+package guardrail
 
 import (
 	"context"
@@ -7,10 +7,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"unicode/utf8"
 
 	"memorize/internal/domain"
+	"memorize/internal/inference/localmodel"
+	"memorize/internal/modules/rulepack"
 )
 
 func TestGuardrailEnforcesNonPinnedRulesAndBlocksMutatingGitCommands(t *testing.T) {
@@ -111,14 +114,12 @@ func TestTurnPreMutateCodeGateAndSameTurnRuleEnforcement(t *testing.T) {
 			Confidence:  0.95,
 		},
 	}
-	// Irreversible shell command still blocks immediately at PreToolUse against newly committed rule #1.
 	badCmd := fmt.Sprintf(`{"conversationId":"conv-gate-1","workspacePaths":[%q],"toolCall":{"name":"run_command","args":{"CommandLine":"go run ./cmd/fetch --no-timeout"}}}`, repo)
 	cmdDenyOut, cmdDenyCode, _ := st.gr.ExecuteHook(ctx, "antigravity-pretool", []byte(badCmd), "")
 	if cmdDenyCode != 0 || !strings.Contains(cmdDenyOut, `"decision":"deny"`) || !strings.Contains(cmdDenyOut, "[MEMORIZE GUARDRAIL BLOCKED]") || !strings.Contains(cmdDenyOut, "3초 타임아웃") {
 		t.Fatalf("expected same-turn Guardrail to block violating run_command immediately, got code=%d out=%s", cmdDenyCode, cmdDenyOut)
 	}
 
-	// File edits pass PreToolUse after Pre-Mutate Gate and trigger self-correction at Stop.
 	editAllowOut, editAllowCode, _ := st.gr.ExecuteHook(ctx, "antigravity-pretool", []byte(violatingEdit), "")
 	if editAllowCode != 0 || editAllowOut != `{"decision":"allow"}` {
 		t.Fatalf("expected edit_file to allow after Pre-Mutate Gate and defer check to Stop, got code=%d out=%s", editAllowCode, editAllowOut)
@@ -132,7 +133,6 @@ func TestTurnPreMutateCodeGateAndSameTurnRuleEnforcement(t *testing.T) {
 		t.Fatalf("expected Stop hook to force continuation fix on violating edit against newly committed rule #1, got code=%d out=%s", stopFixCode, stopFixOut)
 	}
 
-	// Re-entry edit resolves violation; subsequent Stop with continuationActive=true finishes cleanly.
 	eval.violations = nil
 	okEdit := fmt.Sprintf(`{"conversationId":"conv-gate-1","workspacePaths":[%q],"toolCall":{"name":"edit_file","args":{"Path":%q,"Replacement":"client := &http.Client{Timeout: 3 * time.Second}"}}}`,
 		repo, clientFile)
@@ -384,13 +384,11 @@ func TestFirstRunEngineSetupGateAndExplicitEnvProvider(t *testing.T) {
 		t.Fatalf("CommitMemory rule: %v", err)
 	}
 
-	ready := false
-	st.mem.Router().SetReadinessChecker(func(_ context.Context, _ map[string]string) (bool, string) {
-		if !ready {
-			return false, "no API key or local model"
-		}
-		return true, ""
-	})
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("MEMORY_PROVIDER", "")
+	t.Setenv("TYPESAFE_API_KEY", "")
+	t.Setenv("LOCAL_MODEL_URL", "")
+	st.mem.Router().AttachLocalManager(localmodel.NewManager(t.TempDir()))
 
 	out1, code1, err := st.gr.ExecuteHook(ctx, "antigravity-start", []byte(`{"session_id":"sess-setup-gate"}`), repo)
 	if err != nil || code1 != 0 {
@@ -429,7 +427,7 @@ func TestFirstRunEngineSetupGateAndExplicitEnvProvider(t *testing.T) {
 		t.Fatalf("expected onboarding suppressed on cold repo when engine unready, got:\n%s", outColdUnready)
 	}
 
-	ready = true
+	st.mem.Router().AttachLocalManager(nil)
 	out3, code3, err := st.gr.ExecuteHook(ctx, "antigravity-turn", []byte(`{"session_id":"sess-setup-gate","prompt":"refactor auth middleware"}`), repo)
 	if err != nil || code3 != 0 {
 		t.Fatalf("ExecuteHook turn ready: code=%d err=%v", code3, err)
@@ -586,7 +584,6 @@ func TestGuardrailOmitsStaleTurnPromptAfterMutation(t *testing.T) {
 		"tool_input": map[string]any{"command": "CGO_ENABLED=0 go build ./cmd/memorize"},
 	})
 
-	// Clean Phase 1 plans must NEVER receive conversational turn prompt prose.
 	if _, _, err := st.gr.ExecuteHook(ctx, "claude-pretool", buildPayload, repo); err != nil {
 		t.Fatalf("ExecuteHook clean pretool: %v", err)
 	}
@@ -594,7 +591,6 @@ func TestGuardrailOmitsStaleTurnPromptAfterMutation(t *testing.T) {
 		t.Fatalf("expected clean Phase 1 call without prompt prose, got %+v", eval.capturedPlans)
 	}
 
-	// Unmutated flagging triggers lazy Phase 2 override check with turn prompt context.
 	eval.violate = true
 	if _, _, err := st.gr.ExecuteHook(ctx, "claude-pretool", buildPayload, repo); err != nil {
 		t.Fatalf("ExecuteHook violated pretool before mutate: %v", err)
@@ -603,7 +599,6 @@ func TestGuardrailOmitsStaleTurnPromptAfterMutation(t *testing.T) {
 		t.Fatalf("expected Phase 1 (clean) + Phase 2 (with prompt) before mutate, got %+v", eval.capturedPlans)
 	}
 
-	// Once turn is mutated, Phase 2 must skip stale rule-change prompt.
 	st.mem.MarkTurnScopeMutated(scope)
 	if _, _, err := st.gr.ExecuteHook(ctx, "claude-pretool", buildPayload, repo); err != nil {
 		t.Fatalf("ExecuteHook pretool after mutate: %v", err)
@@ -660,5 +655,531 @@ func TestGuardrailLazyOverrideAllowsExplicitExceptionAcrossFlaggedRulesOnly(t *t
 	}
 	if len(eval.capturedCounts) != 2 || eval.capturedCounts[0] != 3 || eval.capturedCounts[1] != 1 {
 		t.Fatalf("expected Phase 1 (3 rules) -> Phase 2 (only 1 flagged rule), got counts=%v", eval.capturedCounts)
+	}
+}
+
+type teamVerifyEval struct {
+	stubEval
+	verifyFn func(plan string, rules []domain.Fact) []domain.PlanViolation
+}
+
+func (e *teamVerifyEval) VerifyPlan(_ context.Context, plan string, rules []domain.Fact) ([]domain.PlanViolation, error) {
+	if e.verifyFn != nil {
+		return e.verifyFn(plan, rules), nil
+	}
+	return nil, nil
+}
+
+func TestGuardrailSyncsAndEnforcesTeamRulePack(t *testing.T) {
+	tmp := t.TempDir()
+	repoDir := filepath.Join(tmp, "teamrepo")
+	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repoDir, ".memorize"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	ev := &teamVerifyEval{}
+	stack := newTestStack(t, filepath.Join(tmp, "mem.db"), ev)
+	rp := rulepack.New(stack.mem)
+	stack.mem.AttachExtraFactsProvider(rp)
+	stack.gr.AttachRulePack(rp)
+
+	ctx := context.Background()
+	scope := "project:teamrepo"
+
+	ev.dec = domain.MutationDecision{Action: "INSERT", Category: "database", Cardinality: "exclusive", IsPermanent: 0.9, Confidence: 0.95}
+	if _, err := stack.mem.CommitMemoryFull(ctx, "Use go-sqlite3 CGO driver in dev builds", "database", "sqlite", "", scope); err != nil {
+		t.Fatal(err)
+	}
+	locals, err := stack.mem.LoadActiveFacts(ctx, scope, scope, "")
+	if err != nil || len(locals) != 1 {
+		t.Fatalf("expected 1 local fact, got %+v err=%v", locals, err)
+	}
+	localID := locals[0].ID
+
+	docBytes, err := rulepack.InsertRule(nil, scope, domain.RulePlacementProposal{
+		Category: "database",
+		Title:    "Always use pure-Go modernc.org/sqlite with CGO_ENABLED=0",
+		AddedBy:  "Alice",
+		AddedAt:  "2026-11-14",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, domain.RulePackRelPath), docBytes, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ev.dec = domain.MutationDecision{
+		Action:          "OVERWRITE",
+		ConflictFactID:  localID,
+		ConflictFactIDs: []int64{localID},
+		Cardinality:     "exclusive",
+		Confidence:      0.94,
+	}
+
+	startPayload, _ := json.Marshal(map[string]any{
+		"session_id": "sess-team-hook",
+		"cwd":        repoDir,
+	})
+	hookOut, code, err := stack.gr.ExecuteHook(ctx, "claude-start", startPayload, repoDir)
+	if err != nil || code != 0 {
+		t.Fatalf("claude-start RunHook failed: code=%d err=%v out=%s", code, err, hookOut)
+	}
+	if !strings.Contains(hookOut, "[TEAM project:teamrepo/database]") || !strings.Contains(hookOut, "TEAM RULE CONFLICT DETECTED") {
+		t.Fatalf("expected hook output to deliver TEAM rule and conflict notice, got:\n%s", hookOut)
+	}
+	if strings.Contains(hookOut, "TEAM:r-") {
+		t.Fatalf("did not expect internal hash key exposed in hook output, got:\n%s", hookOut)
+	}
+
+	teamKey := domain.ComputeRuleKey("database", "Always use pure-Go modernc.org/sqlite with CGO_ENABLED=0")
+
+	ev.verifyFn = func(plan string, rules []domain.Fact) []domain.PlanViolation {
+		for _, r := range rules {
+			if r.IsTeam() && r.RuleKey == teamKey && strings.Contains(plan, "CGO_ENABLED=1") {
+				return []domain.PlanViolation{{Fact: r, Probability: 0.96, Confidence: 0.95}}
+			}
+		}
+		return nil
+	}
+	vOut, err := stack.gr.VerifyPlan(ctx, "Run CGO_ENABLED=1 with modernc.org/sqlite", scope)
+	if err != nil {
+		t.Fatalf("VerifyPlan failed: %v", err)
+	}
+	if !strings.Contains(vOut, "database TEAM]") || !strings.Contains(vOut, "modernc.org/sqlite") {
+		t.Fatalf("expected VerifyPlan violation to cite TEAM rule cleanly, got:\n%s", vOut)
+	}
+
+	toolPayload, _ := json.Marshal(map[string]any{
+		"session_id": "sess-team-hook",
+		"cwd":        repoDir,
+		"tool_name":  "Bash",
+		"tool_input": map[string]any{
+			"command": "CGO_ENABLED=1 go test ./internal/infra/sqlite/...",
+		},
+	})
+	stack.mem.MarkTurnScopeMutated(scope)
+	gOut, gCode, err := stack.gr.ExecuteHook(ctx, "claude-pretool", toolPayload, repoDir)
+	if err != nil || gCode != 2 {
+		t.Fatalf("claude-pretool RunHook expected exit code 2 (block): code=%d err=%v out=%s", gCode, err, gOut)
+	}
+	if !strings.Contains(gOut, "block") || !strings.Contains(gOut, "database TEAM") {
+		t.Fatalf("expected PreToolUse guardrail block mentioning TEAM rule, got:\n%s", gOut)
+	}
+
+	if err := rp.ResolveConflict(ctx, scope, teamKey, "local_override", "Testing override"); err != nil {
+		t.Fatalf("ResolveConflict failed: %v", err)
+	}
+	vAfterOverride, err := stack.gr.VerifyPlan(ctx, "Run CGO_ENABLED=1 with modernc.org/sqlite", scope)
+	if err != nil {
+		t.Fatalf("VerifyPlan after local_override failed: %v", err)
+	}
+	if strings.Contains(vAfterOverride, "modernc.org/sqlite") {
+		t.Fatalf("expected local_override to stop enforcing overridden TEAM rule, got:\n%s", vAfterOverride)
+	}
+}
+
+type remoteViolEval struct {
+	matchRuleContent  string
+	ruleMu            sync.Mutex
+	lastVerifiedRules []domain.Fact
+	stubEval
+}
+
+func (e *remoteViolEval) VerifyPlan(_ context.Context, plan string, rules []domain.Fact) ([]domain.PlanViolation, error) {
+	e.ruleMu.Lock()
+	e.lastVerifiedRules = append([]domain.Fact(nil), rules...)
+	e.ruleMu.Unlock()
+	var out []domain.PlanViolation
+	for _, r := range rules {
+		if strings.Contains(r.Content, "PERSONAL_ONLY_TOKEN") && strings.Contains(plan, "PERSONAL_ONLY_TOKEN") {
+			out = append(out, domain.PlanViolation{
+				Fact:        r,
+				Probability: 0.95,
+				Confidence:  0.95,
+			})
+		}
+		if strings.Contains(r.Content, "PROJECT_FORBIDDEN_TOKEN") && strings.Contains(plan, "PROJECT_FORBIDDEN_TOKEN") {
+			out = append(out, domain.PlanViolation{
+				Fact:        r,
+				Probability: 0.95,
+				Confidence:  0.95,
+			})
+		}
+	}
+	return out, nil
+}
+
+func TestRemoteThinClientIsolationAndHooks(t *testing.T) {
+	eval := &remoteViolEval{
+		stubEval: stubEval{
+			dec: domain.MutationDecision{Action: "INSERT", Category: "security", IsPermanent: 0.95, IsGlobalInvariant: 0.95, Confidence: 0.95},
+		},
+	}
+	st := newTestStack(t, "", eval)
+	rp := rulepack.New(st.mem)
+	st.gr.AttachRulePack(rp)
+
+	ctxAlice := domain.WithAuthPrincipal(context.Background(), domain.AuthPrincipal{
+		Account:       "alice",
+		Role:          domain.RoleMember,
+		ServerMode:    true,
+		Authenticated: true,
+	})
+	ctxBob := domain.WithAuthPrincipal(context.Background(), domain.AuthPrincipal{
+		Account:       "bob",
+		Role:          domain.RoleMember,
+		ServerMode:    true,
+		Authenticated: true,
+	})
+	ctxAdmin := domain.WithAuthPrincipal(context.Background(), domain.AuthPrincipal{
+		Account:       "admin",
+		Role:          domain.RoleAdmin,
+		ServerMode:    true,
+		Authenticated: true,
+	})
+
+	if _, err := st.mem.CommitMemoryFull(ctxAlice, "Never call PROJECT_FORBIDDEN_TOKEN", "security", "", "", "project:teamapp"); err != nil {
+		t.Fatalf("alice commit project rule: %v", err)
+	}
+	if _, err := st.mem.CommitMemoryFull(ctxAlice, "Never call PERSONAL_ONLY_TOKEN", "preference", "", "", "personal"); err != nil {
+		t.Fatalf("alice commit personal rule: %v", err)
+	}
+
+	if _, err := st.mem.CommitMemoryFull(ctxAlice, "Never call GLOBAL_PRIVATE_TOKEN", "architecture", "", "", "global"); err != nil {
+		t.Fatalf("alice commit own global rule: %v", err)
+	}
+	if _, err := st.mem.CommitMemoryFull(ctxAdmin, "Always run CGO_ENABLED=0 builds", "build", "", "", "global"); err != nil {
+		t.Fatalf("admin commit own global rule: %v", err)
+	}
+
+	for _, sc := range []string{"personal", "global"} {
+		for name, callerCtx := range map[string]context.Context{"bob": ctxBob, "admin": ctxAdmin} {
+			page, err := st.mem.QueryRecordsPage(callerCtx, domain.RecordQuery{Scope: sc, State: "all"})
+			if err != nil {
+				t.Fatalf("%s QueryRecordsPage(%s): %v", name, sc, err)
+			}
+			for _, rec := range page.Records {
+				if rec.Account == "alice" {
+					t.Fatalf("%s unexpectedly saw Alice %s memory: %+v", name, sc, rec)
+				}
+			}
+		}
+	}
+
+	turnPayload, _ := json.Marshal(map[string]any{
+		"session_id":  "s1",
+		"user_prompt": "implement endpoint",
+		"client_ctx": domain.ClientHookContext{
+			CanonicalScopes: []string{"project:teamapp"},
+			TargetScope:     "project:teamapp",
+			TeamRuleDocs: map[string]string{
+				"project:teamapp": "# Team Rules\n\n## Architecture (`architecture`)\n- Use parameterized queries. · `@alice` · `2026-11-18`\n",
+			},
+			GitHeadByScope: map[string]string{"project:teamapp": "abc1234"},
+			GitCommitsByScope: map[string][]domain.GitCommitBrief{
+				"project:teamapp": {{SHA: "abc1234", Date: "2026-11-18", Subject: "feat: remote client sync"}},
+			},
+		},
+	})
+	if out, code, err := st.gr.ExecuteHook(ctxAlice, "claude-turn", turnPayload, ""); err != nil || code != 0 || out == "" {
+		t.Fatalf("claude-turn failed: code=%d err=%v out=%s", code, err, out)
+	}
+	st.mem.MarkTurnScopeMutated(domain.ScopedSessionID(ctxAlice, "s1"))
+	eval.dec.Action = "IGNORE"
+	if rules, err := rp.ListTeamRules(ctxAlice, "project:teamapp"); err != nil || len(rules) != 1 || !strings.Contains(rules[0].Title+" "+rules[0].How, "parameterized") {
+		t.Fatalf("expected remote TeamRuleDocs ingested cleanly, got %+v (err=%v)", rules, err)
+	}
+	ov, err := st.prog.GetProgressOverviewByTrack(ctxAlice, "project:teamapp", "", "", "")
+	if err != nil || len(ov.Records) == 0 {
+		t.Fatalf("expected remote GitCommitsByScope synced into progress, got len=%d err=%v", len(ov.Records), err)
+	}
+	foundCommit := false
+	for _, r := range ov.Records {
+		if r.CommitSHA == "abc1234" && r.Account == "alice" {
+			foundCommit = true
+		}
+	}
+	if !foundCommit {
+		t.Fatalf("expected git commit abc1234 attributed to alice in progress records: %+v", ov.Records)
+	}
+
+	pretoolPayload, _ := json.Marshal(map[string]any{
+		"session_id": "s1",
+		"tool_name":  "edit_file",
+		"tool_input": map[string]any{"file_path": "/nonexistent/client/app.go"},
+		"client_ctx": domain.ClientHookContext{
+			CanonicalScopes:   []string{"project:teamapp"},
+			TargetScope:       "project:teamapp",
+			TargetRelPath:     "app.go",
+			RemoteManagedEdit: true,
+		},
+	})
+	if _, code, err := st.gr.ExecuteHook(ctxAlice, "claude-pretool", pretoolPayload, ""); err != nil || code != 0 {
+		t.Fatalf("expected remote pretool edit to succeed without host filesystem, code=%d err=%v", code, err)
+	}
+
+	if err := st.mem.SaveConfig(ctxAdmin, map[string]string{"include_personal_in_project": "1"}); err != nil {
+		t.Fatalf("SaveConfig include_personal_in_project: %v", err)
+	}
+	stopPersonalPayload, _ := json.Marshal(map[string]any{
+		"session_id": "s1",
+		"client_ctx": domain.ClientHookContext{
+			CanonicalScopes: []string{"project:teamapp"},
+			TargetScope:     "project:teamapp",
+			DiffSections: []domain.HookDiffSection{{
+				Scope: "project:teamapp",
+				Label: "app.go",
+				Body:  "File: app.go\nAdded:\nPERSONAL_ONLY_TOKEN()",
+			}},
+		},
+	})
+	outStopPers, _, err := st.gr.ExecuteHook(ctxAlice, "claude-stop", stopPersonalPayload, "")
+	if err != nil || !strings.Contains(outStopPers, "block") {
+		t.Fatalf("expected Stop hook to block on personal violation, out=%s err=%v", outStopPers, err)
+	}
+
+	aliceLogs, err := st.gr.QueryGuardrailLogsPage(ctxAlice, domain.GuardrailLogQuery{State: "all", PageSize: 20})
+	if err != nil || aliceLogs.TotalCount != 1 || !aliceLogs.Records[0].IsPrivate || aliceLogs.Records[0].Account != "alice" {
+		t.Fatalf("expected 1 private guardrail log for alice, got %+v (err=%v)", aliceLogs, err)
+	}
+	for name, callerCtx := range map[string]context.Context{"bob": ctxBob, "admin": ctxAdmin} {
+		otherLogs, err := st.gr.QueryGuardrailLogsPage(callerCtx, domain.GuardrailLogQuery{State: "all", PageSize: 20})
+		if err != nil || otherLogs.TotalCount != 0 {
+			t.Fatalf("%s unexpectedly saw alice's private guardrail log: %+v (err=%v)", name, otherLogs, err)
+		}
+	}
+
+	stopProjPayload, _ := json.Marshal(map[string]any{
+		"session_id": "s2",
+		"client_ctx": domain.ClientHookContext{
+			CanonicalScopes: []string{"project:teamapp"},
+			TargetScope:     "project:teamapp",
+			DiffSections: []domain.HookDiffSection{{
+				Scope: "project:teamapp",
+				Label: "app.go",
+				Body:  "File: app.go\nAdded:\nPROJECT_FORBIDDEN_TOKEN()",
+			}},
+		},
+	})
+	st.mem.MarkTurnScopeMutated(domain.ScopedSessionID(ctxAlice, "s2"))
+	outStopProj, _, err := st.gr.ExecuteHook(ctxAlice, "claude-stop", stopProjPayload, "")
+	if err != nil || !strings.Contains(outStopProj, "block") {
+		t.Fatalf("expected Stop hook to block on project violation, out=%s err=%v", outStopProj, err)
+	}
+	adminLogs, _ := st.gr.QueryGuardrailLogsPage(ctxAdmin, domain.GuardrailLogQuery{State: "all", PageSize: 20})
+	if adminLogs.TotalCount != 1 || adminLogs.Records[0].IsPrivate || adminLogs.Records[0].Account != "alice" {
+		t.Fatalf("expected admin to see 1 non-private alice log only, got %+v", adminLogs)
+	}
+	bobLogs, _ := st.gr.QueryGuardrailLogsPage(ctxBob, domain.GuardrailLogQuery{State: "all", PageSize: 20})
+	if bobLogs.TotalCount != 0 {
+		t.Fatalf("expected member Bob to see 0 logs (member isolated to own logs), got %+v", bobLogs)
+	}
+
+	preCommitCtx := domain.WithClientHookContext(ctxAlice, &domain.ClientHookContext{
+		CanonicalScopes: []string{"project:teamapp"},
+		TargetScope:     "project:teamapp",
+		StagedDiffs: []domain.HookDiffSection{{
+			Scope: "project:teamapp",
+			Label: "staged.go",
+			Body:  "+PROJECT_FORBIDDEN_TOKEN()",
+		}},
+	})
+	_, pcCode, err := st.gr.ExecuteHook(preCommitCtx, "git-precommit", nil, "")
+	if err != nil || pcCode == 0 {
+		t.Fatalf("expected git-precommit to fail on remote StagedDiffs violation, code=%d err=%v", pcCode, err)
+	}
+}
+
+func TestRemoteServerTeamRuleDocsPerAccountIsolation(t *testing.T) {
+	eval := &remoteViolEval{
+		stubEval: stubEval{
+			dec: domain.MutationDecision{Action: "IGNORE", Category: "architecture", Confidence: 0.9},
+		},
+	}
+	st := newTestStack(t, "", eval)
+	rp := rulepack.New(st.mem)
+	st.gr.AttachRulePack(rp)
+
+	ctxAlice := domain.WithAuthPrincipal(context.Background(), domain.AuthPrincipal{
+		Account:       "alice",
+		Role:          domain.RoleMember,
+		ServerMode:    true,
+		Authenticated: true,
+	})
+	ctxBob := domain.WithAuthPrincipal(context.Background(), domain.AuthPrincipal{
+		Account:       "bob",
+		Role:          domain.RoleMember,
+		ServerMode:    true,
+		Authenticated: true,
+	})
+	ctxAdmin := domain.WithAuthPrincipal(context.Background(), domain.AuthPrincipal{
+		Account:       "admin",
+		Role:          domain.RoleAdmin,
+		ServerMode:    true,
+		Authenticated: true,
+	})
+
+	aliceTurn, _ := json.Marshal(map[string]any{
+		"session_id":  "s-alice",
+		"user_prompt": "check alice rules",
+		"client_ctx": domain.ClientHookContext{
+			CanonicalScopes: []string{"project:teamapp"},
+			TargetScope:     "project:teamapp",
+			TeamRuleDocs: map[string]string{
+				"project:teamapp": "# Team Rules\n\n## Architecture (`architecture`)\n- Never skip Alice check. · `@alice` · `2026-11-18`\n",
+			},
+		},
+	})
+	if _, code, err := st.gr.ExecuteHook(ctxAlice, "claude-turn", aliceTurn, ""); err != nil || code != 0 {
+		t.Fatalf("alice turn hook failed: code=%d err=%v", code, err)
+	}
+
+	bobTurn, _ := json.Marshal(map[string]any{
+		"session_id":  "s-bob",
+		"user_prompt": "check bob rules",
+		"client_ctx": domain.ClientHookContext{
+			CanonicalScopes: []string{"project:teamapp"},
+			TargetScope:     "project:teamapp",
+			TeamRuleDocs: map[string]string{
+				"project:teamapp": "# Team Rules\n\n## Architecture (`architecture`)\n- Bob branch rule only. · `@bob` · `2026-11-18`\n",
+			},
+		},
+	})
+	if _, code, err := st.gr.ExecuteHook(ctxBob, "claude-turn", bobTurn, ""); err != nil || code != 0 {
+		t.Fatalf("bob turn hook failed: code=%d err=%v", code, err)
+	}
+
+	aliceRules, err := rp.ListTeamRules(ctxAlice, "project:teamapp")
+	if err != nil || len(aliceRules) != 1 || !strings.Contains(aliceRules[0].Title+" "+aliceRules[0].How, "Alice check") {
+		t.Fatalf("expected Alice cache isolated from Bob's TeamRuleDocs, got %+v (err=%v)", aliceRules, err)
+	}
+	bobRules, err := rp.ListTeamRules(ctxBob, "project:teamapp")
+	if err != nil || len(bobRules) != 1 || !strings.Contains(bobRules[0].Title+" "+bobRules[0].How, "Bob branch") {
+		t.Fatalf("expected Bob cache isolated from Alice's TeamRuleDocs, got %+v (err=%v)", bobRules, err)
+	}
+
+	bobClear, _ := json.Marshal(map[string]any{
+		"session_id":  "s-bob-clear",
+		"user_prompt": "clear bob rules",
+		"client_ctx": domain.ClientHookContext{
+			CanonicalScopes: []string{"project:teamapp"},
+			TargetScope:     "project:teamapp",
+			TeamRuleDocs:    map[string]string{"project:teamapp": ""},
+		},
+	})
+	if _, code, err := st.gr.ExecuteHook(ctxBob, "claude-turn", bobClear, ""); err != nil || code != 0 {
+		t.Fatalf("bob clear turn failed: code=%d err=%v", code, err)
+	}
+	if gotBob, _ := rp.ListTeamRules(ctxBob, "project:teamapp"); len(gotBob) != 0 {
+		t.Fatalf("expected Bob cache cleared cleanly, got %+v", gotBob)
+	}
+	if gotAlice, _ := rp.ListTeamRules(ctxAlice, "project:teamapp"); len(gotAlice) != 1 {
+		t.Fatalf("expected Alice cache unaffected by Bob clear, got %+v", gotAlice)
+	}
+
+	if err := rp.SetAuthorName(ctxBob, "@bob"); err == nil {
+		t.Fatalf("expected SetAuthorName by member to be rejected in ServerMode")
+	}
+	if err := rp.SetAuthorName(ctxAdmin, "@lead"); err != nil {
+		t.Fatalf("expected SetAuthorName by admin to succeed: %v", err)
+	}
+
+	evalTeam := &remoteViolEval{
+		stubEval: stubEval{dec: domain.MutationDecision{Action: "INSERT", Category: "security", IsPermanent: 0.95, IsGlobalInvariant: 0.95, Confidence: 0.95}},
+	}
+	stPrio := newTestStack(t, "", evalTeam)
+	rpPrio := rulepack.New(stPrio.mem)
+	stPrio.mem.AttachExtraFactsProvider(rpPrio)
+	stPrio.gr.AttachRulePack(rpPrio)
+
+	if _, err := stPrio.mem.CommitMemoryFull(ctxAlice, "Never call PROJECT_FORBIDDEN_TOKEN", "security", "", "", "project:teamapp"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stPrio.mem.CommitMemoryFull(ctxAlice, "Never call PERSONAL_ONLY_TOKEN", "architecture", "", "", "global"); err != nil {
+		t.Fatal(err)
+	}
+	teamDoc := "# Team Rules\n\n## Architecture (`architecture`)\n- Never call PROJECT_FORBIDDEN_TOKEN from team rule. · `@lead` · `2026-11-18`\n"
+	if err := rpPrio.IngestTeamRuleDoc(ctxAlice, "project:teamapp", teamDoc); err != nil {
+		t.Fatal(err)
+	}
+	rulesAlice, err := rpPrio.ListTeamRules(ctxAlice, "project:teamapp")
+	if err != nil || len(rulesAlice) != 1 {
+		t.Fatalf("expected 1 ingested team rule, got %+v (err=%v)", rulesAlice, err)
+	}
+	if err := rpPrio.ResolveConflict(ctxAlice, "project:teamapp", rulesAlice[0].RuleKey, "local_override", "try override"); err == nil {
+		t.Fatalf("expected local_override resolution rejected in ServerMode")
+	}
+	if err := rpPrio.UpsertConflictState(ctxAlice, "project:teamapp", rulesAlice[0].RuleKey, domain.RuleStateLocalOverride, 0, "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	factsAlice, err := rpPrio.ListTeamRuleFacts(ctxAlice, "project:teamapp")
+	if err != nil || len(factsAlice) != 1 {
+		t.Fatalf("expected Team Rule Pack still enforced in ServerMode despite local_override row, got %+v (err=%v)", factsAlice, err)
+	}
+
+	ctxSession := domain.WithSessionID(ctxAlice, "s-prio")
+	qOut, err := stPrio.mem.QuerySessionMemory(ctxSession, "s-prio", "write code", "", "project:teamapp", false)
+	if err != nil {
+		t.Fatalf("QuerySessionMemory: %v", err)
+	}
+	idxTeam := strings.Index(qOut, "TEAM]")
+	if idxTeam < 0 {
+		idxTeam = strings.Index(qOut, "TEAM ")
+	}
+	idxProj := strings.Index(qOut, "Never call PROJECT_FORBIDDEN_TOKEN")
+	idxGlob := strings.Index(qOut, "Never call PERSONAL_ONLY_TOKEN")
+	if idxTeam < 0 || idxProj < 0 || idxGlob < 0 || !(idxTeam < idxProj && idxProj < idxGlob) {
+		t.Fatalf("expected Team -> project -> global injection order, got:\n%s", qOut)
+	}
+
+	verOut, err := stPrio.gr.VerifyPlan(ctxAlice, "PROJECT_FORBIDDEN_TOKEN() and PERSONAL_ONLY_TOKEN()", "project:teamapp")
+	if err != nil {
+		t.Fatalf("VerifyPlan: %v", err)
+	}
+	vTeam := strings.Index(verOut, "TEAM]")
+	vPriv := strings.Index(verOut, "PERSONAL_ONLY_TOKEN")
+	if vTeam < 0 || vPriv < 0 || vTeam >= vPriv {
+		t.Fatalf("expected VerifyPlan TEAM violation listed before global/personal violation, got:\n%s", verOut)
+	}
+	privLogs, _ := stPrio.gr.QueryGuardrailLogsPage(ctxAlice, domain.GuardrailLogQuery{State: "all", PageSize: 20})
+	otherLogs, _ := stPrio.gr.QueryGuardrailLogsPage(ctxAdmin, domain.GuardrailLogQuery{State: "all", PageSize: 20})
+	if privLogs.TotalCount != 1 || !privLogs.Records[0].IsPrivate || otherLogs.TotalCount != 0 {
+		t.Fatalf("expected Alice global violation logged IsPrivate=true and hidden from admin: alice=%+v admin=%+v", privLogs, otherLogs)
+	}
+
+	evalKV := &remoteViolEval{
+		stubEval: stubEval{dec: domain.MutationDecision{Action: "INSERT", Category: "architecture", IsPermanent: 0.95, Confidence: 0.95}},
+	}
+	stKV := newTestStack(t, "", evalKV)
+	rpKV := rulepack.New(stKV.mem)
+	stKV.gr.AttachRulePack(rpKV)
+	if _, err := stKV.mem.CommitMemoryFull(ctxAlice, "Alice older-ID private global rule", "architecture", "", "", "global"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stKV.mem.CommitMemoryFull(ctxAlice, "Shared newer-ID project rule", "architecture", "", "", "project:teamapp"); err != nil {
+		t.Fatal(err)
+	}
+	if err := rpKV.IngestTeamRuleDoc(ctxAlice, "project:teamapp", teamDoc); err != nil {
+		t.Fatal(err)
+	}
+	if err := rpKV.IngestTeamRuleDoc(ctxBob, "project:teamapp", teamDoc); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stKV.gr.VerifyPlan(ctxAlice, "safe code", "project:teamapp"); err != nil {
+		t.Fatal(err)
+	}
+	aliceRulesPassed := append([]domain.Fact(nil), evalKV.lastVerifiedRules...)
+	if _, err := stKV.gr.VerifyPlan(ctxBob, "safe code", "project:teamapp"); err != nil {
+		t.Fatal(err)
+	}
+	bobRulesPassed := append([]domain.Fact(nil), evalKV.lastVerifiedRules...)
+	if len(aliceRulesPassed) != 3 || len(bobRulesPassed) != 2 ||
+		!aliceRulesPassed[0].IsTeam() || aliceRulesPassed[1].Scope != "project:teamapp" || aliceRulesPassed[2].Scope != "global" ||
+		aliceRulesPassed[0].ID != bobRulesPassed[0].ID || aliceRulesPassed[1].ID != bobRulesPassed[1].ID {
+		t.Fatalf("expected shared [TEAM, project:*] KV prefix before private global tail:\nalice=%+v\nbob=%+v", aliceRulesPassed, bobRulesPassed)
 	}
 }

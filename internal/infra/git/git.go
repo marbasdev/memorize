@@ -12,16 +12,13 @@ import (
 	"memorize/internal/domain"
 )
 
-// BaselineManifests lists project metadata files scanned for repository onboarding baselines.
 var BaselineManifests = []string{
-	// Code/build manifests & CONSTRAINTS.md only; static AGENTS.md/CLAUDE.md excluded.
 	"CONSTRAINTS.md", "README.md",
 	"go.mod", "package.json", "pyproject.toml", "Cargo.toml",
 	"pom.xml", "build.gradle", "Makefile", "Dockerfile",
 	".golangci.yml", "tsconfig.json", ".github/workflows",
 }
 
-// Run executes a short-bounded git command in dir and returns trimmed stdout.
 func Run(parent context.Context, dir string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
 	defer cancel()
@@ -33,7 +30,6 @@ func Run(parent context.Context, dir string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// ResolveRoot walks up from dir to find the enclosing .git repository root, stopping before home or filesystem root.
 func ResolveRoot(dir string) string {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {
@@ -62,7 +58,6 @@ func ResolveRoot(dir string) string {
 	return ""
 }
 
-// RemoteOriginURL returns the trimmed origin remote URL for repoRoot, or empty if unconfigured.
 func RemoteOriginURL(ctx context.Context, repoRoot string) string {
 	if strings.TrimSpace(repoRoot) == "" {
 		return ""
@@ -106,7 +101,6 @@ func CanonicalScope(ctx context.Context, dir string) (string, string) {
 	return "", root
 }
 
-// FastHead resolves the 12-char HEAD commit hash quickly by reading .git/HEAD directly before invoking git.
 func FastHead(ctx context.Context, root string) string {
 	raw, err := os.ReadFile(filepath.Join(root, ".git", "HEAD"))
 	if err == nil {
@@ -125,7 +119,6 @@ func FastHead(ctx context.Context, root string) string {
 	return RevParse(ctx, root, "HEAD")
 }
 
-// RevParse resolves a revision spec into a 12-char commit hash.
 func RevParse(ctx context.Context, root, rev string) string {
 	sha, err := Run(ctx, root, "rev-parse", "--verify", "--short=12", rev+"^{commit}")
 	if err != nil {
@@ -134,7 +127,6 @@ func RevParse(ctx context.Context, root, rev string) string {
 	return sha
 }
 
-// DetectHeadLayout builds a compact summary of project manifests and top-level directories at root.
 func DetectHeadLayout(root string) string {
 	var found []string
 	for _, rel := range BaselineManifests {
@@ -167,7 +159,6 @@ func DetectHeadLayout(root string) string {
 	return strings.Join(parts, "\n")
 }
 
-// CollectPendingCommits inspects commits from lastCommit..HEAD (or up to maxInitial) excluding recorded 7-char SHAs.
 func CollectPendingCommits(ctx context.Context, repoRoot, lastCommit string, maxInitial int, existingSHAs map[string]bool) (string, []domain.GitCommitBrief) {
 	if repoRoot == "" {
 		return "", nil
@@ -231,7 +222,6 @@ func CollectPendingCommits(ctx context.Context, repoRoot, lastCommit string, max
 	return head, commits
 }
 
-// DiffFile returns a minimal unified diff for a single modified file against HEAD (or the index if HEAD does not exist).
 func DiffFile(ctx context.Context, repoDir, filePath string) string {
 	if strings.TrimSpace(repoDir) == "" || strings.TrimSpace(filePath) == "" {
 		return ""
@@ -251,7 +241,6 @@ func DiffFile(ctx context.Context, repoDir, filePath string) string {
 	return ""
 }
 
-// StagedFileDiff captures one staged file's compacted diff section from git diff --cached.
 type StagedFileDiff struct {
 	Path   string
 	Body   string
@@ -301,7 +290,6 @@ done:
 	return ""
 }
 
-// StagedDiffFiles parses git diff --cached into per-file compacted sections without byte-cutting later files.
 func StagedDiffFiles(ctx context.Context, repoDir string) ([]StagedFileDiff, error) {
 	if strings.TrimSpace(repoDir) == "" {
 		return nil, nil
@@ -314,7 +302,6 @@ func StagedDiffFiles(ctx context.Context, repoDir string) ([]StagedFileDiff, err
 	return ParseUnifiedDiffFiles(raw), nil
 }
 
-// ParseUnifiedDiffFiles splits a multi-file git unified diff into per-file compacted StagedFileDiff entries.
 func ParseUnifiedDiffFiles(raw string) []StagedFileDiff {
 	norm := strings.ReplaceAll(raw, "\r\n", "\n")
 	lines := strings.Split(norm, "\n")
@@ -363,7 +350,6 @@ func ParseUnifiedDiffFiles(raw string) []StagedFileDiff {
 	return out
 }
 
-// CleanCommitSubject strips conventional-commit prefixes (e.g. "feat(scope): ") when a meaningful body follows.
 func CleanCommitSubject(subject string) string {
 	s := strings.TrimSpace(subject)
 	if idx := strings.Index(s, ":"); idx > 0 && idx < 28 {

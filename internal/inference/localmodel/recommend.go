@@ -124,7 +124,6 @@ func decorateFit(p Preset, hw HardwareSpec) Preset {
 func Presets() []Preset {
 	hw := DetectHardware()
 	raw := []Preset{
-		// Tier 1: speed (<= 2B, Ultra-low latency System 1)
 		{
 			ID:          "qwen3.5-2b-q4",
 			Tier:        "speed",
@@ -160,7 +159,6 @@ func Presets() []Preset {
 			URL:       "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q8_0.gguf",
 		},
 
-		// Tier 2: balanced (2B ~ 4B, Multilingual + Architecture Reasoning / Latency Balance)
 		{
 			ID:          "qwen3.5-4b-q4",
 			Tier:        "balanced",
@@ -196,7 +194,6 @@ func Presets() []Preset {
 			URL:       "https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_0.gguf",
 		},
 
-		// Tier 3: accuracy (8B ~ 12B, High-Precision Plan Verification for 24GB+ RAM)
 		{
 			ID:          "qwen3.5-9b-q4",
 			Tier:        "accuracy",
@@ -228,8 +225,6 @@ func Presets() []Preset {
 	return out
 }
 
-// SelectBootstrapPreset chooses the best zero-config speed-tier GGUF preset that fits
-// comfortably within the host machine's SafeBudgetGB.
 func SelectBootstrapPreset() Preset {
 	presets := Presets()
 	for _, p := range presets {
@@ -340,8 +335,6 @@ var (
 	hfCache   = map[string]hfCacheEntry{}
 )
 
-// DiscoverHuggingFaceModels queries Hugging Face Hub API live for the newest / trending GGUF models
-// across speed, balanced, and accuracy tiers, automatically selecting optimal single-file quantizations.
 func DiscoverHuggingFaceModels(ctx context.Context, sortMode, searchQuery string, forceRefresh ...bool) ([]Preset, error) {
 	base := strings.TrimRight(os.Getenv("HF_API_BASE"), "/")
 	if base == "" {
@@ -392,7 +385,6 @@ func DiscoverHuggingFaceModels(ctx context.Context, sortMode, searchQuery string
 		_ = json.NewDecoder(resp.Body).Decode(&candidates)
 		_ = resp.Body.Close()
 	} else {
-		// Fetch live feeds concurrently across official & trusted GGUF maintainers
 		urls := []string{
 			fmt.Sprintf("%s/api/models?author=ggml-org&filter=gguf&sort=%s&direction=-1&limit=12", base, sortField),
 			fmt.Sprintf("%s/api/models?author=unsloth&filter=gguf&sort=%s&direction=-1&limit=12", base, sortField),
@@ -425,7 +417,6 @@ func DiscoverHuggingFaceModels(ctx context.Context, sortMode, searchQuery string
 		}
 		_ = fg.Wait()
 
-		// Round-robin interleave across official maintainers so speed, balanced, and accuracy tiers are well represented
 		seen := make(map[string]bool)
 		for pos := 0; pos < 14; pos++ {
 			for b := range buckets {
@@ -535,7 +526,6 @@ func DiscoverHuggingFaceModels(ctx context.Context, sortMode, searchQuery string
 		return results[i].Downloads > results[j].Downloads
 	})
 
-	// Mark the top (#1) optimal live model in each tier as Recommended
 	topTier := map[string]bool{}
 	for i := range results {
 		t := results[i].Tier

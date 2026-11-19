@@ -1,11 +1,10 @@
-package guardrail_test
+package guardrail
 
 import (
 	"context"
 	"testing"
 
 	"memorize/internal/domain"
-	"memorize/internal/modules/guardrail"
 	"memorize/internal/modules/memory"
 	"memorize/internal/modules/progress"
 )
@@ -13,7 +12,7 @@ import (
 type testStack struct {
 	mem  *memory.Service
 	prog *progress.Service
-	gr   *guardrail.Service
+	gr   *Service
 }
 
 func newTestStack(t *testing.T, dbPath string, eval domain.Evaluator) *testStack {
@@ -27,7 +26,7 @@ func newTestStack(t *testing.T, dbPath string, eval domain.Evaluator) *testStack
 	}
 	t.Cleanup(func() { _ = mem.Close() })
 	prog := progress.New(mem)
-	gr := guardrail.New(mem, prog)
+	gr := New(mem, prog)
 	return &testStack{mem: mem, prog: prog, gr: gr}
 }
 

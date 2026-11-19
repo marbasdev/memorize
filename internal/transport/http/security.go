@@ -8,7 +8,6 @@ import (
 	"strings"
 )
 
-// SecurityHeadersMiddleware attaches defensive HTTP security headers on local console responses.
 func SecurityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -20,7 +19,68 @@ func SecurityHeadersMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// IsLoopbackHost reports whether rawHost resolves strictly to a loopback hostname or IP.
+// IsTrustedProxyPeer reports whether remoteAddr belongs to a loopback, private RFC1918/ULA,
+// or link-local reverse proxy allowed to supply X-Forwarded-* headers.
+func IsTrustedProxyPeer(remoteAddr string) bool {
+	raw := strings.TrimSpace(remoteAddr)
+	if raw == "" {
+		return false
+	}
+	host := raw
+	if h, _, err := net.SplitHostPort(raw); err == nil {
+		host = h
+	}
+	host = strings.Trim(host, "[]")
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
+}
+
+func TrustedForwardedHost(r *http.Request) string {
+	if r == nil || !IsTrustedProxyPeer(r.RemoteAddr) {
+		return ""
+	}
+	raw := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
+	if raw == "" {
+		return ""
+	}
+	first := strings.TrimSpace(strings.Split(raw, ",")[0])
+	if first == "" {
+		return ""
+	}
+	for i := 0; i < len(first); i++ {
+		c := first[i]
+		if c <= 0x20 || c >= 0x7f || c == '/' || c == '\\' || c == '@' || c == '?' || c == '#' {
+			return ""
+		}
+	}
+	return first
+}
+
+func ClientPeerIP(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if IsTrustedProxyPeer(r.RemoteAddr) {
+		if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
+			first := strings.TrimSpace(strings.Split(xff, ",")[0])
+			if ip := net.ParseIP(strings.Trim(first, "[]")); ip != nil {
+				return ip.String()
+			}
+		}
+	}
+	raw := strings.TrimSpace(r.RemoteAddr)
+	if h, _, err := net.SplitHostPort(raw); err == nil {
+		raw = h
+	}
+	if ip := net.ParseIP(strings.Trim(raw, "[]")); ip != nil {
+		return ip.String()
+	}
+	return raw
+}
+
 func IsLoopbackHost(rawHost string) bool {
 	h := strings.TrimSpace(rawHost)
 	if h == "" {
@@ -33,12 +93,6 @@ func IsLoopbackHost(rawHost string) bool {
 	return h == "127.0.0.1" || h == "localhost" || h == "::1"
 }
 
-// IsAllowedLocalOrigin blocks cross-site browser requests and non-loopback Host headers (DNS rebinding).
-func IsAllowedLocalOrigin(r *http.Request) bool {
-	return IsAllowedOrigin(r, false)
-}
-
-// IsAllowedOrigin verifies Host/Origin/Sec-Fetch-Site against either local loopback or team server mode.
 func IsAllowedOrigin(r *http.Request, serverMode bool) bool {
 	if r == nil {
 		return false
@@ -76,16 +130,12 @@ func IsAllowedOrigin(r *http.Request, serverMode bool) bool {
 	if strings.EqualFold(u.Host, hostHeader) {
 		return true
 	}
-	if xfh := strings.TrimSpace(r.Header.Get("X-Forwarded-Host")); xfh != "" {
-		first := strings.TrimSpace(strings.Split(xfh, ",")[0])
-		if first != "" && strings.EqualFold(u.Host, first) {
-			return true
-		}
+	if xfh := TrustedForwardedHost(r); xfh != "" && strings.EqualFold(u.Host, xfh) {
+		return true
 	}
 	return false
 }
 
-// IsJSONPost verifies POST method, application/json Content-Type, and mode-aware Origin checks.
 func IsJSONPost(r *http.Request, serverMode bool) bool {
 	if r == nil || r.Method != http.MethodPost || !IsAllowedOrigin(r, serverMode) {
 		return false
@@ -94,7 +144,6 @@ func IsJSONPost(r *http.Request, serverMode bool) bool {
 	return strings.HasPrefix(ct, "application/json")
 }
 
-// PostJSONMode enforces POST + application/json + mode-aware Origin checks.
 func PostJSONMode(serverMode bool, fn http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -113,48 +162,16 @@ func PostJSONMode(serverMode bool, fn http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// IsLocalJSONPost verifies loopback Host/Origin, POST method, and application/json Content-Type.
-func IsLocalJSONPost(r *http.Request) bool {
-	if !IsAllowedLocalOrigin(r) || r.Method != http.MethodPost {
-		return false
-	}
-	ct := strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type")))
-	return strings.HasPrefix(ct, "application/json")
-}
-
-// PostJSON enforces POST + application/json + local Origin checks to prevent drive-by CSRF against localhost.
-func PostJSON(fn http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if !IsAllowedLocalOrigin(r) {
-			WriteJSON(w, http.StatusForbidden, map[string]any{"error": "cross-origin request blocked"})
-			return
-		}
-		if r.Method != http.MethodPost {
-			WriteJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "POST required"})
-			return
-		}
-		ct := strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type")))
-		if !strings.HasPrefix(ct, "application/json") {
-			WriteJSON(w, http.StatusUnsupportedMediaType, map[string]any{"error": "Content-Type application/json required"})
-			return
-		}
-		fn(w, r)
-	}
-}
-
-// WriteJSON writes a JSON response with the given HTTP status code.
 func WriteJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// WriteErr writes an error JSON response with the given HTTP status code.
 func WriteErr(w http.ResponseWriter, code int, err error) {
 	WriteJSON(w, code, map[string]any{"error": err.Error()})
 }
 
-// DecodeJSON reads up to 1 MiB from the request body and decodes JSON into dst.
 func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {

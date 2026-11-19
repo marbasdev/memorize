@@ -3,15 +3,11 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"memorize/internal/domain"
-	"memorize/internal/infra/git"
 )
 
-// GetSyncedCommit returns the recorded last_commit cursor for rawScope (and account in server mode).
 func GetSyncedCommit(ctx context.Context, db *sql.DB, rawScope string) string {
 	sc := domain.NormalizeScope(rawScope)
 	var sha string
@@ -25,7 +21,6 @@ func GetSyncedCommit(ctx context.Context, db *sql.DB, rawScope string) string {
 	return strings.TrimSpace(sha)
 }
 
-// SetSyncedCommit upserts the synced commit cursor for rawScope (per account in server mode).
 func SetSyncedCommit(ctx context.Context, db *sql.DB, rawScope, sha string) error {
 	sc := domain.NormalizeScope(rawScope)
 	sha = strings.TrimSpace(sha)
@@ -48,18 +43,15 @@ func SetSyncedCommit(ctx context.Context, db *sql.DB, rawScope, sha string) erro
 	return err
 }
 
-// RememberRepoPath records the resolved Git repository root for a project:* scope.
-func RememberRepoPath(ctx context.Context, db *sql.DB, rawScope, repoDir string) {
-	if domain.IsServerMode(ctx) {
-		// In multi-user server mode, teammate repo paths live on client machines rather than the host DB.
+// SetStoredRepoPath persists an already-resolved local Git repository root for a project:* scope.
+// In authenticated team server mode, client repository paths are never persisted on the host DB.
+func SetStoredRepoPath(ctx context.Context, db *sql.DB, rawScope, resolvedRoot string) {
+	if db == nil || domain.IsServerMode(ctx) {
 		return
 	}
 	sc := domain.NormalizeScope(rawScope)
-	if !strings.HasPrefix(sc, "project:") {
-		return
-	}
-	root := git.ResolveRoot(repoDir)
-	if root == "" {
+	root := strings.TrimSpace(resolvedRoot)
+	if !strings.HasPrefix(sc, "project:") || root == "" {
 		return
 	}
 	_, _ = db.ExecContext(ctx, `
@@ -71,38 +63,34 @@ func RememberRepoPath(ctx context.Context, db *sql.DB, rawScope, repoDir string)
 	`, sc, root)
 }
 
-// ResolveScopeRepoPath resolves the Git root path for rawScope from explicitRepo, repo_sync, or CWD siblings.
-// In authenticated team server mode, the server never probes host-local filesystem repositories.
-func ResolveScopeRepoPath(ctx context.Context, db *sql.DB, rawScope, explicitRepo string) string {
-	if domain.IsServerMode(ctx) {
+func GetStoredRepoPath(ctx context.Context, db *sql.DB, rawScope string) string {
+	if db == nil || domain.IsServerMode(ctx) {
 		return ""
 	}
 	sc := domain.NormalizeScope(rawScope)
 	if !strings.HasPrefix(sc, "project:") {
 		return ""
 	}
-	if r := git.ResolveRoot(explicitRepo); r != "" {
-		RememberRepoPath(ctx, db, sc, r)
-		return r
-	}
 	var stored string
 	_ = db.QueryRowContext(ctx, `SELECT COALESCE(repo_path, '') FROM repo_sync WHERE scope = ?`, sc).Scan(&stored)
-	if r := git.ResolveRoot(stored); r != "" {
-		return r
+	return strings.TrimSpace(stored)
+}
+
+func ListSyncedProjectScopes(ctx context.Context, db *sql.DB) []string {
+	if db == nil {
+		return nil
 	}
-	projName := strings.TrimPrefix(sc, "project:")
-	if wd, err := os.Getwd(); err == nil && wd != "" {
-		if wdRoot := git.ResolveRoot(wd); wdRoot != "" {
-			if strings.EqualFold(filepath.Base(wdRoot), projName) {
-				RememberRepoPath(ctx, db, sc, wdRoot)
-				return wdRoot
-			}
-			sib := filepath.Join(filepath.Dir(wdRoot), projName)
-			if sibRoot := git.ResolveRoot(sib); sibRoot != "" && strings.EqualFold(filepath.Base(sibRoot), projName) {
-				RememberRepoPath(ctx, db, sc, sibRoot)
-				return sibRoot
-			}
+	rows, err := db.QueryContext(ctx, `SELECT DISTINCT scope FROM repo_sync WHERE scope LIKE 'project:%'`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var sc string
+		if rows.Scan(&sc) == nil && strings.HasPrefix(sc, "project:") {
+			out = append(out, sc)
 		}
 	}
-	return ""
+	return out
 }

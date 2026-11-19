@@ -16,8 +16,6 @@ import (
 
 const defaultGeminiDecisionModel = "gemini-decision-1"
 
-// GeminiDecisionsAdapter implements non-generative closed-set decision evaluation
-// via Google's Gemini Decisions API (/v1beta/decisions, 0 output tokens).
 type GeminiDecisionsAdapter struct {
 	apiKey    string
 	model     string
@@ -25,7 +23,6 @@ type GeminiDecisionsAdapter struct {
 	ctxProbed atomic.Bool
 }
 
-// InputTokenLimit returns the decision model's verified inputTokenLimit when known.
 func (g *GeminiDecisionsAdapter) InputTokenLimit(ctx context.Context) int {
 	if g == nil {
 		return 0
@@ -33,13 +30,6 @@ func (g *GeminiDecisionsAdapter) InputTokenLimit(ctx context.Context) int {
 	return lookupGeminiInputTokenLimit(ctx, g.apiKey, g.model, &g.ctxLimit, &g.ctxProbed)
 }
 
-// NewGeminiDecisionsAdapter returns a BatchEvaluator backed by gemini-decision-1.
-func NewGeminiDecisionsAdapter() *BatchEvaluator {
-	return NewGeminiDecisionsAdapterConfig("", "")
-}
-
-// NewGeminiDecisionsAdapterConfig configures a Gemini Decisions API evaluator with
-// explicit API key and model overrides (defaulting to gemini-decision-1).
 func NewGeminiDecisionsAdapterConfig(apiKey, model string) *BatchEvaluator {
 	k := strings.TrimSpace(apiKey)
 	if k == "" {
@@ -149,7 +139,6 @@ func (w geminiDecisionAnswerWire) toDecisionAnswer() decisionAnswer {
 	}
 }
 
-// CallDecisions posts a single forward-pass decision batch to /v1beta/decisions.
 func (g *GeminiDecisionsAdapter) CallDecisions(ctx context.Context, input string, questions map[string]decisionQuestion) (map[string]decisionAnswer, error) {
 	endpoint := geminiBaseURL() + "/v1beta/decisions"
 	body, err := json.Marshal(map[string]any{
@@ -184,8 +173,6 @@ func (g *GeminiDecisionsAdapter) CallDecisions(ctx context.Context, input string
 			} else {
 				lastErr = fmt.Errorf("gemini decisions status %d", resp.StatusCode)
 			}
-			// Only retry once on transient 503; fail fast on 429 so the router circuit-breaker
-			// can immediately switch to the generative fallback model without wasting hook budget.
 			if resp.StatusCode == http.StatusServiceUnavailable {
 				continue
 			}

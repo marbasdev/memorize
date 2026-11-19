@@ -7,21 +7,21 @@ import (
 
 	"memorize/internal/domain"
 	"memorize/internal/infra/git"
-	"memorize/internal/infra/sqlite"
 )
 
-// RememberRepoPath records the resolved Git repository root for a project:* scope
-// so Dashboard Progress Sync can inspect commits even when invoked from a browser.
 func (s *Service) RememberRepoPath(ctx context.Context, rawScope, repoDir string) {
-	sqlite.RememberRepoPath(ctx, s.db, rawScope, repoDir)
+	if s != nil && s.mem != nil {
+		s.mem.RememberRepoPath(ctx, rawScope, repoDir)
+	}
 }
 
-// ResolveScopeRepoPath resolves the Git root path for rawScope from explicitRepo, repo_sync, or CWD siblings.
 func (s *Service) ResolveScopeRepoPath(ctx context.Context, rawScope, explicitRepo string) string {
-	return sqlite.ResolveScopeRepoPath(ctx, s.db, rawScope, explicitRepo)
+	if s != nil && s.mem != nil {
+		return s.mem.ResolveScopeRepoPath(ctx, rawScope, explicitRepo)
+	}
+	return ""
 }
 
-// TopProjectScope returns the project:* scope with the highest combined active memory and progress count.
 func (s *Service) TopProjectScope(ctx context.Context) string {
 	var sc string
 	_ = s.db.QueryRowContext(ctx, `
@@ -105,8 +105,6 @@ func (s *Service) factsForProgressIDs(ctx context.Context, memIDs []int64) []dom
 	return out
 }
 
-// RecordMemoryMutationProgress automatically links project:* memory additions, overwrites,
-// updates, and consolidations to a separated project_progress milestone with full expandable details.
 func (s *Service) RecordMemoryMutationProgress(ctx context.Context, rawScope, category, subCategory, actionKind string, newID int64, oldIDs []int64, content string) {
 	sc := domain.NormalizeScope(rawScope)
 	if !strings.HasPrefix(sc, "project:") || newID <= 0 {
@@ -242,7 +240,6 @@ func (s *Service) unlinkedActiveMemories(ctx context.Context, scope string) ([]d
 	return out, nil
 }
 
-// InspectProgressSync computes repo_sync cursor state, pending Git commits, and unlinked active memories.
 func (s *Service) InspectProgressSync(ctx context.Context, rawScope, explicitRepo string) domain.ProgressSyncState {
 	sc := domain.NormalizeScope(rawScope)
 	repoRoot := s.ResolveScopeRepoPath(ctx, sc, explicitRepo)

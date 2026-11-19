@@ -91,19 +91,16 @@ func TestModelRecommendationCriteriaAndLiveDiscovery(t *testing.T) {
 		t.Fatalf("expected gemma-4-E2B-it-Q4_K_M.gguf (balanced), got %+v (%v)", hfModels, err)
 	}
 
-	// Gemini discovery without API key falls back to builtin defaults
 	optsBuiltin, srcBuiltin, _ := discovery.DiscoverGeminiModels(context.Background(), map[string]string{}, "")
 	if srcBuiltin != "builtin" || len(optsBuiltin) == 0 {
 		t.Fatalf("expected builtin gemini defaults, got src=%q len=%d", srcBuiltin, len(optsBuiltin))
 	}
 
-	// Unsaved override key sends x-goog-api-key header
 	_, _, _ = discovery.DiscoverGeminiModels(context.Background(), map[string]string{}, "typed-unsaved-key")
 	if gotGeminiHeader != "typed-unsaved-key" {
 		t.Fatalf("expected typed override key header, got %q", gotGeminiHeader)
 	}
 
-	// Saved config key ranks canonical alias > snapshot > balanced > accuracy, excluding 1.5 and TTS
 	optsLive, srcLive, errMsg := discovery.DiscoverGeminiModels(context.Background(), map[string]string{"gemini_api_key": "test-live-gem-key"}, "")
 	if srcLive != "live_api" || errMsg != "" {
 		t.Fatalf("expected live gemini catalog without error, got src=%q err=%q", srcLive, errMsg)

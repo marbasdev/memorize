@@ -146,7 +146,6 @@ func runDaemonPortCLI(args []string, explicitAddr, dbPath, modelsDir string) int
 		return 2
 	}
 
-	// If a daemon is running, delegate the change to it so DB, GGUF server, and daemon listener stay synchronized.
 	if _, liveAddr, running := thttp.DiscoverLiveDaemonStatus(explicitAddr, dbPath); running {
 		res, err := thttp.PostDaemonPortApply(liveAddr, thttp.PortApplyRequest{
 			DaemonPort: nextCfg.DaemonPort,
@@ -185,7 +184,6 @@ func runDaemonPortCLI(args []string, explicitAddr, dbPath, modelsDir string) int
 		return 0
 	}
 
-	// Offline update: save ports.json, sync SQLite gguf_endpoint if DB exists, and restart standalone llama-server if active.
 	if err := config.SavePortConfig(dbPath, nextCfg); err != nil {
 		fmt.Fprintf(os.Stderr, "memorize port save error: %v\n", err)
 		return 1

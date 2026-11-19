@@ -16,7 +16,6 @@ import (
 
 	"memorize/internal/domain"
 	"memorize/internal/inference/providers"
-	"memorize/internal/inference/router"
 	"memorize/internal/modules/memory"
 )
 
@@ -61,14 +60,12 @@ func TestServiceLifecycleAndUpgrades(t *testing.T) {
 	}
 	defer svc.Close()
 
-	// 1. Gatekeeper drop when IsPermanent < 0.75
 	eval.dec = domain.MutationDecision{IsPermanent: 0.4, Action: "INSERT", Confidence: 0.9}
 	res, err := svc.CommitMemory(ctx, "temp debug log", "Arch")
 	if err != nil || !strings.HasPrefix(res, "SKIPPED") {
 		t.Fatalf("expected SKIPPED, got %q (%v)", res, err)
 	}
 
-	// 2. Commit 2 facts in normalized category, one Pinned
 	eval.dec = domain.MutationDecision{IsPermanent: 0.95, IsGlobalInvariant: 0.90, Action: "INSERT", Confidence: 0.92}
 	res, err = svc.CommitMemory(ctx, "Never use CGO in Go builds", "Arch")
 	if err != nil || !strings.Contains(res, "COMMITTED") || !strings.Contains(res, "pinned=true") {
@@ -84,7 +81,6 @@ func TestServiceLifecycleAndUpgrades(t *testing.T) {
 
 	_, _ = svc.QuerySessionMemory(ctx, "sess-prior", "implement login endpoint", "", "", false)
 
-	// 3. 1:N Multi-Fact Overwrite + Supersession Lineage
 	eval.dec = domain.MutationDecision{
 		Category:        "security",
 		IsPermanent:     0.95,
@@ -97,13 +93,11 @@ func TestServiceLifecycleAndUpgrades(t *testing.T) {
 		t.Fatalf("expected OVERWRITTEN, got %q (%v)", res, err)
 	}
 
-	// 4a. Session that previously received #2/#3 gets 1-time (Replaces: ...) notice
 	qPrior, err := svc.QuerySessionMemory(ctx, "sess-prior", "implement login endpoint", "", "", false)
 	if err != nil || !strings.Contains(qPrior, "Replaces: Use JWT for auth") {
 		t.Fatalf("expected prior session to receive Replaces notice, got:\n%s (%v)", qPrior, err)
 	}
-	// 4b. Fresh session receives clean latest text without obsolete Replaces bloat
-	qOut, err := svc.QueryMemory(ctx, "implement login endpoint", "")
+	qOut, err := svc.QuerySessionMemory(ctx, "", "implement login endpoint", "", "", true)
 	if err != nil {
 		t.Fatalf("QueryMemory error: %v", err)
 	}
@@ -111,7 +105,6 @@ func TestServiceLifecycleAndUpgrades(t *testing.T) {
 		t.Fatalf("expected clean latest output without Replaces in fresh session:\n%s", qOut)
 	}
 
-	// 5. Confirmation Boost on Duplicate
 	eval.dec = domain.MutationDecision{
 		IsPermanent:     0.9,
 		Action:          "IGNORE",
@@ -151,7 +144,7 @@ func TestMultiProjectAndPersonalIsolation(t *testing.T) {
 		t.Fatalf("expected personal/health commit, got %q (%v)", pRes, err)
 	}
 
-	alphaOut, _ := svc.QueryMemory(ctx, "implement auth", "", "alpha")
+	alphaOut, _ := svc.QuerySessionMemory(ctx, "", "implement auth", "", "alpha", true)
 	if !strings.Contains(alphaOut, "Conventional Commits") || !strings.Contains(alphaOut, "Alpha uses session cookies") {
 		t.Fatalf("alpha query missing expected memories:\n%s", alphaOut)
 	}
@@ -159,7 +152,7 @@ func TestMultiProjectAndPersonalIsolation(t *testing.T) {
 		t.Fatalf("scope leak detected in alpha query:\n%s", alphaOut)
 	}
 
-	persOut, _ := svc.QueryMemory(ctx, "저녁 식당 추천", "", "personal")
+	persOut, _ := svc.QuerySessionMemory(ctx, "", "저녁 식당 추천", "", "personal", true)
 	if !strings.Contains(persOut, "갑각류") || strings.Contains(persOut, "Conventional Commits") || strings.Contains(persOut, "Alpha") {
 		t.Fatalf("unexpected personal query result:\n%s", persOut)
 	}
@@ -277,7 +270,7 @@ func TestExhaustiveParallelChunkEvaluation(t *testing.T) {
 	probe.scoredCount.Store(0)
 	probe.batchCalls.Store(0)
 
-	out, err := svc.QueryMemory(ctx, "오늘 저녁 간장게장 어때?", "", "personal")
+	out, err := svc.QuerySessionMemory(ctx, "", "오늘 저녁 간장게장 어때?", "", "personal", true)
 	if err != nil {
 		t.Fatalf("QueryMemory error: %v", err)
 	}
@@ -319,7 +312,7 @@ func TestMemoryBudgetWarning(t *testing.T) {
 		t.Fatalf("expected no Memory Budget Warning on commit, got:\n%s", lastCommit)
 	}
 
-	qOut, err := svc.QueryMemory(ctx, "아무 작업", "", "project:warn")
+	qOut, err := svc.QuerySessionMemory(ctx, "", "아무 작업", "", "project:warn", true)
 	if err != nil {
 		t.Fatalf("QueryMemory error: %v", err)
 	}
@@ -411,7 +404,7 @@ func TestGitHeadBaselineAndIncrementalSync(t *testing.T) {
 	if !strings.Contains(qPriorLegacy, "Replaces: 인증은 JWT 토큰을 사용한다") {
 		t.Fatalf("expected prior session to receive post-baseline Replaces lineage, got:\n%s", qPriorLegacy)
 	}
-	qOut, _ := svc.QueryMemory(ctx, "인증 미들웨어 수정", "", "project:legacy")
+	qOut, _ := svc.QuerySessionMemory(ctx, "", "인증 미들웨어 수정", "", "project:legacy", true)
 	if !strings.Contains(qOut, "인증은 JWT 대신 HttpOnly 세션 쿠키를 사용한다") || strings.Contains(qOut, "Replaces:") {
 		t.Fatalf("expected fresh query to omit obsolete Replaces lineage, got:\n%s", qOut)
 	}
@@ -448,9 +441,9 @@ func TestSecurityGuardBlocksSecretsAndPromptInjection(t *testing.T) {
 			t.Fatalf("expected security guard rejection for %q, got %q (%v)", c, out, err)
 		}
 	}
-	recs, err := svc.ListRecords(ctx, "project:sec")
-	if err != nil || len(recs) != 0 {
-		t.Fatalf("expected 0 stored records after rejections, got %d (%v)", len(recs), err)
+	secPage, err := svc.QueryRecordsPage(ctx, domain.RecordQuery{Scope: "project:sec", State: "all", PageSize: 50})
+	if err != nil || len(secPage.Records) != 0 {
+		t.Fatalf("expected 0 stored records after rejections, got %d (%v)", len(secPage.Records), err)
 	}
 }
 
@@ -476,7 +469,7 @@ func TestAdminForgetUndoConsolidateThresholdsAndQuery(t *testing.T) {
 	if err != nil || !strings.Contains(undoMsg, "UNDONE OVERWRITE") {
 		t.Fatalf("expected UNDONE OVERWRITE, got %q (%v)", undoMsg, err)
 	}
-	qAfterUndo, _ := svc.QueryMemory(ctx, "쿠키 설정", "", "project:dash")
+	qAfterUndo, _ := svc.QuerySessionMemory(ctx, "", "쿠키 설정", "", "project:dash", true)
 	if !strings.Contains(qAfterUndo, "HttpOnly") || !strings.Contains(qAfterUndo, "Secure") || strings.Contains(qAfterUndo, "잘못 병합된") {
 		t.Fatalf("expected #1 and #2 restored and #4 inactive, got:\n%s", qAfterUndo)
 	}
@@ -486,7 +479,7 @@ func TestAdminForgetUndoConsolidateThresholdsAndQuery(t *testing.T) {
 	if err != nil || newID != 5 {
 		t.Fatalf("ConsolidateMemories failed: id=%d err=%v", newID, err)
 	}
-	qCompacted, _ := svc.QueryMemory(ctx, "쿠키 보안", "", "project:dash")
+	qCompacted, _ := svc.QuerySessionMemory(ctx, "", "쿠키 보안", "", "project:dash", true)
 	if !strings.Contains(qCompacted, "HttpOnly, Secure, SameSite=Lax") || !strings.Contains(qCompacted, "Core Rule") {
 		t.Fatalf("expected compacted pinned memory #5, got:\n%s", qCompacted)
 	}
@@ -501,17 +494,17 @@ func TestAdminForgetUndoConsolidateThresholdsAndQuery(t *testing.T) {
 	if err != nil || purged != 4 {
 		t.Fatalf("expected 4 tombstones purged, got %d (%v)", purged, err)
 	}
-	qAfterPurge, _ := svc.QueryMemory(ctx, "쿠키 보안", "", "project:dash")
+	qAfterPurge, _ := svc.QuerySessionMemory(ctx, "", "쿠키 보안", "", "project:dash", true)
 	if !strings.Contains(qAfterPurge, "HttpOnly, Secure, SameSite=Lax") || strings.Contains(qAfterPurge, "Replaces:") {
 		t.Fatalf("expected fresh query after PurgeTombstones to contain clean merged rule without Replaces bloat, got:\n%s", qAfterPurge)
 	}
-	dashRecs, _ := svc.ListRecords(ctx, "project:dash")
-	if len(dashRecs) != 1 || len(dashRecs[0].Replaces) == 0 {
-		t.Fatalf("expected ListRecords to preserve Replaces lineage snapshot after PurgeTombstones, got %+v", dashRecs)
+	dashPage, _ := svc.QueryRecordsPage(ctx, domain.RecordQuery{Scope: "project:dash", State: "all", PageSize: 50})
+	if len(dashPage.Records) != 1 || len(dashPage.Records[0].Replaces) == 0 {
+		t.Fatalf("expected QueryRecordsPage to preserve Replaces lineage snapshot after PurgeTombstones, got %+v", dashPage.Records)
 	}
 
-	// Unpin #5, raise MinRelevance threshold to 4.50 -> stubEval score 4.2 filtered out & DiagnoseRelevance surfaces DROP item
-	if err := svc.UpdateMemory(ctx, 5, "security", "", false); err != nil {
+	pinnedFalse := false
+	if err := svc.UpdateMemoryFull(ctx, 5, "", "security", nil, "", &pinnedFalse); err != nil {
 		t.Fatalf("unpin #5 failed: %v", err)
 	}
 	if _, err := svc.SaveThresholds(ctx, domain.Thresholds{
@@ -523,7 +516,7 @@ func TestAdminForgetUndoConsolidateThresholdsAndQuery(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SaveThresholds failed: %v", err)
 	}
-	filteredOut, _ := svc.QueryMemory(ctx, "쿠키 확인", "", "project:dash")
+	filteredOut, _ := svc.QuerySessionMemory(ctx, "", "쿠키 확인", "", "project:dash", true)
 	if !strings.Contains(filteredOut, "No relevant memories matched threshold (Score >= 4.50") {
 		t.Fatalf("expected live threshold 4.50 to filter out score 4.2, got:\n%s", filteredOut)
 	}
@@ -554,7 +547,6 @@ func TestSQLiteFilePermissionsAndCardinalitySemantics(t *testing.T) {
 		}
 	}
 
-	// Schema-driven tier & cardinality semantics
 	prefEval := &stubEval{
 		dec: domain.MutationDecision{
 			Category:          "convention",
@@ -579,7 +571,7 @@ func TestSQLiteFilePermissionsAndCardinalitySemantics(t *testing.T) {
 	if !strings.Contains(res1, "COMMITTED") || !strings.Contains(res2, "COMMITTED") || !strings.Contains(res2, "category=preference") || strings.Contains(res2, "pinned=true") || !strings.Contains(res2, "golang") {
 		t.Fatalf("expected both golang and typescript preferences to coexist as unpinned soft preferences with free-form tags, got:\nres1=%s\nres2=%s", res1, res2)
 	}
-	qPref, _ := prefSvc.QueryMemory(ctx, "선호 언어 확인", "", "global")
+	qPref, _ := prefSvc.QuerySessionMemory(ctx, "", "선호 언어 확인", "", "global", true)
 	if !strings.Contains(qPref, "프로그래밍 언어 golang 선호") || !strings.Contains(qPref, "프로그래밍 언어 typescript 선호") || !strings.Contains(qPref, "soft preference") {
 		t.Fatalf("expected both preferences active with soft preference badge, got:\n%s", qPref)
 	}
@@ -620,7 +612,7 @@ func TestSubCategoryPersonalInProjectAndRevocation(t *testing.T) {
 		t.Fatalf("CommitMemory slash shorthand failed: %v", err)
 	}
 
-	qDefault, _ := svc.QueryMemory(ctx, "식단 및 보안 확인", "", "project:webapp")
+	qDefault, _ := svc.QuerySessionMemory(ctx, "", "식단 및 보안 확인", "", "project:webapp", true)
 	if strings.Contains(qDefault, "땅콩 알레르기") || !strings.Contains(qDefault, "[project:webapp / security/oauth2 #2]") {
 		t.Fatalf("expected default project query to include security/oauth2 and exclude personal, got:\n%s", qDefault)
 	}
@@ -628,28 +620,26 @@ func TestSubCategoryPersonalInProjectAndRevocation(t *testing.T) {
 	if err := svc.SaveConfig(ctx, map[string]string{"include_personal_in_project": "1"}); err != nil {
 		t.Fatalf("SaveConfig include_personal_in_project failed: %v", err)
 	}
-	qWithPersonal, _ := svc.QueryMemory(ctx, "식단 및 보안 확인", "", "project:webapp")
+	qWithPersonal, _ := svc.QuerySessionMemory(ctx, "", "식단 및 보안 확인", "", "project:webapp", true)
 	if !strings.Contains(qWithPersonal, "[personal / diet/allergy #1]") || !strings.Contains(qWithPersonal, "땅콩 알레르기") {
 		t.Fatalf("expected project query with include_personal_in_project=1 to return personal memory, got:\n%s", qWithPersonal)
 	}
 
-	qSubFilter, _ := svc.QueryMemory(ctx, "OAuth 확인", "oauth2", "project:webapp")
+	qSubFilter, _ := svc.QuerySessionMemory(ctx, "", "OAuth 확인", "oauth2", "project:webapp", true)
 	if !strings.Contains(qSubFilter, "PKCE") || strings.Contains(qSubFilter, "땅콩") {
 		t.Fatalf("expected sub_category filter 'oauth2' to match only #2, got:\n%s", qSubFilter)
 	}
 
-	// UpdateMemoryFull scope + sub_category + preserved pin
 	subComm := "communication"
 	pinnedTrue := true
 	if err := svc.UpdateMemoryFull(ctx, 1, "global", "preference", &subComm, "답변은 항상 한국어로 간결하게 작성한다", &pinnedTrue); err != nil {
 		t.Fatalf("UpdateMemoryFull failed: %v", err)
 	}
-	recs, err := svc.ListRecords(ctx, "global")
-	if err != nil || len(recs) != 1 || recs[0].Scope != "global" || recs[0].Category != "preference" || recs[0].SubCategory != "communication" {
-		t.Fatalf("expected #1 moved to global / preference / communication, got: %+v (%v)", recs, err)
+	globPage, err := svc.QueryRecordsPage(ctx, domain.RecordQuery{Scope: "global", State: "all", PageSize: 50})
+	if err != nil || len(globPage.Records) != 1 || globPage.Records[0].Scope != "global" || globPage.Records[0].Category != "preference" || globPage.Records[0].SubCategory != "communication" {
+		t.Fatalf("expected #1 moved to global / preference / communication, got: %+v (%v)", globPage.Records, err)
 	}
 
-	// Mid-session revocation notice
 	t1, err := svc.QuerySessionMemory(ctx, "sess-revoke", "OAuth 작업", "", "project:webapp", false)
 	if err != nil || !strings.Contains(t1, "#2") {
 		t.Fatalf("expected #2 delivered on Turn 1, got:\n%s (%v)", t1, err)
@@ -734,13 +724,6 @@ func TestServiceTaskRoutingDecisionAndGenerativeFallbacks(t *testing.T) {
 		t.Fatalf("memory.Open failed: %v", err)
 	}
 	defer svc.Close()
-
-	taskRes := router.NewTaskResolver()
-	svc.Router().SetTaskResolver(taskRes)
-	svc.Router().SetDynamicResolver(func(cfg map[string]string) domain.Evaluator {
-		ev, _ := taskRes(cfg, "")
-		return ev
-	})
 
 	if err := svc.SaveConfig(ctx, map[string]string{
 		"active_provider": "gemini",

@@ -9,7 +9,6 @@ import (
 
 	"memorize/internal/domain"
 	"memorize/internal/infra/git"
-	"memorize/internal/infra/sqlite"
 )
 
 func (s *Service) activeOverrideTurnInput(ctx context.Context, ev NormalizedHookEvent, scopeKey string) string {
@@ -38,7 +37,9 @@ func (s *Service) rememberRepo(ctx context.Context, scope, repoDir string) {
 		s.prog.RememberRepoPath(ctx, scope, repoDir)
 		return
 	}
-	sqlite.RememberRepoPath(ctx, s.db, scope, repoDir)
+	if s.mem != nil {
+		s.mem.RememberRepoPath(ctx, scope, repoDir)
+	}
 }
 
 func (s *Service) runGuardrailHook(ctx context.Context, ev NormalizedHookEvent, codec AgentCodec, scope, repoDir, sid string) (string, int, error) {
@@ -82,8 +83,6 @@ func (s *Service) runGuardrailHook(ctx context.Context, ev NormalizedHookEvent, 
 	hookStart := time.Now()
 	toolName := ev.ToolName
 
-	// Enforce the turn pre-mutate gate first so durable decisions in the current chat are
-	// persisted before evaluating the tool call against active personal and team rules.
 	if gateReason, gateIDs := s.checkTurnPreMutateGate(ctx, ev, scope); gateReason != "" {
 		gateSnippet := plan
 		if gateSnippet == "" && len(stagedSections) > 0 {
@@ -103,8 +102,6 @@ func (s *Service) runGuardrailHook(ctx context.Context, ev NormalizedHookEvent, 
 		return codec.FormatDenyPreTool(gateReason)
 	}
 
-	// File edits pass PreToolUse after the pre-mutate gate and collect their pre-turn baseline
-	// so the Stop hook evaluates the net turn diff once and triggers self-correction on violations.
 	if ev.Phase == domain.HookPhasePreTool && strings.TrimSpace(ev.Raw.ProposedPlan) == "" && isFileEditTool(toolName) {
 		if ev.ClientCtx == nil || !ev.ClientCtx.RemoteManagedEdit {
 			s.recordPendingTurnEdit(ctx, sid, scope, repoDir, toolName, ev, plan)

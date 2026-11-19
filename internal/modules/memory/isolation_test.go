@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"memorize/internal/domain"
@@ -110,8 +111,8 @@ func TestCategoryDistributionAndScopeStats(t *testing.T) {
 			t.Fatalf("CommitMemoryFull testing %d: %v", i, err)
 		}
 		if i <= 3 {
-			recs, _ := svc.ListRecords(ctx, "project:dist")
-			tombIDs = append(tombIDs, recs[0].ID)
+			pg, _ := svc.QueryRecordsPage(ctx, domain.RecordQuery{Scope: "project:dist", State: "all", PageSize: 50})
+			tombIDs = append(tombIDs, pg.Records[0].ID)
 		}
 	}
 	if _, err := svc.ForgetMemories(domain.WithAdminBypass(ctx), tombIDs); err != nil {
@@ -327,9 +328,9 @@ func TestMultiAccountPersonalOwnershipAndAdminBypass(t *testing.T) {
 		t.Fatalf("Admin UpdateMemoryFull failed: %v", err)
 	}
 
-	recs, _ := svc.ListRecords(ctxAdmin, "personal")
-	if len(recs) != 1 || recs[0].Account != "alice" || !recs[0].Pinned {
-		t.Fatalf("expected account='alice' and Pinned=true preserved after admin edit, got %+v", recs)
+	pg, _ := svc.QueryRecordsPage(ctxAdmin, domain.RecordQuery{Scope: "personal", State: "all", PageSize: 50})
+	if len(pg.Records) != 1 || pg.Records[0].Account != "alice" || !pg.Records[0].Pinned {
+		t.Fatalf("expected account='alice' and Pinned=true preserved after admin edit, got %+v", pg.Records)
 	}
 }
 
@@ -398,5 +399,244 @@ func TestAutoSyncRepoLargeCommitBatchBoundedExecution(t *testing.T) {
 	msg := svc.AutoSyncRepo(ctx, "sess-batch", scope, repo, false)
 	if svc.GetSyncedCommit(ctx, scope) != latest || !strings.Contains(msg, "8 commit(s)") {
 		t.Fatalf("expected AutoSyncRepo to advance cursor to %s across 8 commits, got cursor=%q msg=%q", latest, svc.GetSyncedCommit(ctx, scope), msg)
+	}
+}
+
+type stubExtraFactsProvider struct {
+	mu    sync.Mutex
+	facts []domain.Fact
+}
+
+func (p *stubExtraFactsProvider) LoadExtraFacts(_ context.Context, scopeA, scopeB, _ string) ([]domain.Fact, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var out []domain.Fact
+	for _, f := range p.facts {
+		if f.Scope == scopeA || f.Scope == scopeB {
+			out = append(out, f)
+		}
+	}
+	return out, nil
+}
+
+func TestExtraFactsMergedReadOnlyAndSessionInvalidation(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "mem.db")
+	ev := &stubEval{}
+	svc, err := memory.Open(dbPath, ev)
+	if err != nil {
+		t.Fatalf("open memory service: %v", err)
+	}
+	defer svc.Close()
+
+	provider := &stubExtraFactsProvider{
+		facts: []domain.Fact{
+			{
+				ID:       1000000001,
+				Scope:    "project:app",
+				Origin:   domain.RuleOriginTeam,
+				RuleKey:  "db-no-cgo",
+				Category: "database",
+				Content:  "Never enable CGO — Why: Static builds | How: CGO_ENABLED=0",
+				Pinned:   true,
+			},
+			{
+				ID:       1000000002,
+				Scope:    "project:app",
+				Origin:   domain.RuleOriginTeam,
+				RuleKey:  "api-json-err",
+				Category: "api",
+				Content:  "Always return structured JSON errors",
+				Pinned:   false,
+			},
+		},
+	}
+	svc.AttachExtraFactsProvider(provider)
+
+	ctx := context.Background()
+	out1, err := svc.QuerySessionMemory(ctx, "sess-1", "implement error response", "", "project:app", false)
+	if err != nil {
+		t.Fatalf("first QuerySessionMemory: %v", err)
+	}
+	if !strings.Contains(out1, "[TEAM project:app/database]") || !strings.Contains(out1, "Never enable CGO") {
+		t.Fatalf("expected team rule rendered with TEAM prefix, got:\n%s", out1)
+	}
+	if !strings.Contains(out1, "[TEAM project:app/api]") {
+		t.Fatalf("expected second team rule rendered with TEAM prefix, got:\n%s", out1)
+	}
+
+	out2, err := svc.QuerySessionMemory(ctx, "sess-1", "implement error response", "", "project:app", false)
+	if err != nil {
+		t.Fatalf("second QuerySessionMemory: %v", err)
+	}
+	if !strings.Contains(out2, "No new memories") {
+		t.Fatalf("expected already-delivered team rules to be deduplicated on turn 2, got:\n%s", out2)
+	}
+
+	provider.mu.Lock()
+	provider.facts[0].Content = "Updated Team Rule Content"
+	provider.mu.Unlock()
+	svc.InvalidateSessionIDs(ctx, 1000000001)
+
+	out3, err := svc.QuerySessionMemory(ctx, "sess-1", "next step", "", "project:app", false)
+	if err != nil {
+		t.Fatalf("third QuerySessionMemory: %v", err)
+	}
+	if !strings.Contains(out3, "Updated Team Rule Content") {
+		t.Fatalf("expected invalidated team rule to re-deliver with updated content, got:\n%s", out3)
+	}
+
+	ev.dec = domain.MutationDecision{Action: "INSERT", Confidence: 0.9}
+	_, err = svc.CommitMemoryFull(ctx, "Always use parameterized queries", "database", "", "", "project:app")
+	if err != nil {
+		t.Fatalf("CommitMemoryFull: %v", err)
+	}
+	ev.mu.Lock()
+	seenInMutation := append([]domain.Fact(nil), ev.lastFacts...)
+	ev.mu.Unlock()
+	for _, f := range seenInMutation {
+		if f.IsTeam() || f.ID >= 1000000000 {
+			t.Fatalf("CommitMemoryFull leaked team rule into mutation candidates: %+v", f)
+		}
+	}
+
+	for i := 0; i < 280; i++ {
+		if _, err := svc.QuerySessionMemory(ctx, fmt.Sprintf("ephemeral-sess-%d", i), "task", "", "project:app", false); err != nil {
+			t.Fatalf("ephemeral session %d: %v", i, err)
+		}
+	}
+	outAfterEvict, err := svc.QuerySessionMemory(ctx, "sess-1", "task after eviction", "", "project:app", false)
+	if err != nil {
+		t.Fatalf("QuerySessionMemory after cache eviction: %v", err)
+	}
+	outAfterReload, err := svc.QuerySessionMemory(ctx, "sess-1", "second turn after eviction", "", "project:app", false)
+	if err != nil {
+		t.Fatalf("QuerySessionMemory second turn after eviction: %v", err)
+	}
+	if !strings.Contains(outAfterReload, "No new memories") {
+		t.Fatalf("expected sess-1 to stay deduplicated after eviction reload (prev=%q), got:\n%s", outAfterEvict, outAfterReload)
+	}
+}
+
+func commitAndID(t *testing.T, ctx context.Context, svc *memory.Service, content, cat, scope string) int64 {
+	t.Helper()
+	if _, err := svc.CommitMemoryFull(ctx, content, cat, "", "", scope); err != nil {
+		t.Fatalf("CommitMemoryFull(%q, %s): %v", content, scope, err)
+	}
+	var id int64
+	if err := svc.DB().QueryRowContext(ctx, `SELECT id FROM memories WHERE scope = ? AND content = ? ORDER BY id DESC LIMIT 1`, scope, content).Scan(&id); err != nil || id <= 0 {
+		t.Fatalf("lookup committed memory ID (%q): id=%d err=%v", content, id, err)
+	}
+	return id
+}
+
+func TestServerModeSharedToPersonalRestrictionAndUndoIsolation(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "mem.db")
+	svc, err := memory.Open(dbPath, &stubEval{
+		dec: domain.MutationDecision{Action: "INSERT", Category: "architecture", IsPermanent: 0.95, Confidence: 0.95},
+	})
+	if err != nil {
+		t.Fatalf("memory.Open: %v", err)
+	}
+	defer svc.Close()
+
+	ctxAdmin := domain.WithAuthPrincipal(context.Background(), domain.AuthPrincipal{
+		Account:       "admin",
+		Role:          domain.RoleAdmin,
+		ServerMode:    true,
+		Authenticated: true,
+	})
+	ctxAlice := domain.WithAuthPrincipal(context.Background(), domain.AuthPrincipal{
+		Account:       "alice",
+		Role:          domain.RoleMember,
+		ServerMode:    true,
+		Authenticated: true,
+	})
+	ctxBob := domain.WithAuthPrincipal(context.Background(), domain.AuthPrincipal{
+		Account:       "bob",
+		Role:          domain.RoleMember,
+		ServerMode:    true,
+		Authenticated: true,
+	})
+	ctxSolo := context.Background()
+
+	p1 := commitAndID(t, ctxAlice, svc, "Shared project rule #1", "architecture", "project:teamapp")
+	p2 := commitAndID(t, ctxAlice, svc, "Shared project rule #2", "architecture", "project:teamapp")
+	aliceGlobal := commitAndID(t, ctxAlice, svc, "Alice cross-project dev rule #1", "architecture", "global")
+	adminGlobal := commitAndID(t, ctxAdmin, svc, "Admin cross-project dev rule #1", "architecture", "global")
+	alicePers := commitAndID(t, ctxAlice, svc, "Alice personal draft note", "preference", "personal")
+
+	for name, tc := range map[string]struct {
+		ctx   context.Context
+		id    int64
+		scope string
+	}{
+		"member_project_to_personal": {ctx: ctxAlice, id: p1, scope: "personal"},
+		"member_project_to_global":   {ctx: ctxAlice, id: p1, scope: "global"},
+		"admin_project_to_personal":  {ctx: ctxAdmin, id: p1, scope: "personal"},
+		"admin_project_to_global":    {ctx: ctxAdmin, id: p1, scope: "global"},
+	} {
+		if err := svc.UpdateMemoryFull(tc.ctx, tc.id, tc.scope, "", nil, "", nil); err == nil {
+			t.Fatalf("%s: expected shared->%s move rejected in ServerMode", name, tc.scope)
+		}
+	}
+
+	if err := svc.UpdateMemoryFull(ctxAlice, alicePers, "global", "", nil, "", nil); err != nil {
+		t.Fatalf("expected Alice own personal -> global move allowed: %v", err)
+	}
+	if err := svc.UpdateMemoryFull(ctxAlice, alicePers, "project:teamapp", "", nil, "", nil); err != nil {
+		t.Fatalf("expected Alice own global -> project move allowed: %v", err)
+	}
+	if err := svc.UpdateMemoryFull(ctxBob, aliceGlobal, "project:teamapp", "", nil, "", nil); err == nil {
+		t.Fatalf("expected Bob mutating Alice global memory to fail in ServerMode")
+	}
+	if err := svc.UpdateMemoryFull(ctxAdmin, aliceGlobal, "project:teamapp", "", nil, "", nil); err == nil {
+		t.Fatalf("expected Admin mutating Alice global memory to fail in ServerMode")
+	}
+	if pageBob, err := svc.QueryRecordsPage(ctxBob, domain.RecordQuery{Scope: "global", State: "all"}); err != nil || len(pageBob.Records) != 0 {
+		t.Fatalf("expected Bob to see 0 other-user global records, got %+v (err=%v)", pageBob.Records, err)
+	}
+	if pageAdmin, err := svc.QueryRecordsPage(ctxAdmin, domain.RecordQuery{Scope: "global", State: "all"}); err != nil || len(pageAdmin.Records) != 1 || pageAdmin.Records[0].ID != adminGlobal {
+		t.Fatalf("expected Admin to see only Admin's global record #%d, got %+v (err=%v)", adminGlobal, pageAdmin.Records, err)
+	}
+
+	if _, err := svc.ConsolidateMemories(ctxAlice, "personal", "architecture", []int64{p1, p2}, "Cannot privatize team rules", true); err == nil {
+		t.Fatalf("expected ConsolidateMemories moving project rules to personal rejected")
+	}
+	if _, err := svc.ConsolidateMemories(ctxAlice, "global", "architecture", []int64{p1, p2}, "Cannot privatize team rules", true); err == nil {
+		t.Fatalf("expected ConsolidateMemories moving project rules to global rejected")
+	}
+	if _, err := svc.ConsolidateMemories(ctxAlice, "project:teamapp", "architecture", []int64{p1, adminGlobal}, "Cannot include admin personal global", true); err == nil {
+		t.Fatalf("expected ConsolidateMemories containing another account global child rejected")
+	}
+
+	soloID := commitAndID(t, ctxSolo, svc, "Solo move test rule", "architecture", "project:solo")
+	if err := svc.UpdateMemoryFull(ctxSolo, soloID, "personal", "", nil, "", nil); err != nil {
+		t.Fatalf("expected solo mode shared -> personal move still permitted: %v", err)
+	}
+
+	aliceChild := commitAndID(t, ctxAlice, svc, "Alice secret child note", "preference", "personal")
+	parentProj := commitAndID(t, ctxAdmin, svc, "Merged parent project rule", "architecture", "project:teamapp")
+	if _, err := svc.DB().Exec(`UPDATE memories SET active = 0, superseded_by = ? WHERE id IN (?, ?)`, parentProj, aliceChild, adminGlobal); err != nil {
+		t.Fatalf("seed superseded children: %v", err)
+	}
+
+	if _, err := svc.UndoMemory(ctxBob, parentProj); err == nil {
+		t.Fatalf("expected Bob UndoMemory on parent superseding Alice personal / Admin global child to fail")
+	}
+	recs, err := svc.GetRecordsByIDs(ctxAdmin, []int64{parentProj, adminGlobal})
+	if err != nil || len(recs) != 2 {
+		t.Fatalf("GetRecordsByIDs: %v", err)
+	}
+	for _, r := range recs {
+		if r.ID == parentProj && !r.Active {
+			t.Fatalf("expected parentProj to stay active after rejected UndoMemory")
+		}
+		if r.ID == adminGlobal && r.Active {
+			t.Fatalf("expected adminGlobal to remain inactive after rejected UndoMemory")
+		}
+	}
+	aliceRecs, err := svc.GetRecordsByIDs(ctxAlice, []int64{aliceChild})
+	if err != nil || len(aliceRecs) != 1 || aliceRecs[0].Active {
+		t.Fatalf("expected aliceChild to remain inactive after rejected Bob UndoMemory, got %+v (err=%v)", aliceRecs, err)
 	}
 }

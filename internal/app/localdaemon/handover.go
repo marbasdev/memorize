@@ -23,7 +23,6 @@ func isDevHotReloadEnabled() bool {
 	return strings.TrimSpace(os.Getenv("MEMORIZE_DEV_HOTRELOAD")) == "1"
 }
 
-// WatchedBinaryCandidates returns executable binary paths checked for hot-reload and daemon spawn.
 func WatchedBinaryCandidates() []string {
 	seen := make(map[string]bool)
 	var out []string
@@ -66,7 +65,6 @@ func WatchedBinaryCandidates() []string {
 			add(filepath.Join(wd, "bin", binName))
 		}
 		if _, callerFile, _, ok := runtime.Caller(0); ok && filepath.IsAbs(callerFile) {
-			// internal/app/localdaemon/handover.go -> repo root is 3 levels up
 			repoRoot := filepath.Clean(filepath.Join(filepath.Dir(callerFile), "..", "..", ".."))
 			add(filepath.Join(repoRoot, "bin", binName))
 		}
@@ -84,7 +82,6 @@ func isExecutableBinary(path string, info os.FileInfo) bool {
 	return (info.Mode() & 0o111) != 0
 }
 
-// NewestWatchedBinary returns the newest executable candidate strictly newer than afterMtime.
 func NewestWatchedBinary(afterMtime int64) (string, int64) {
 	var bestPath string
 	bestTime := afterMtime
@@ -106,7 +103,6 @@ func currentBinaryModTime() int64 {
 	return t
 }
 
-// ListenWithHandover binds addr, asking an existing listener on the same port to yield when appropriate.
 func ListenWithHandover(addr string, onlyIfNewer bool) (net.Listener, error) {
 	a := strings.TrimSpace(addr)
 	if a == "" {
@@ -119,7 +115,6 @@ func ListenWithHandover(addr string, onlyIfNewer bool) (net.Listener, error) {
 	if onlyIfNewer {
 		myMtime := currentBinaryModTime()
 		remoteMtime, ok := thttp.RemoteDashboardBinModTime(a)
-		// If remote responds and is already at least as new as us, do not take over.
 		if ok && remoteMtime >= myMtime && myMtime > 0 {
 			return nil, err
 		}
@@ -136,7 +131,6 @@ func ListenWithHandover(addr string, onlyIfNewer bool) (net.Listener, error) {
 	return nil, err
 }
 
-// StartBackgroundServer starts the dashboard HTTP server in a non-blocking goroutine alongside inline MCP stdio.
 func StartBackgroundServer(addr string, deps dashboard.Deps, dbPath string) (string, func() error, error) {
 	a := strings.TrimSpace(addr)
 	if a == "" {
@@ -177,7 +171,6 @@ func StartBackgroundServer(addr string, deps dashboard.Deps, dbPath string) (str
 		_ = srv.Serve(ln)
 	}()
 
-	// If bound to a fixed port and a newer binary appears, gracefully yield and spawn the updated binary.
 	if !strings.HasSuffix(a, ":0") && runtime.GOOS != "windows" {
 		go func() {
 			ticker := time.NewTicker(1 * time.Second)

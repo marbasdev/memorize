@@ -13,7 +13,6 @@ import (
 	"memorize/internal/infra/config"
 )
 
-// Router manages per-task evaluator selection, local GGUF wake callbacks, engine readiness, and telemetry.
 type Router struct {
 	mu          sync.RWMutex
 	db          *sql.DB
@@ -21,11 +20,9 @@ type Router struct {
 	mgr         *localmodel.Manager
 	defaultEval domain.Evaluator
 	taskRes     func(map[string]string, domain.EvalTask) (domain.Evaluator, bool)
-	customRes   func(map[string]string) domain.Evaluator
 	readinessFn func(context.Context, map[string]string) (bool, string)
 }
 
-// New constructs an inference Router backed by config table settings in db.
 func New(db *sql.DB, dbPath string, fallbackEval domain.Evaluator, mgr *localmodel.Manager) *Router {
 	r := &Router{
 		db:          db,
@@ -40,7 +37,6 @@ func New(db *sql.DB, dbPath string, fallbackEval domain.Evaluator, mgr *localmod
 	return r
 }
 
-// AttachLocalManager binds the local GGUF runtime manager, wiring dynamic port lookup and auto-wake.
 func (r *Router) AttachLocalManager(mgr *localmodel.Manager) {
 	if r == nil {
 		return
@@ -80,35 +76,12 @@ func (r *Router) AttachLocalManager(mgr *localmodel.Manager) {
 	r.mu.Unlock()
 }
 
-// SetTaskResolver overrides the task-aware evaluator resolver (useful for custom test routing).
-func (r *Router) SetTaskResolver(fn func(map[string]string, domain.EvalTask) (domain.Evaluator, bool)) {
-	r.mu.Lock()
-	r.taskRes = fn
-	r.mu.Unlock()
-}
-
-// SetDynamicResolver overrides the legacy single-evaluator resolver.
-func (r *Router) SetDynamicResolver(fn func(map[string]string) domain.Evaluator) {
-	r.mu.Lock()
-	r.customRes = fn
-	r.mu.Unlock()
-}
-
-// SetReadinessChecker overrides engine readiness probing.
-func (r *Router) SetReadinessChecker(fn func(context.Context, map[string]string) (bool, string)) {
-	r.mu.Lock()
-	r.readinessFn = fn
-	r.mu.Unlock()
-}
-
-// EvalForTask resolves the appropriate Evaluator for task from persisted config or the fallback Evaluator.
 func (r *Router) EvalForTask(ctx context.Context, task domain.EvalTask) domain.Evaluator {
 	if r == nil {
 		return nil
 	}
 	r.mu.RLock()
 	taskRes := r.taskRes
-	customRes := r.customRes
 	defaultEval := r.defaultEval
 	db := r.db
 	r.mu.RUnlock()
@@ -119,25 +92,13 @@ func (r *Router) EvalForTask(ctx context.Context, task domain.EvalTask) domain.E
 			return ev
 		}
 	}
-	if customRes != nil && cfg[config.CfgActiveProvider] != "" {
-		if ev := customRes(cfg); ev != nil {
-			return ev
-		}
-	}
 	return defaultEval
 }
 
-// EvalFor resolves the default evaluator without task overrides.
-func (r *Router) EvalFor(ctx context.Context) domain.Evaluator {
-	return r.EvalForTask(ctx, "")
-}
-
-// ProviderName returns the default resolved engine identifier or "none".
 func (r *Router) ProviderName(ctx context.Context) string {
 	return r.ProviderNameForTask(ctx, "")
 }
 
-// ProviderNameForTask returns the effective resolved engine identifier for task.
 func (r *Router) ProviderNameForTask(ctx context.Context, task domain.EvalTask) string {
 	ev := r.EvalForTask(ctx, task)
 	if ev == nil {
@@ -146,7 +107,6 @@ func (r *Router) ProviderNameForTask(ctx context.Context, task domain.EvalTask) 
 	return ev.Name()
 }
 
-// CheckReadiness reports whether the active or default inference engine is configured and reachable.
 func (r *Router) CheckReadiness(ctx context.Context) (bool, string) {
 	if r == nil {
 		return false, "no inference engine configured"
@@ -186,19 +146,6 @@ func safeGenerativeModel(prov, rawMod string, cfg map[string]string) string {
 	return mod
 }
 
-// NewTaskResolver builds a cached task-aware Evaluator resolver backed by SQLite config.
-func NewTaskResolver(autoWake ...func(ctx context.Context, model string) error) func(map[string]string, domain.EvalTask) (domain.Evaluator, bool) {
-	var wakeFn func(context.Context, string) (string, error)
-	if len(autoWake) > 0 && autoWake[0] != nil {
-		raw := autoWake[0]
-		wakeFn = func(ctx context.Context, model string) (string, error) {
-			return "", raw(ctx, model)
-		}
-	}
-	return NewTaskResolverWithEndpoint(wakeFn)
-}
-
-// NewTaskResolverWithEndpoint builds a cached task-aware Evaluator resolver propagating dynamic GGUF endpoints.
 func NewTaskResolverWithEndpoint(wakeFn func(ctx context.Context, model string) (string, error)) func(map[string]string, domain.EvalTask) (domain.Evaluator, bool) {
 	var mu sync.Mutex
 	cache := make(map[string]domain.Evaluator)
@@ -332,16 +279,6 @@ func NewTaskResolverWithEndpoint(wakeFn func(ctx context.Context, model string) 
 	}
 }
 
-// NewDynamicResolver builds a cached hot-swappable Evaluator resolver backed by SQLite config.
-func NewDynamicResolver(autoWake ...func(ctx context.Context, model string) error) func(map[string]string) domain.Evaluator {
-	taskRes := NewTaskResolver(autoWake...)
-	return func(cfg map[string]string) domain.Evaluator {
-		ev, _ := taskRes(cfg, "")
-		return ev
-	}
-}
-
-// CheckConfiguredEngineReadiness probes whether the effective inference provider is ready to serve calls.
 func CheckConfiguredEngineReadiness(ctx context.Context, cfg map[string]string, mgr *localmodel.Manager) (bool, string) {
 	eff := domain.NormalizeProviderID(cfg[config.CfgActiveProvider])
 	if eff == "" {
@@ -375,7 +312,6 @@ func CheckConfiguredEngineReadiness(ctx context.Context, cfg map[string]string, 
 	})
 }
 
-// SelectStartupEvaluator instantiates the initial default Evaluator from env flags and platform defaults.
 func SelectStartupEvaluator(mgr *localmodel.Manager) domain.Evaluator {
 	rawProv := strings.ToLower(strings.TrimSpace(os.Getenv("MEMORY_PROVIDER")))
 	if rawProv == "" {

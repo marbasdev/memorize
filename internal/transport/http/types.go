@@ -6,7 +6,6 @@ import (
 	"memorize/internal/domain"
 )
 
-// DaemonStatus describes the runtime state returned by /api/daemon/status.
 type DaemonStatus struct {
 	Running              bool   `json:"running"`
 	ServerMode           bool   `json:"server_mode,omitempty"`
@@ -32,7 +31,6 @@ type DaemonStatus struct {
 	GGUFRunning          bool   `json:"gguf_running,omitempty"`
 }
 
-// DaemonPortState exposes live daemon port status to the dashboard console.
 type DaemonPortState struct {
 	PID            int    `json:"pid"`
 	ListenAddr     string `json:"listen_addr"`
@@ -42,7 +40,6 @@ type DaemonPortState struct {
 	Fallback       bool   `json:"daemon_fallback"`
 }
 
-// DaemonPortApplyResult summarizes the outcome of a live port reconfiguration request.
 type DaemonPortApplyResult struct {
 	ListenAddr       string `json:"listen_addr"`
 	ActiveDaemonPort int    `json:"active_daemon_port"`
@@ -55,14 +52,12 @@ type DaemonPortApplyResult struct {
 	GGUFRunning      bool   `json:"gguf_running"`
 }
 
-// PortApplyRequest carries a port change or reset request for /api/daemon/port.
 type PortApplyRequest struct {
 	DaemonPort int  `json:"daemon_port"`
 	GGUFPort   int  `json:"gguf_port"`
 	Reset      bool `json:"reset,omitempty"`
 }
 
-// PortApplyResponse returns configured and active ports after applying a port update.
 type PortApplyResponse struct {
 	OK               bool   `json:"ok"`
 	ConfiguredDaemon int    `json:"configured_daemon_port"`
@@ -79,7 +74,6 @@ type PortApplyResponse struct {
 	Error            string `json:"error,omitempty"`
 }
 
-// DashboardHooks injects optional daemon lifecycle callbacks into dashboard HTTP handlers.
 type DashboardHooks struct {
 	YieldFn           func() error
 	BinMtimeFn        func() int64
@@ -87,7 +81,6 @@ type DashboardHooks struct {
 	ApplyDaemonPortFn func(ctx context.Context, daemonPort, ggufPort int) (DaemonPortApplyResult, error)
 }
 
-// DaemonHookRequest carries one hook execution payload from CLI bridge to daemon /api/daemon/hook.
 type DaemonHookRequest struct {
 	Mode      string                    `json:"mode"`
 	Stdin     string                    `json:"stdin"`

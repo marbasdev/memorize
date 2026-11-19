@@ -1,6 +1,7 @@
-package dashboard_test
+package dashboard
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,9 +11,9 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"memorize/internal/domain"
-	"memorize/internal/transport/dashboard"
 	thttp "memorize/internal/transport/http"
 )
 
@@ -23,7 +24,6 @@ func TestFourTabProgressDistributionAndScopeStatsUI(t *testing.T) {
 	prog := deps.Progress
 	gr := deps.Guardrail
 
-	// Seed 6 architecture rules in project:one (including 1 unclassified sub_category) + 2 rules in project:two
 	for i := 1; i <= 6; i++ {
 		sub := "ui"
 		if i == 6 {
@@ -39,10 +39,9 @@ func TestFourTabProgressDistributionAndScopeStatsUI(t *testing.T) {
 		}
 	}
 
-	ts := httptest.NewServer(dashboard.NewHandler(deps))
+	ts := httptest.NewServer(NewHandler(deps))
 	defer ts.Close()
 
-	// 1. 4-tab SSR layout includes Progress tab + fixed-height 2D squarified treemap + persistent collapse state
 	rootResp, err := http.Get(ts.URL + "/?lang=ko")
 	if err != nil || rootResp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /?lang=ko failed: %v", err)
@@ -69,7 +68,6 @@ func TestFourTabProgressDistributionAndScopeStatsUI(t *testing.T) {
 		}
 	}
 
-	// 2. Scope-linked KPIs & distribution via /ui/memories?scope=project:one (HX-Request OOB swap) and /api/state?scope=project:one
 	memReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/ui/memories?scope=project:one&state=active", nil)
 	memReq.Header.Set("HX-Request", "true")
 	memResp, err := http.DefaultClient.Do(memReq)
@@ -86,7 +84,6 @@ func TestFourTabProgressDistributionAndScopeStatsUI(t *testing.T) {
 		t.Fatalf("expected /ui/memories OOB response NOT to overwrite Calibration tab #confHist")
 	}
 
-	// 2b. Calibration tab confidence histogram has its own independent scope selector (#calHistScope)
 	histOneResp, err := http.Get(ts.URL + "/ui/calibrate/histogram?cal_scope=project:one&lang=ko")
 	if err != nil || histOneResp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /ui/calibrate/histogram?cal_scope=project:one failed: %v", err)
@@ -121,7 +118,6 @@ func TestFourTabProgressDistributionAndScopeStatsUI(t *testing.T) {
 		t.Fatalf("expected scope=project:two stats/distribution active=2, got stats=%+v dist=%+v", statsTwo, distTwo)
 	}
 
-	// 3. Category-scoped Consolidate modal from distribution [Merge...] button
 	catMergeResp, err := http.Get(ts.URL + "/ui/modal/consolidate?merge_scope=project:one&merge_category=architecture")
 	if err != nil || catMergeResp.StatusCode != http.StatusOK {
 		t.Fatalf("GET category-scoped consolidate modal failed: %v", err)
@@ -132,7 +128,6 @@ func TestFourTabProgressDistributionAndScopeStatsUI(t *testing.T) {
 		t.Fatalf("expected hidden merge_category=architecture in consolidate modal")
 	}
 
-	// 3b. Unified AI Recommend (suggest -> apply-plan) shows both merge & re-categorization in Korean
 	uniSugReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/ui/consolidate/suggest?lang=ko", strings.NewReader("merge_scope=project:one"))
 	uniSugReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	uniSugReq.Header.Set("HX-Request", "true")
@@ -168,7 +163,6 @@ func TestFourTabProgressDistributionAndScopeStatsUI(t *testing.T) {
 		t.Fatalf("expected #6 sub_category=tilemap with untouched content, got %+v", rebCheck)
 	}
 
-	// 4. Progress HTMX routes: Read-Only 3-lane board + pagination + Sync button (no manual add/edit/status/delete routes)
 	csrfReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/ui/progress/sync", strings.NewReader("scope=project:one"))
 	csrfReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	csrfResp, err := http.DefaultClient.Do(csrfReq)
@@ -177,7 +171,6 @@ func TestFourTabProgressDistributionAndScopeStatsUI(t *testing.T) {
 	}
 	_ = csrfResp.Body.Close()
 
-	// Seed agent-driven activity entries (12 earlier milestones + 2 latest feature tracks) to verify read-only activity cards & pagination
 	for i := 1; i <= 12; i++ {
 		details := ""
 		if i == 12 {
@@ -254,7 +247,6 @@ func TestFourTabProgressDistributionAndScopeStatsUI(t *testing.T) {
 		}
 	}
 
-	// Verify page 2 of history pagination
 	page2Req, _ := http.NewRequest(http.MethodGet, ts.URL+"/ui/progress?scope=project:one&lang=ko&page=2&page_size=10", nil)
 	page2Req.Header.Set("HX-Request", "true")
 	page2Resp, err := http.DefaultClient.Do(page2Req)
@@ -267,7 +259,6 @@ func TestFourTabProgressDistributionAndScopeStatsUI(t *testing.T) {
 		t.Fatalf("expected page 2 to render older history items while preserving top project board")
 	}
 
-	// Verify track filter on /ui/progress isolates the requested track
 	trkReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/ui/progress?scope=project:one&track="+url.QueryEscape("4탭 진행현황 타임라인 개편"), nil)
 	trkReq.Header.Set("HX-Request", "true")
 	trkResp, err := http.DefaultClient.Do(trkReq)
@@ -288,7 +279,6 @@ func TestFourTabProgressDistributionAndScopeStatsUI(t *testing.T) {
 		t.Fatalf("expected paginated progress overview with RecentHistory=5, got %+v", progOv)
 	}
 
-	// Verify Korean toast in HX-Trigger header uses pure 7-bit ASCII \uXXXX escapes (preventing browser Latin-1 mojibake)
 	syncReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/ui/progress/sync?lang=ko", strings.NewReader("scope=project:one"))
 	syncReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	syncReq.Header.Set("HX-Request", "true")
@@ -312,7 +302,6 @@ func TestFourTabProgressDistributionAndScopeStatsUI(t *testing.T) {
 		t.Fatalf("expected decoded Korean toast starting with '동기화 완료', got %q", toastStr)
 	}
 
-	// 5. Verify Guardrail & Plan Verification Logs UI + OOB simulator update + server-side pagination
 	for i := 1; i <= 11; i++ {
 		_, _ = gr.RecordGuardrailLog(ctx, domain.GuardrailLogInput{
 			Scope:       "project:one",
@@ -339,7 +328,6 @@ func TestFourTabProgressDistributionAndScopeStatsUI(t *testing.T) {
 		t.Fatalf("expected POST /ui/verify to include OOB #guardrailLogsSection refresh")
 	}
 
-	// Guardrails tab (/ui/guardrails) and Calibration tab (/ui/calibrate) must render their separated responsibilities cleanly
 	grTabResp, err := http.Get(ts.URL + "/ui/guardrails?lang=ko")
 	if err != nil || grTabResp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /ui/guardrails failed: %v", err)
@@ -393,7 +381,6 @@ func TestFourTabProgressDistributionAndScopeStatsUI(t *testing.T) {
 		t.Fatalf("unexpected guardrail logs pagination payload: %+v", grPage)
 	}
 
-	// 6. Verify default Forever (0d) retention, header-exposed Auto-TTL select, and explicit 2-step Confirm Cleanup controls
 	defRetResp, err := http.Get(ts.URL + "/api/retention")
 	if err != nil || defRetResp.StatusCode != http.StatusOK {
 		t.Fatalf("GET default /api/retention failed: %v", err)
@@ -407,7 +394,6 @@ func TestFourTabProgressDistributionAndScopeStatsUI(t *testing.T) {
 		t.Fatalf("expected default ProgressDays=0 GuardrailDays=0 (Forever), got %+v", defRetPol)
 	}
 
-	// Single-line exposed header controls (Auto-TTL select + Immediate Cleanup period select + explicit Confirm button, no collapsible drawer):
 	for _, needle := range []string{
 		`id="progRetentionDays"`,
 		`<option value="0" selected>영구 보관</option>`,
@@ -436,7 +422,6 @@ func TestFourTabProgressDistributionAndScopeStatsUI(t *testing.T) {
 		}
 	}
 
-	// Set retention via SSR endpoint
 	retReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/ui/progress/retention?lang=ko", strings.NewReader("scope=project:one&retention_days=30"))
 	retReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	retReq.Header.Set("HX-Request", "true")
@@ -468,7 +453,6 @@ func TestFourTabProgressDistributionAndScopeStatsUI(t *testing.T) {
 		t.Fatalf("expected ProgressDays=30 GuardrailDays=7, got %+v", retPol)
 	}
 
-	// Clean guardrail PASS logs only (older_than_days=0 -> removes the 1 PASS log while keeping all 11 blocked violations)
 	grCleanPassReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/ui/guardrail-logs/cleanup?lang=ko", strings.NewReader("gr_scope=project:one&older_than_days=0"))
 	grCleanPassReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	grCleanPassReq.Header.Set("HX-Request", "true")
@@ -483,7 +467,6 @@ func TestFourTabProgressDistributionAndScopeStatsUI(t *testing.T) {
 		t.Fatalf("expected PASS-only cleanup to preserve all 11 blocked logs, got %+v", grAfterPassPage)
 	}
 
-	// Clean guardrail logs INCLUDING blocked violations (include_blocked=1, older_than_days=0)
 	grCleanAllReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/ui/guardrail-logs/cleanup?lang=ko", strings.NewReader("gr_scope=project:one&older_than_days=0&include_blocked=1"))
 	grCleanAllReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	grCleanAllReq.Header.Set("HX-Request", "true")
@@ -498,7 +481,6 @@ func TestFourTabProgressDistributionAndScopeStatsUI(t *testing.T) {
 		t.Fatalf("expected 0 guardrail logs after include_blocked=1 cleanup, got %+v", grAfterAllPage)
 	}
 
-	// Clean all progress history (older_than_days=0): removes all recorded entries in scope while leaving CSRF protection intact!
 	progCleanReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/ui/progress/cleanup?lang=ko", strings.NewReader("scope=project:one&older_than_days=0"))
 	progCleanReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	progCleanReq.Header.Set("HX-Request", "true")
@@ -514,5 +496,282 @@ func TestFourTabProgressDistributionAndScopeStatsUI(t *testing.T) {
 	ovAfterClean, err := prog.GetProgressOverviewWithQuery(ctx, domain.ProgressQuery{Scope: "project:one", Page: 1, PageSize: 10})
 	if err != nil || ovAfterClean.TotalCount != 0 {
 		t.Fatalf("expected 0 remaining progress rows after cleanup, got ov=%+v err=%v", ovAfterClean, err)
+	}
+}
+
+func TestUnifiedProgressBoardAndLiveSSE(t *testing.T) {
+	ctx := context.Background()
+	deps := newTestDeps(t, ":memory:", noopEval{}, "", thttp.DashboardHooks{})
+	prog := deps.Progress
+
+	ts := httptest.NewServer(NewHandler(deps))
+	defer ts.Close()
+
+	evilReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/events", nil)
+	evilReq.Header.Set("Origin", "https://evil.example.com")
+	evilResp, err := http.DefaultClient.Do(evilReq)
+	if err != nil || evilResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected cross-origin /api/events to return 403, got %v (%v)", evilResp, err)
+	}
+	_ = evilResp.Body.Close()
+
+	sseCtx, sseCancel := context.WithTimeout(ctx, 4*time.Second)
+	defer sseCancel()
+	sseReq, _ := http.NewRequestWithContext(sseCtx, http.MethodGet, ts.URL+"/api/events", nil)
+	sseResp, err := http.DefaultClient.Do(sseReq)
+	if err != nil || sseResp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/events failed: %v (%v)", sseResp, err)
+	}
+	defer sseResp.Body.Close()
+
+	reader := bufio.NewReader(sseResp.Body)
+	firstLine, err := reader.ReadString('\n')
+	if err != nil || !strings.HasPrefix(firstLine, ": connected") {
+		t.Fatalf("expected initial ': connected' SSE comment, got %q (%v)", firstLine, err)
+	}
+	gotHello := false
+	for i := 0; i < 5; i++ {
+		hline, herr := reader.ReadString('\n')
+		if herr != nil {
+			t.Fatalf("read SSE hello line: %v", herr)
+		}
+		if strings.HasPrefix(hline, "event: hello") {
+			hdata, _ := reader.ReadString('\n')
+			if strings.Contains(hdata, `"boot":`) {
+				gotHello = true
+				break
+			}
+		}
+	}
+	if !gotHello {
+		t.Fatalf("expected initial SSE 'event: hello' with boot ID")
+	}
+
+	ctxAlpha := domain.WithSessionID(ctx, "sess-alpha-11112222")
+	if _, err := prog.RecordProgress(ctxAlpha, domain.ProgressInput{
+		Scope:    "project:alpha",
+		Track:    "인증 게이트웨이",
+		Summary:  "ALPHA_WORK_SUMMARY JWT 토큰 회전 구현 완료",
+		NextStep: "ALPHA_NEXT_STEP 리프레시 토큰 검증",
+		Source:   "agent",
+	}); err != nil {
+		t.Fatalf("RecordProgress alpha: %v", err)
+	}
+
+	gotChangeEvent := false
+	for i := 0; i < 6; i++ {
+		line, rerr := reader.ReadString('\n')
+		if rerr != nil {
+			t.Fatalf("read SSE event line: %v", rerr)
+		}
+		if strings.HasPrefix(line, "event: change") {
+			dataLine, _ := reader.ReadString('\n')
+			if strings.HasPrefix(dataLine, "data: {\"seq\":") && strings.Contains(dataLine, `"domain":"progress"`) {
+				gotChangeEvent = true
+				break
+			}
+		}
+	}
+	if !gotChangeEvent {
+		t.Fatalf("expected real-time SSE 'event: change' notification after RecordProgress")
+	}
+	sseCancel()
+
+	ctxBeta := domain.WithSessionID(ctx, "sess-beta-33334444")
+	if _, err := prog.RecordProgress(ctxBeta, domain.ProgressInput{
+		Scope:    "project:beta",
+		Track:    "결제 정산 배치",
+		Summary:  "BETA_WORK_SUMMARY 정산 파이프라인 구축 완료",
+		NextStep: "BETA_NEXT_STEP 실패 재시도 큐",
+		Source:   "agent",
+	}); err != nil {
+		t.Fatalf("RecordProgress beta: %v", err)
+	}
+	if _, err := prog.RecordProgress(ctxBeta, domain.ProgressInput{
+		Scope:     "project:beta",
+		Track:     "architecture / settlement",
+		Summary:   "BETA_MEM_SUMMARY 정산 멱등성 키 불변 규칙 반영",
+		MemoryIDs: []int64{7},
+		Source:    "memory",
+	}); err != nil {
+		t.Fatalf("RecordProgress beta memory: %v", err)
+	}
+	if _, err := prog.RecordProgress(ctx, domain.ProgressInput{
+		Scope:     "project:alpha",
+		Track:     "architecture / auth",
+		Summary:   "ALPHA_GIT_SUMMARY feat(auth): add JWKS cache",
+		CommitSHA: "a1b2c3d4",
+		Source:    "git_sync",
+	}); err != nil {
+		t.Fatalf("RecordProgress alpha git: %v", err)
+	}
+
+	fetchProg := func(query string) string {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/ui/progress?"+query, nil)
+		req.Header.Set("HX-Request", "true")
+		resp, derr := http.DefaultClient.Do(req)
+		if derr != nil || resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET /ui/progress?%s failed: %v (%v)", query, resp, derr)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return string(b)
+	}
+
+	allHTML := fetchProg("lang=ko")
+	for _, needle := range []string{
+		"전체 프로젝트",
+		"alpha",
+		"beta",
+		"구현 · 작업",
+		"기억 · 규칙",
+		"Git 커밋",
+		"ALPHA_WORK_SUMMARY",
+		"BETA_WORK_SUMMARY",
+		"BETA_MEM_SUMMARY",
+		"ALPHA_GIT_SUMMARY",
+	} {
+		if !strings.Contains(allHTML, needle) {
+			t.Fatalf("expected All-Projects unified progress HTML to contain %q", needle)
+		}
+	}
+
+	betaScopeHTML := fetchProg("lang=ko&scope=project:beta")
+	if !strings.Contains(betaScopeHTML, "BETA_WORK_SUMMARY") || !strings.Contains(betaScopeHTML, "BETA_MEM_SUMMARY") {
+		t.Fatalf("expected beta scope filter to include beta work & memory entries")
+	}
+	if strings.Contains(betaScopeHTML, "ALPHA_WORK_SUMMARY") || strings.Contains(betaScopeHTML, "ALPHA_NEXT_STEP") || strings.Contains(betaScopeHTML, "ALPHA_GIT_SUMMARY") {
+		t.Fatalf("expected beta scope filter to exclude alpha from BOTH top board and bottom timeline")
+	}
+
+	gitOnlyHTML := fetchProg("lang=ko&kind=git")
+	if !strings.Contains(gitOnlyHTML, "ALPHA_GIT_SUMMARY") {
+		t.Fatalf("expected kind=git filter to include git commit milestone")
+	}
+	if strings.Contains(gitOnlyHTML, "ALPHA_WORK_SUMMARY") || strings.Contains(gitOnlyHTML, "BETA_WORK_SUMMARY") || strings.Contains(gitOnlyHTML, "BETA_MEM_SUMMARY") {
+		t.Fatalf("expected kind=git filter to exclude work/memory items from top board and timeline")
+	}
+
+	trackOnlyHTML := fetchProg("lang=ko&track=" + url.QueryEscape("결제 정산 배치"))
+	if !strings.Contains(trackOnlyHTML, "BETA_WORK_SUMMARY") || strings.Contains(trackOnlyHTML, "ALPHA_WORK_SUMMARY") {
+		t.Fatalf("expected track filter to synchronize top activity board and timeline with selected track only")
+	}
+}
+
+func TestDashboardProgressProjectCentricAndDoneWindow(t *testing.T) {
+	deps := newTestDeps(t, ":memory:", noopEval{}, "", thttp.DashboardHooks{})
+	prog := deps.Progress
+
+	ctx := context.Background()
+	scope := "project:liveui"
+	if _, err := prog.RecordProgress(ctx, domain.ProgressInput{
+		Scope:    scope,
+		Track:    "UI Activity Refactor",
+		Category: "backend",
+		Summary:  "Refactored progress to project activity feed",
+		NextStep: "Verify SSR rendering",
+		Source:   "agent",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prog.RecordProgress(ctx, domain.ProgressInput{
+		Scope:    scope,
+		Track:    "Window Selector",
+		Category: "backend",
+		Summary:  "Finished live window selector backend",
+		Source:   "agent",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	h := NewHandler(deps)
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/ui/progress?scope=" + url.QueryEscape(scope) + "&done_window=24h&lang=ko")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	html := string(bodyBytes)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK from /ui/progress, got %d", resp.StatusCode)
+	}
+	for _, want := range []string{
+		`id="progDoneWindow"`,
+		`id="projectProgressBoard"`,
+		`프로젝트별 활동 요약`,
+		`최근 활동 흐름`,
+		`구현 · 작업`,
+		`value="24h" selected`,
+		`최근 24시간`,
+		`최신 시각순`,
+		`방금 전`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("expected progress HTML to contain %q, got:\n%s", want, html)
+		}
+	}
+	for _, forbidden := range []string{
+		`지금 하는 중`, `이전 진행 흐름`,
+		`liveSessionsStrip`, `progSessionFilter`,
+		"/ui/progress/add", "/ui/progress/status", "/ui/progress/update", "/ui/progress/delete", "/ui/modal/progress-edit",
+	} {
+		if strings.Contains(html, forbidden) {
+			t.Fatalf("Progress contract violated: found forbidden string %q", forbidden)
+		}
+	}
+
+	enResp, err := http.Get(ts.URL + "/ui/progress?scope=" + url.QueryEscape(scope) + "&done_window=30d&lang=en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	enBytes, _ := io.ReadAll(enResp.Body)
+	_ = enResp.Body.Close()
+	enHTML := string(enBytes)
+	for _, want := range []string{`value="30d" selected`, `Last 30d`, `by latest time`, `Project Activity`, `Recent Activity Flow`, `Task · Work`} {
+		if !strings.Contains(enHTML, want) {
+			t.Fatalf("expected English /ui/progress HTML to contain %q", want)
+		}
+	}
+
+	jsResp, err := http.Get(ts.URL + "/assets/ui.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	jsBytes, _ := io.ReadAll(jsResp.Body)
+	_ = jsResp.Body.Close()
+	js := string(jsBytes)
+	for _, want := range []string{
+		"es.onerror",
+		"handleConnectivityResume", "visibilitychange", "progDoneWindow", "domainToTabs", "defaultSettleDelay",
+		"!document.hidden", "switchTab(next, true)",
+	} {
+		if !strings.Contains(js, want) {
+			t.Fatalf("expected ui.js to contain %q", want)
+		}
+	}
+	for _, removed := range []string{"morphTargetHTML", "startFallbackPoll", "tag === 'SELECT'", "refreshLiveSessions", "liveSessionsBadge"} {
+		if strings.Contains(js, removed) {
+			t.Fatalf("expected removed bloat %q not to appear in ui.js", removed)
+		}
+	}
+
+	cssResp, err := http.Get(ts.URL + "/assets/styles.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cssBytes, _ := io.ReadAll(cssResp.Body)
+	_ = cssResp.Body.Close()
+	css := string(cssBytes)
+	for _, want := range []string{"scrollbar-gutter: stable", ".prog-projects-grid", ".prog-project-card", ".prog-flow-item"} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("expected styles.css to include %q", want)
+		}
+	}
+	if strings.Contains(css, ".live-sessions-strip") {
+		t.Fatalf("expected styles.css not to include removed .live-sessions-strip")
 	}
 }

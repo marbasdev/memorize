@@ -63,8 +63,6 @@ func estimateMaxRuleBatchBytes(rules []domain.Fact, batchSize int) int {
 	return maxBytes
 }
 
-// resolveVerifyDiffBudget computes the per-call diff byte budget from the evaluator's verified
-// runtime context limit (when known) and the largest single rule batch, preventing -c overflow.
 func resolveVerifyDiffBudget(ctx context.Context, eval domain.Evaluator, rules []domain.Fact) int {
 	batchSize := domain.EvaluatorRuleBatchSize(eval)
 	if batchSize <= 0 {
@@ -80,14 +78,12 @@ func resolveVerifyDiffBudget(ctx context.Context, eval domain.Evaluator, rules [
 		return max(minDiffChunkBytes, adjusted)
 	}
 
-	// Reserve tokens for system instructions, JSON schema, output verdict, and safety buffer.
 	const reservedOverheadTokens = 1150
 	ruleTokens := (maxRuleBytes*2 + 4) / 5 // conservative ~2.5 bytes/token for mixed prose/rules
 	availTokens := tokLimit - reservedOverheadTokens - ruleTokens
 	if availTokens <= 0 {
 		return minDiffChunkBytes
 	}
-	// Code diffs tokenize densely (~2.2 bytes/token).
 	budget := (availTokens * 11) / 5
 	if budget < minDiffChunkBytes {
 		return minDiffChunkBytes
@@ -108,7 +104,6 @@ func splitOversizedFileSection(label, rawSection string, maxSectionBytes int) []
 		body = strings.TrimPrefix(body, headerPrefix)
 	}
 	lines := strings.Split(body, "\n")
-	// Reserve room for "File: <label> (part XX/YY)\n".
 	partCap := max(256, maxSectionBytes-len(label)-28)
 
 	var groups [][]string
@@ -401,8 +396,6 @@ func (s *Service) evaluateGuardrailPlanChunks(
 		return out
 	}
 
-	// Phase 2 (lazy override): only re-check flagged rules with Turn Context when Phase 1
-	// hits and sufficient hook deadline budget remains.
 	turnInp := s.activeOverrideTurnInput(ctx, ev, scA)
 	if turnInp != "" {
 		if dl, ok := ctx.Deadline(); !ok || time.Until(dl) >= 1200*time.Millisecond {

@@ -9,7 +9,6 @@ import (
 )
 
 const (
-	// RulePackRelPath is the repository-relative path of the shared declarative Team Rule Pack document.
 	RulePackRelPath = ".memorize/TEAM_RULES.md"
 
 	RuleOriginLocal = "local"
@@ -22,7 +21,6 @@ const (
 	RuleStateConflictPending = "conflict_pending"
 )
 
-// TeamRule represents one declarative team-agreed rule stored in .memorize/TEAM_RULES.md and cached in memory.
 type TeamRule struct {
 	RuleKey           string `json:"rule_key"`
 	Scope             string `json:"scope,omitempty"`
@@ -41,7 +39,6 @@ type TeamRule struct {
 	LocalOverrideNote string `json:"local_override_note,omitempty"`
 }
 
-// DisplayContent builds a compact evaluator-ready rule statement combining What, Why, and How.
 func (r TeamRule) DisplayContent() string {
 	var b strings.Builder
 	b.WriteString(strings.TrimSpace(r.Title))
@@ -60,7 +57,6 @@ func (r TeamRule) DisplayContent() string {
 	return b.String()
 }
 
-// ToFact projects a TeamRule into a read-only domain.Fact for evaluation and guardrail checks.
 func (r TeamRule) ToFact(virtualID int64) Fact {
 	return Fact{
 		ID:          virtualID,
@@ -74,7 +70,6 @@ func (r TeamRule) ToFact(virtualID int64) Fact {
 	}
 }
 
-// RulePlacementProposal holds an AI-summarized Team Rule entry plus internal surgical placement hints.
 type RulePlacementProposal struct {
 	RuleKey     string `json:"rule_key,omitempty"`
 	Category    string `json:"category"`
@@ -90,7 +85,6 @@ type RulePlacementProposal struct {
 	BaseHash    string `json:"base_hash,omitempty"`
 }
 
-// ToTeamRule converts a placement proposal into a normalized TeamRule bound to scope.
 func (p RulePlacementProposal) ToTeamRule(scope string) TeamRule {
 	sc := NormalizeScope(scope)
 	cat := NormalizeCategoryForScope(sc, p.Category)
@@ -115,7 +109,6 @@ func (p RulePlacementProposal) ToTeamRule(scope string) TeamRule {
 	}
 }
 
-// RuleOutlineEntry is an internal-key and title index item used for surgical insertion ordering.
 type RuleOutlineEntry struct {
 	RuleKey     string `json:"rule_key"`
 	Category    string `json:"category"`
@@ -124,7 +117,6 @@ type RuleOutlineEntry struct {
 	Title       string `json:"title"`
 }
 
-// RulePackConflict records a policy clash between an incoming TeamRule and an existing Local Memory.
 type RulePackConflict struct {
 	Scope         string   `json:"scope"`
 	RuleKey       string   `json:"rule_key"`
@@ -136,7 +128,6 @@ type RulePackConflict struct {
 	UpdatedAt     string   `json:"updated_at,omitempty"`
 }
 
-// RuleDuplicateSuggestion describes a local memory redundant with or partially overlapping active Team Rules.
 type RuleDuplicateSuggestion struct {
 	LocalMemoryID  int64  `json:"local_memory_id"`
 	LocalCategory  string `json:"local_category"`
@@ -153,7 +144,6 @@ func cleanSingleLine(s string) string {
 	return strings.Join(lines, " ")
 }
 
-// NormalizeRuleKey canonicalizes a string into a safe lowercase kebab/snake rule slug ([a-z0-9][a-z0-9_-]*).
 func NormalizeRuleKey(raw string) string {
 	s := strings.ToLower(strings.TrimSpace(raw))
 	var b strings.Builder
@@ -182,8 +172,6 @@ func NormalizeRuleKey(raw string) string {
 	return out
 }
 
-// ComputeRuleKey derives a deterministic, language-agnostic internal identifier
-// from canonical category and normalized single-line title.
 func ComputeRuleKey(category, title string) string {
 	cat := NormalizeCategoryForScope("", category)
 	normTitle := strings.ToLower(cleanSingleLine(title))
@@ -191,28 +179,6 @@ func ComputeRuleKey(category, title string) string {
 	return "r-" + hex.EncodeToString(sum[:5])
 }
 
-// SuggestRuleKey generates a deterministic internal rule key from category and seed text.
-func SuggestRuleKey(category, seed string) string {
-	catPrefix := NormalizeRuleKey(category)
-	slug := NormalizeRuleKey(seed)
-	if slug != "" {
-		if catPrefix != "" && !strings.HasPrefix(slug, catPrefix+"-") {
-			combined := catPrefix + "-" + slug
-			if len(combined) <= 64 {
-				return combined
-			}
-		}
-		return slug
-	}
-	sum := sha256.Sum256([]byte(strings.TrimSpace(category) + "|" + strings.TrimSpace(seed)))
-	shortHex := hex.EncodeToString(sum[:4])
-	if catPrefix == "" {
-		catPrefix = "rule"
-	}
-	return NormalizeRuleKey(catPrefix + "-" + shortHex)
-}
-
-// NormalizeGitHandle formats an author attribution string into a clean Git '@handle' (no spaces/backticks/'·').
 func NormalizeGitHandle(raw string) string {
 	cleaned := strings.NewReplacer("`", "", "·", "", "\r", " ", "\n", " ").Replace(strings.TrimSpace(raw))
 	cleaned = strings.TrimLeft(cleaned, "@")
@@ -228,7 +194,6 @@ func NormalizeGitHandle(raw string) string {
 	return "@" + handle
 }
 
-// ValidateTeamRule checks formatting, completeness, inline-backtick safety, and security guards on r.
 func ValidateTeamRule(r TeamRule) error {
 	key := strings.TrimSpace(r.RuleKey)
 	if key == "" || NormalizeRuleKey(key) != key {
@@ -293,7 +258,6 @@ var canonicalCategoryRanks = map[string]int{
 	"general":      90,
 }
 
-// CanonicalCategoryRank returns the fixed top-level section ordering priority for Markdown Rule Pack generation.
 func CanonicalCategoryRank(cat string) int {
 	k := strings.ToLower(strings.TrimSpace(cat))
 	if r, ok := canonicalCategoryRanks[k]; ok {
@@ -302,7 +266,6 @@ func CanonicalCategoryRank(cat string) int {
 	return 100
 }
 
-// FormatCategoryHeadingTitle converts a category slug into a readable Markdown heading title.
 func FormatCategoryHeadingTitle(slug string) string {
 	k := strings.ToLower(strings.TrimSpace(slug))
 	if k == "" {

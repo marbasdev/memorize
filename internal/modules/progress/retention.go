@@ -11,12 +11,10 @@ import (
 	"memorize/internal/infra/config"
 )
 
-// GetRetentionPolicy returns the active retention policy from SQLite config with safe defaults.
 func (s *Service) GetRetentionPolicy(ctx context.Context) domain.RetentionPolicy {
 	return config.LoadRetentionPolicy(ctx, s.db)
 }
 
-// SetProgressRetentionDays updates automatic TTL for completed progress history and immediately sweeps expired entries.
 func (s *Service) SetProgressRetentionDays(ctx context.Context, days int) (domain.RetentionPolicy, int, error) {
 	if err := domain.RequireAdmin(ctx); err != nil {
 		return s.GetRetentionPolicy(ctx), 0, err
@@ -42,9 +40,6 @@ func (s *Service) getProgressPrunedMemHWM(ctx context.Context, scope string) int
 	return v
 }
 
-// CleanupProgressHistory deletes recorded progress entries matching scope and age cutoff
-// (olderThanDays == 0 deletes all entries for the scope; >0 deletes entries older than N days),
-// recording memory and git watermarks so pruned items are not re-created on subsequent syncs.
 func (s *Service) CleanupProgressHistory(ctx context.Context, rawScope string, olderThanDays int) (int, error) {
 	if err := domain.RequireAdmin(ctx); err != nil {
 		return 0, err
@@ -125,7 +120,6 @@ func (s *Service) CleanupProgressHistory(ctx context.Context, rawScope string, o
 	return int(n), nil
 }
 
-// MaybeRunAutoRetention runs automatic completed-progress TTL sweeps at most once per hour.
 func (s *Service) MaybeRunAutoRetention(ctx context.Context) {
 	if s == nil {
 		return

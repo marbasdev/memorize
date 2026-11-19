@@ -10,7 +10,6 @@ import (
 	"memorize/internal/infra/sqlite"
 )
 
-// ExtractBearerToken extracts a Bearer token from the Authorization header if present.
 func ExtractBearerToken(r *http.Request) (string, bool) {
 	if r == nil {
 		return "", false
@@ -26,7 +25,6 @@ func ExtractBearerToken(r *http.Request) (string, bool) {
 	return strings.TrimSpace(parts[1]), true
 }
 
-// IsSecureRequest reports whether the request arrived over TLS directly or via an HTTPS proxy.
 func IsSecureRequest(r *http.Request) bool {
 	if r == nil {
 		return false
@@ -34,11 +32,13 @@ func IsSecureRequest(r *http.Request) bool {
 	if r.TLS != nil {
 		return true
 	}
+	if !IsTrustedProxyPeer(r.RemoteAddr) {
+		return false
+	}
 	xfp := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0])
 	return strings.EqualFold(xfp, "https")
 }
 
-// SetSessionCookie writes the HttpOnly signed team session cookie to w.
 func SetSessionCookie(w http.ResponseWriter, r *http.Request, value string, maxAgeSec int) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     domain.SessionCookieName,
@@ -51,7 +51,6 @@ func SetSessionCookie(w http.ResponseWriter, r *http.Request, value string, maxA
 	})
 }
 
-// ClearSessionCookie expires the team session cookie immediately.
 func ClearSessionCookie(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     domain.SessionCookieName,
@@ -65,7 +64,6 @@ func ClearSessionCookie(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// AuthenticateHTTPRequest authenticates an HTTP caller using Bearer token or signed session cookie.
 func AuthenticateHTTPRequest(db *sql.DB, r *http.Request) (domain.AuthPrincipal, bool) {
 	if db == nil || r == nil {
 		return domain.AuthPrincipal{}, false

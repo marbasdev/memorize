@@ -11,17 +11,14 @@ import (
 	"memorize/internal/infra/config"
 )
 
-// ProviderName returns the default resolved engine identifier or "none".
 func (s *Service) ProviderName() string {
 	return s.ProviderNameForTask(context.Background(), "")
 }
 
-// ProviderNameForTask returns the effective resolved engine name for a specific feature task.
 func (s *Service) ProviderNameForTask(ctx context.Context, task domain.EvalTask) string {
 	return s.router.ProviderNameForTask(ctx, task)
 }
 
-// GetConfigMap returns all key/value entries from SQLite config.
 func (s *Service) GetConfigMap(ctx context.Context) map[string]string {
 	return config.GetConfigMap(ctx, s.db)
 }
@@ -31,7 +28,6 @@ func (s *Service) SaveConfig(ctx context.Context, pairs map[string]string) error
 	return config.SaveConfig(ctx, s.db, s.dbPath, pairs)
 }
 
-// GetThresholds reads the persistent admission and retrieval gate thresholds with safe defaults.
 func (s *Service) GetThresholds(ctx context.Context) domain.Thresholds {
 	th := domain.DefaultThresholds()
 	rows, err := s.db.QueryContext(ctx, `SELECT key, val FROM settings`)
@@ -60,7 +56,6 @@ func (s *Service) GetThresholds(ctx context.Context) domain.Thresholds {
 	return th
 }
 
-// SaveThresholds validates, clamps, and persists admission and retrieval thresholds into SQLite.
 func (s *Service) SaveThresholds(ctx context.Context, th domain.Thresholds) (domain.Thresholds, error) {
 	if err := domain.RequireAdmin(ctx); err != nil {
 		return th, err
@@ -90,12 +85,6 @@ func (s *Service) SaveThresholds(ctx context.Context, th domain.Thresholds) (dom
 	})
 }
 
-// GetDashboardStats computes global active/pinned/tomb counts and confidence histogram bins.
-func (s *Service) GetDashboardStats(ctx context.Context) (domain.DashboardStats, error) {
-	return s.GetDashboardStatsForScope(ctx, "")
-}
-
-// GetDashboardStatsForScope computes memory KPI counts and confidence bins filtered by scope.
 func (s *Service) GetDashboardStatsForScope(ctx context.Context, scopeFilter string) (domain.DashboardStats, error) {
 	sc := strings.TrimSpace(scopeFilter)
 	st := domain.DashboardStats{ConfidenceBins: make([]int, 5)}
@@ -121,7 +110,6 @@ func (s *Service) GetDashboardStatsForScope(ctx context.Context, scopeFilter str
 	return st, err
 }
 
-// GetDashboardFacets collects sorted distinct scopes, accounts, categories, sub-categories, and recent sessions.
 func (s *Service) GetDashboardFacets(ctx context.Context) (domain.DashboardFacets, error) {
 	visSQL, visArgs := s.memoryVisibilitySQL(ctx, "")
 	scopeSet := map[string]bool{"global": true, "personal": true}
@@ -263,7 +251,6 @@ func (s *Service) GetDashboardFacets(ctx context.Context) (domain.DashboardFacet
 	}, nil
 }
 
-// DiagnoseRelevance runs a non-session diagnostic relevance probe against active memories.
 func (s *Service) DiagnoseRelevance(ctx context.Context, rawScope, query string) (domain.ProbeResult, error) {
 	t0 := time.Now()
 	_, _, ev, pinned, scored, err := s.evaluateRelevance(ctx, rawScope, "", query)

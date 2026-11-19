@@ -39,7 +39,10 @@ func registerRetentionAPIRoutes(mux *http.ServeMux, d Deps) {
 			select {
 			case <-r.Context().Done():
 				return
-			case ev := <-ch:
+			case ev, ok := <-ch:
+				if !ok {
+					return
+				}
 				_, _ = fmt.Fprintf(w, "event: change\ndata: {\"seq\":%d,\"domain\":%q}\n\n", ev.Seq, ev.Domain)
 				flusher.Flush()
 			case <-ping.C:
