@@ -124,6 +124,9 @@ func (s *Service) RecordProgress(ctx context.Context, in domain.ProgressInput) (
 		return domain.ProgressRecord{}, fmt.Errorf("security guard: %s", reason)
 	}
 	sc := domain.NormalizeScope(in.Scope)
+	if err := domain.CanModifyScope(ctx, sc); err != nil {
+		return domain.ProgressRecord{}, err
+	}
 	rawCat := strings.TrimSpace(in.Category)
 	if rawCat == "" && trackRaw != "" {
 		rawCat = "general"
@@ -215,8 +218,8 @@ func (s *Service) UpdateProgress(ctx context.Context, id int64, in domain.Progre
 	if strings.TrimSpace(in.Scope) != "" {
 		sc = domain.NormalizeScope(in.Scope)
 	}
-	if domain.IsServerMode(ctx) && cur.Scope != "personal" && sc == "personal" {
-		return fmt.Errorf("permission denied: cannot move shared %s progress #%d into personal scope in server mode", cur.Scope, id)
+	if domain.IsServerMode(ctx) && !domain.IsUserPrivateScope(ctx, cur.Scope) && domain.IsUserPrivateScope(ctx, sc) {
+		return fmt.Errorf("permission denied: cannot move shared %s progress #%d into %s scope in server mode", cur.Scope, id, sc)
 	}
 	if err := domain.CanModifyScope(ctx, sc); err != nil {
 		return err

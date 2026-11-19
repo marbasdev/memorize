@@ -46,6 +46,12 @@ func handleTeamRuleTool(deps Deps, resolver *ScopeResolver) server.ToolHandlerFu
 		}
 
 		action := strings.ToLower(trimmedArg(req, "action"))
+		if domain.IsServerMode(ctx) {
+			switch action {
+			case "sync", "pull", "fetch", "add", "create", "promote", "export", "update", "edit", "remove", "delete":
+				return mcp.NewToolResultError("team_rules git sync/publish actions must run against a local repository rather than the remote team server (list, resolve_conflict, duplicates, clean_duplicates, and admin set_config remain available)"), nil
+			}
+		}
 		args := req.GetArguments()
 		rp := deps.RulePack
 		singleID, ids := parseIDs(req)

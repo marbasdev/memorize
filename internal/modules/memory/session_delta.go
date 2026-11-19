@@ -16,6 +16,21 @@ type matchedItem struct {
 	suffix string
 }
 
+func memoryScopeRank(f domain.Fact) int {
+	if f.IsTeam() {
+		return 0
+	}
+	sc := domain.NormalizeScope(f.Scope)
+	switch {
+	case strings.HasPrefix(sc, "project:"):
+		return 1
+	case sc == "global":
+		return 2
+	default:
+		return 3
+	}
+}
+
 func (s *Service) snapshotSessionSeen(ctx context.Context, sessionID string, refresh bool) map[int64]bool {
 	if sessionID == "" {
 		return nil
@@ -302,6 +317,12 @@ func (s *Service) QuerySessionMemory(ctx context.Context, sessionID, currentTask
 	}
 
 	th := s.GetThresholds(ctx)
+	sort.SliceStable(pendingUpdatedFacts, func(i, j int) bool {
+		return memoryScopeRank(pendingUpdatedFacts[i]) < memoryScopeRank(pendingUpdatedFacts[j])
+	})
+	sort.SliceStable(unsentPinned, func(i, j int) bool {
+		return memoryScopeRank(unsentPinned[i]) < memoryScopeRank(unsentPinned[j])
+	})
 	var matched []matchedItem
 	var consumedUpdates []int64
 	for _, f := range pendingUpdatedFacts {

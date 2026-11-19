@@ -27,22 +27,24 @@
 
     <div style="display:flex;align-items:center;gap:0.45rem;flex-wrap:wrap;">
       {{if .Overview.Sync.InSync}}
-        <span class="badge b-ok" title="{{.Overview.Sync.RepoPath}}">
+        <span class="badge b-ok"{{if .Overview.Sync.RepoPath}} title="{{.Overview.Sync.RepoPath}}"{{end}}>
           ✓ {{t .Lang "prog_in_sync"}}{{if .Overview.Sync.HeadCommit}} · {{.Overview.Sync.HeadCommit}}{{end}}
         </span>
       {{else}}
-        <span class="badge b-warn" title="{{.Overview.Sync.RepoPath}}">
+        <span class="badge b-warn"{{if .Overview.Sync.RepoPath}} title="{{.Overview.Sync.RepoPath}}"{{end}}>
           ↻ {{t .Lang "prog_needs_sync"}}
           {{if gt .Overview.Sync.UnlinkedMemoryCount 0}} · {{t .Lang "prog_unlinked_mem"}} {{.Overview.Sync.UnlinkedMemoryCount}}{{end}}
           {{if gt (len .Overview.Sync.PendingCommits) 0}} · {{t .Lang "prog_pending_git"}} {{len .Overview.Sync.PendingCommits}}{{end}}
         </span>
       {{end}}
 
-      <button type="button" class="btn btn-sm {{if not .Overview.Sync.InSync}}btn-warn{{end}}" id="btnSyncProgress"
-        hx-post="/ui/progress/sync" hx-include="#progressFilterForm" hx-target="#progressSection" hx-swap="innerHTML"
-        hx-indicator="#progSyncIndicator">
-        ↻ {{t .Lang "prog_btn_sync"}}
-      </button>
+      {{if not .ServerMode}}
+        <button type="button" class="btn btn-sm {{if not .Overview.Sync.InSync}}btn-warn{{end}}" id="btnSyncProgress"
+          hx-post="/ui/progress/sync" hx-include="#progressFilterForm" hx-target="#progressSection" hx-swap="innerHTML"
+          hx-indicator="#progSyncIndicator">
+          ↻ {{t .Lang "prog_btn_sync"}}
+        </button>
+      {{end}}
     </div>
 
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;width:100%;margin-top:0.25rem;">

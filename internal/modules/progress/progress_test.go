@@ -391,23 +391,57 @@ func TestServerModeProgressUpdateAuthorization(t *testing.T) {
 	if err != nil {
 		t.Fatalf("alice RecordProgress: %v", err)
 	}
-	recGlobal, err := svc.RecordProgress(ctxAdmin, domain.ProgressInput{
+	recGlobal, err := svc.RecordProgress(ctxAlice, domain.ProgressInput{
 		Scope:    "global",
-		Category: "release",
-		Summary:  "Admin tagged v1.1",
+		Category: "dev-habit",
+		Summary:  "Alice personal cross-project workflow",
 	})
 	if err != nil {
-		t.Fatalf("admin RecordProgress global: %v", err)
+		t.Fatalf("alice RecordProgress global: %v", err)
+	}
+	recPersonal, err := svc.RecordProgress(ctxAlice, domain.ProgressInput{
+		Scope:    "personal",
+		Category: "notes",
+		Summary:  "Alice personal non-dev memo",
+	})
+	if err != nil {
+		t.Fatalf("alice RecordProgress personal: %v", err)
+	}
+
+	// Strict per-account isolation in ServerMode for BOTH personal AND global progress (hidden from Bob & Admin).
+	for _, scFilter := range []string{"", "global", "personal"} {
+		for name, callerCtx := range map[string]context.Context{"bob": ctxBob, "admin": ctxAdmin} {
+			ov, err := svc.GetProgressOverviewWithQuery(callerCtx, domain.ProgressQuery{
+				Scope:      scFilter,
+				DoneWindow: "all",
+				Page:       1,
+				PageSize:   50,
+			})
+			if err != nil {
+				t.Fatalf("%s GetProgressOverview(%q): %v", name, scFilter, err)
+			}
+			for _, r := range ov.Records {
+				if r.ID == recGlobal.ID || r.ID == recPersonal.ID {
+					t.Fatalf("%s unexpectedly saw Alice private %s progress #%d", name, r.Scope, r.ID)
+				}
+			}
+		}
 	}
 
 	if err := svc.UpdateProgress(ctxBob, recAlice.ID, domain.ProgressInput{Summary: "bob hijack"}); err == nil {
 		t.Fatalf("expected member Bob UpdateProgress on Alice entry to fail in ServerMode")
 	}
 	if err := svc.UpdateProgress(ctxBob, recGlobal.ID, domain.ProgressInput{Summary: "bob global edit"}); err == nil {
-		t.Fatalf("expected member Bob UpdateProgress on global entry to fail in ServerMode")
+		t.Fatalf("expected member Bob UpdateProgress on Alice global entry to fail in ServerMode")
 	}
 	if err := svc.UpdateProgress(ctxAlice, recAlice.ID, domain.ProgressInput{Scope: "personal"}); err == nil {
 		t.Fatalf("expected moving shared project progress into personal to fail in ServerMode")
+	}
+	if err := svc.UpdateProgress(ctxAlice, recAlice.ID, domain.ProgressInput{Scope: "global"}); err == nil {
+		t.Fatalf("expected moving shared project progress into global to fail in ServerMode")
+	}
+	if err := svc.UpdateProgress(ctxAlice, recGlobal.ID, domain.ProgressInput{Summary: "Alice updated cross-project dev workflow"}); err != nil {
+		t.Fatalf("expected owner Alice UpdateProgress on own global entry to succeed: %v", err)
 	}
 	if err := svc.UpdateProgress(ctxAlice, recAlice.ID, domain.ProgressInput{Summary: "Alice updated API validation"}); err != nil {
 		t.Fatalf("expected owner Alice UpdateProgress to succeed: %v", err)

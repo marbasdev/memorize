@@ -14,15 +14,14 @@ import (
 
 // TopActiveScope returns the scope with the highest number of active memories, or "" if none exist.
 func (s *Service) TopActiveScope(ctx context.Context) string {
-	isAdmin := s.canBypassPersonal(ctx)
-	curAcc := s.CurrentAccount(ctx)
+	privSQL, privArgs := s.privateScopeSQL(ctx, "", true)
 	var sc string
 	_ = s.db.QueryRowContext(ctx, `
 		SELECT scope FROM memories
-		WHERE active = 1 AND (? = 1 OR scope != 'personal' OR account = ?)
+		WHERE active = 1 AND `+privSQL+`
 		GROUP BY scope
 		ORDER BY COUNT(*) DESC, scope ASC
-		LIMIT 1`, boolToInt(isAdmin), curAcc).Scan(&sc)
+		LIMIT 1`, privArgs...).Scan(&sc)
 	return strings.TrimSpace(sc)
 }
 
@@ -327,8 +326,8 @@ func (s *Service) ConsolidateMemories(ctx context.Context, rawScope, category st
 		if err := domain.CanModifyScope(ctx, srcScope); err != nil {
 			return 0, err
 		}
-		if domain.IsServerMode(ctx) && srcScope != "personal" && targetScope == "personal" {
-			return 0, fmt.Errorf("permission denied: cannot move shared %s memory #%d into personal scope in server mode", srcScope, id)
+		if domain.IsServerMode(ctx) && !domain.IsUserPrivateScope(ctx, srcScope) && domain.IsUserPrivateScope(ctx, targetScope) {
+			return 0, fmt.Errorf("permission denied: cannot move shared %s memory #%d into %s scope in server mode", srcScope, id, targetScope)
 		}
 		if srcConf > mergedConf {
 			mergedConf = srcConf
@@ -347,7 +346,7 @@ func (s *Service) ConsolidateMemories(ctx context.Context, rawScope, category st
 		mergedConf = 0.90
 	}
 	mergedConf = domain.Clamp(mergedConf, 0.80, 1.00)
-	if targetScope == "personal" && domain.IsServerMode(ctx) {
+	if domain.IsUserPrivateScope(ctx, targetScope) && domain.IsServerMode(ctx) {
 		acc = s.CurrentAccount(ctx)
 	} else if acc == "" {
 		acc = s.CurrentAccount(ctx)

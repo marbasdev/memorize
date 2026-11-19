@@ -132,10 +132,12 @@
                 hx-post="/ui/team/conflict" hx-include="#teamScopeSelect"
                 hx-vals='{"rule_key":"{{.RuleKey}}","decision":"adopt_team"}'
                 hx-target="#teamSection" hx-swap="innerHTML">{{t $.Lang "team_btn_adopt"}}</button>
-              <button type="button" class="btn btn-warn btn-sm"
-                hx-post="/ui/team/conflict" hx-include="#teamScopeSelect"
-                hx-vals='{"rule_key":"{{.RuleKey}}","decision":"local_override"}'
-                hx-target="#teamSection" hx-swap="innerHTML">{{t $.Lang "team_btn_override"}}</button>
+              {{if not $.ServerMode}}
+                <button type="button" class="btn btn-warn btn-sm"
+                  hx-post="/ui/team/conflict" hx-include="#teamScopeSelect"
+                  hx-vals='{"rule_key":"{{.RuleKey}}","decision":"local_override"}'
+                  hx-target="#teamSection" hx-swap="innerHTML">{{t $.Lang "team_btn_override"}}</button>
+              {{end}}
               <button type="button" class="btn btn-sm"
                 hx-post="/ui/team/conflict" hx-include="#teamScopeSelect"
                 hx-vals='{"rule_key":"{{.RuleKey}}","decision":"mark_updated"}'
@@ -160,16 +162,16 @@
             </div>
             <div class="team-rule-list">
               {{range .Rules}}
-                <div class="team-rule-card {{if eq .Resolution "local_override"}}overridden{{end}}">
+                <div class="team-rule-card {{if and (not $.ServerMode) (eq .Resolution "local_override")}}overridden{{end}}">
                   <div class="team-rule-head">
                     <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
                       {{if .SubCategory}}<span class="tag-chip">{{.SubCategory}}</span>{{end}}
-                      {{if eq .Resolution "local_override"}}<span class="badge b-danger">local_override</span>{{end}}
+                      {{if and (not $.ServerMode) (eq .Resolution "local_override")}}<span class="badge b-danger">local_override</span>{{end}}
                       {{if eq .Resolution "conflict_pending"}}<span class="badge b-danger">conflict</span>{{end}}
                     </div>
                     <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
                       <span class="team-added">{{.AddedBy}} · {{.AddedAt}}</span>
-                      {{if eq .Resolution "local_override"}}
+                      {{if and (not $.ServerMode) (eq .Resolution "local_override")}}
                         <button type="button" class="btn btn-sm"
                           hx-post="/ui/team/conflict" hx-include="#teamScopeSelect"
                           hx-vals='{"rule_key":"{{.RuleKey}}","decision":"mark_updated"}'

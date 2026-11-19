@@ -40,7 +40,7 @@ func escapeSQLLike(raw string) string {
 	return r.Replace(raw)
 }
 
-func buildRecordWhereClause(q domain.RecordQuery) (string, []any) {
+func (s *Service) buildRecordWhereClause(ctx context.Context, q domain.RecordQuery) (string, []any) {
 	var conds []string
 	var args []any
 
@@ -148,6 +148,7 @@ func buildRecordWhereClause(q domain.RecordQuery) (string, []any) {
 			}
 			continue
 		}
+		childVisSQL, childVisArgs := s.memoryVisibilitySQL(ctx, "child")
 		pat := "%" + escapeSQLLike(tok) + "%"
 		conds = append(conds, `(
 			CAST(m.id AS TEXT) LIKE ? ESCAPE '\'
@@ -162,10 +163,13 @@ func buildRecordWhereClause(q domain.RecordQuery) (string, []any) {
 			OR EXISTS (
 				SELECT 1 FROM memories child
 				WHERE child.active = 0 AND child.superseded_by = m.id
+				  AND `+childVisSQL+`
 				  AND LOWER(child.content) LIKE ? ESCAPE '\'
 			)
 		)`)
-		args = append(args, pat, pat, pat, pat, pat, pat, pat, pat, pat, pat)
+		args = append(args, pat, pat, pat, pat, pat, pat, pat, pat, pat)
+		args = append(args, childVisArgs...)
+		args = append(args, pat)
 	}
 
 	if len(conds) == 0 {
@@ -205,16 +209,15 @@ func (s *Service) attachRecordReplaces(ctx context.Context, out []domain.MemoryR
 	if len(out) == 0 {
 		return
 	}
-	strictPersonal := boolToInt(s.enforceStrictPersonalVisibility(ctx))
-	curAcc := s.CurrentAccount(ctx)
+	visSQL, visArgs := s.memoryVisibilitySQL(ctx, "")
 	placeholders := make([]string, 0, len(out))
-	args := make([]any, 0, len(out)+2)
-	args = append(args, strictPersonal, curAcc)
+	args := make([]any, 0, len(out)+len(visArgs))
+	args = append(args, visArgs...)
 	for _, r := range out {
 		placeholders = append(placeholders, "?")
 		args = append(args, r.ID)
 	}
-	query := fmt.Sprintf(`SELECT superseded_by, content FROM memories WHERE active = 0 AND (? = 0 OR scope != 'personal' OR COALESCE(account, '') = ?) AND superseded_by IN (%s) ORDER BY id ASC`, strings.Join(placeholders, ","))
+	query := fmt.Sprintf(`SELECT superseded_by, content FROM memories WHERE active = 0 AND %s AND superseded_by IN (%s) ORDER BY id ASC`, visSQL, strings.Join(placeholders, ","))
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return
@@ -250,7 +253,7 @@ func (s *Service) QueryRecordsPage(ctx context.Context, q domain.RecordQuery) (d
 		return domain.RecordPage{}, err
 	}
 
-	whereSQL, whereArgs := buildRecordWhereClause(q)
+	whereSQL, whereArgs := s.buildRecordWhereClause(ctx, q)
 	whereSQL = `(` + whereSQL + `) AND ` + visSQL
 	whereArgs = append(whereArgs, visArgs...)
 	var totalFiltered, totalFilteredActive int
@@ -327,7 +330,7 @@ func (s *Service) QueryMatchingActiveIDs(ctx context.Context, q domain.RecordQue
 		limit = 5000
 	}
 	visSQL, visArgs := s.memoryVisibilitySQL(ctx, "m")
-	whereSQL, whereArgs := buildRecordWhereClause(q)
+	whereSQL, whereArgs := s.buildRecordWhereClause(ctx, q)
 	whereSQL = `(` + whereSQL + `) AND ` + visSQL
 	whereArgs = append(whereArgs, visArgs...)
 	selSQL := `SELECT m.id FROM memories m WHERE (` + whereSQL + `) AND m.active = 1 ORDER BY m.id DESC LIMIT ?`

@@ -28,12 +28,12 @@ func (s *Service) clearSessionIDs(ids ...int64) {
 }
 
 func (s *Service) checkPersonalOwnership(ctx context.Context, id int64, recScope, recAccount string) error {
-	if s.canBypassPersonal(ctx) || recScope != "personal" {
+	if s.canBypassPersonal(ctx) || !domain.IsUserPrivateScope(ctx, recScope) {
 		return nil
 	}
 	cur := s.CurrentAccount(ctx)
 	if (recAccount != "" || domain.IsServerMode(ctx)) && recAccount != cur {
-		return fmt.Errorf("permission denied: personal memory #%d belongs to account %q (current: %q)", id, recAccount, cur)
+		return fmt.Errorf("permission denied: %s memory #%d belongs to account %q (current: %q)", recScope, id, recAccount, cur)
 	}
 	return nil
 }
@@ -127,22 +127,19 @@ func (s *Service) UndoMemory(ctx context.Context, id int64) (string, error) {
 		return "", childErr
 	}
 
-	bypassFlag := boolToInt(s.canBypassPersonal(ctx))
-	canGlobalFlag := boolToInt(domain.CanModifyScope(ctx, "global") == nil)
-	curAcc := s.CurrentAccount(ctx)
+	privSQL, privArgs := s.privateScopeSQL(ctx, "", true)
 	var msg string
 	if err := s.withTx(ctx, func(tx *sql.Tx) error {
 		if act == 1 && len(children) > 0 {
 			if _, err := tx.ExecContext(ctx, `UPDATE memories SET active = 0 WHERE id = ?`, id); err != nil {
 				return err
 			}
+			qArgs := append([]any{id}, privArgs...)
 			if _, err := tx.ExecContext(ctx, `
 				UPDATE memories
 				SET active = 1, superseded_by = NULL
 				WHERE superseded_by = ?
-				  AND (? = 1 OR scope != 'personal' OR COALESCE(account, '') = ?)
-				  AND (? = 1 OR scope != 'global')
-			`, id, bypassFlag, curAcc, canGlobalFlag); err != nil {
+				  AND `+privSQL, qArgs...); err != nil {
 				return err
 			}
 			msg = fmt.Sprintf("UNDONE OVERWRITE: deactivated #%d and restored %v", id, children)
@@ -187,14 +184,14 @@ func (s *Service) UpdateMemoryFull(ctx context.Context, id int64, rawScope, cate
 	if strings.TrimSpace(rawScope) != "" {
 		scope = domain.NormalizeScope(rawScope)
 	}
-	if domain.IsServerMode(ctx) && curScope != "personal" && scope == "personal" {
-		return fmt.Errorf("permission denied: cannot move shared %s memory #%d into personal scope in server mode", curScope, id)
+	if domain.IsServerMode(ctx) && !domain.IsUserPrivateScope(ctx, curScope) && domain.IsUserPrivateScope(ctx, scope) {
+		return fmt.Errorf("permission denied: cannot move shared %s memory #%d into %s scope in server mode", curScope, id, scope)
 	}
 	if err := domain.CanModifyScope(ctx, scope); err != nil {
 		return err
 	}
 	acc := curAcc
-	if acc == "" || (scope == "personal" && domain.IsServerMode(ctx)) {
+	if acc == "" || (domain.IsUserPrivateScope(ctx, scope) && domain.IsServerMode(ctx)) {
 		acc = s.CurrentAccount(ctx)
 	}
 	cat := curCat
@@ -263,8 +260,8 @@ func (s *Service) UpdateMemoryAccount(ctx context.Context, id int64, rawAccount 
 	if acc == "" {
 		acc = s.CurrentAccount(ctx)
 	}
-	if domain.IsServerMode(ctx) && recScope == "personal" && acc != s.CurrentAccount(ctx) {
-		return fmt.Errorf("permission denied: cannot reassign personal memory #%d across accounts in server mode", id)
+	if domain.IsServerMode(ctx) && domain.IsUserPrivateScope(ctx, recScope) && acc != s.CurrentAccount(ctx) {
+		return fmt.Errorf("permission denied: cannot reassign %s memory #%d across accounts in server mode", recScope, id)
 	}
 	if err := s.withTx(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `UPDATE memories SET account = ? WHERE id = ?`, acc, id)
@@ -302,21 +299,21 @@ func (s *Service) UpdateMemoryTags(ctx context.Context, id int64, rawTags string
 // PurgeTombstones permanently deletes inactive memories while preserving superseded lineage on active parent records.
 func (s *Service) PurgeTombstones(ctx context.Context, scopeFilter string) (int64, error) {
 	sc := strings.TrimSpace(scopeFilter)
-	if domain.IsServerMode(ctx) && domain.NormalizeScope(sc) != "personal" {
+	if domain.IsServerMode(ctx) && !domain.IsUserPrivateScope(ctx, sc) {
 		if err := domain.RequireAdmin(ctx); err != nil {
 			return 0, err
 		}
 	}
-	isAdmin := s.canBypassPersonal(ctx)
-	curAcc := s.CurrentAccount(ctx)
+	privSQL, privArgs := s.privateScopeSQL(ctx, "", true)
 	var n int64
 	if err := s.withTx(ctx, func(tx *sql.Tx) error {
 		// Snapshot direct superseded lineage into parent's replaces_text before deleting inactive rows
+		selArgs := append([]any{sc, sc}, privArgs...)
 		rows, err := tx.QueryContext(ctx, `
 			SELECT superseded_by, content FROM memories
 			WHERE active = 0 AND superseded_by IS NOT NULL AND (? = '' OR scope = ?)
-			  AND (? = 1 OR scope != 'personal' OR account = ?)
-			ORDER BY id ASC`, sc, sc, boolToInt(isAdmin), curAcc)
+			  AND `+privSQL+`
+			ORDER BY id ASC`, selArgs...)
 		if err == nil {
 			byParent := make(map[int64][]string)
 			for rows.Next() {
@@ -350,8 +347,9 @@ func (s *Service) PurgeTombstones(ctx context.Context, scopeFilter string) (int6
 			}
 		}
 
-		_, _ = tx.ExecContext(ctx, `DELETE FROM session_sent WHERE memory_id IN (SELECT id FROM memories WHERE active = 0 AND (? = '' OR scope = ?) AND (? = 1 OR scope != 'personal' OR account = ?))`, sc, sc, boolToInt(isAdmin), curAcc)
-		res, err := tx.ExecContext(ctx, `DELETE FROM memories WHERE active = 0 AND (? = '' OR scope = ?) AND (? = 1 OR scope != 'personal' OR account = ?)`, sc, sc, boolToInt(isAdmin), curAcc)
+		delArgs := append([]any{sc, sc}, privArgs...)
+		_, _ = tx.ExecContext(ctx, `DELETE FROM session_sent WHERE memory_id IN (SELECT id FROM memories WHERE active = 0 AND (? = '' OR scope = ?) AND `+privSQL+`)`, delArgs...)
+		res, err := tx.ExecContext(ctx, `DELETE FROM memories WHERE active = 0 AND (? = '' OR scope = ?) AND `+privSQL, delArgs...)
 		if err != nil {
 			return err
 		}
@@ -388,14 +386,14 @@ func (s *Service) RecalibrateConfidence(ctx context.Context, scopeFilter string)
 	}
 
 	sc := strings.TrimSpace(scopeFilter)
-	isAdmin := s.canBypassPersonal(ctx)
-	curAcc := s.CurrentAccount(ctx)
+	privSQL, privArgs := s.privateScopeSQL(ctx, "", true)
+	qArgs := append([]any{sc, sc}, privArgs...)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, scope, COALESCE(account, ''), category, COALESCE(sub_category, ''), tags, content, pinned
 		FROM memories
 		WHERE active = 1 AND (? = '' OR scope = ?)
-		  AND (? = 1 OR scope != 'personal' OR account = ?)
-		ORDER BY scope ASC, id ASC`, sc, sc, boolToInt(isAdmin), curAcc)
+		  AND `+privSQL+`
+		ORDER BY scope ASC, id ASC`, qArgs...)
 	if err != nil {
 		return 0, err
 	}

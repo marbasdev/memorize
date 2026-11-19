@@ -446,7 +446,7 @@ func (s *Service) evaluateGuardrailPlanChunks(
 	}
 	out.Blocking = filterAndSortViolations(merged, minProb)
 	for _, v := range out.Blocking {
-		if domain.NormalizeScope(v.Scope) == "personal" {
+		if domain.IsUserPrivateScope(ctx, v.Scope) {
 			out.HasPersonalViolation = true
 			break
 		}

@@ -136,7 +136,7 @@
               </span>
               <span class="badge b-accent">{{.Scope}}</span>
               {{if .Account}}<span class="tag-chip">@{{.Account}}</span>{{end}}
-              {{if .IsPrivate}}<span class="tag-chip">personal</span>{{end}}
+              {{if .IsPrivate}}<span class="tag-chip">{{if eq .Scope "global"}}global (private){{else if eq .Scope "personal"}}personal{{else}}private{{end}}</span>{{end}}
               <span class="tag-chip">{{guardrailSourceLabel $.Lang .Source}}{{if .ToolName}} · {{.ToolName}}{{end}}</span>
               {{if gt .RuleCount 0}}
                 <span class="tag-chip">{{.RuleCount}} {{t $.Lang "gr_rules_checked"}}</span>

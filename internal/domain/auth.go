@@ -86,7 +86,15 @@ func EffectivePrincipalAccount(ctx context.Context) string {
 	return p.Account
 }
 
-// CanModifyScope verifies whether the caller is allowed to mutate rules in scope.
+// IsUserPrivateScope reports whether rawScope is isolated per authenticated account.
+// personal is always private to one account (non-dev notes); in team server mode global
+// is also isolated per account (representing that user's cross-project personal dev rules).
+func IsUserPrivateScope(ctx context.Context, rawScope string) bool {
+	norm := NormalizeScope(rawScope)
+	return norm == "personal" || (IsServerMode(ctx) && norm == "global")
+}
+
+// CanModifyScope verifies whether the caller is allowed to mutate rules in rawScope.
 func CanModifyScope(ctx context.Context, rawScope string) error {
 	p, ok := AuthPrincipalFromContext(ctx)
 	if !ok || !p.ServerMode {
@@ -94,9 +102,6 @@ func CanModifyScope(ctx context.Context, rawScope string) error {
 	}
 	if !p.Authenticated || p.Account == "" {
 		return errors.New("authentication required")
-	}
-	if NormalizeScope(rawScope) == "global" && p.Role != RoleAdmin {
-		return errors.New("permission denied: only admins can modify global rules")
 	}
 	return nil
 }

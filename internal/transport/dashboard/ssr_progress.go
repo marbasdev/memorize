@@ -252,7 +252,7 @@ func registerSSRProgressRoutes(mux *http.ServeMux, d Deps) {
 		renderProgressAfterMutation(w, r, d, lang, msg, r.Form)
 	})))
 
-	mux.HandleFunc("/ui/progress/sync", postHX(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ui/progress/sync", postHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		lang := requestLang(r)
 		sc := strings.TrimSpace(r.FormValue("scope"))
 		var (
@@ -277,5 +277,5 @@ func registerSSRProgressRoutes(mux *http.ServeMux, d Deps) {
 			fmt.Sprintf("동기화 완료 (기억 %d건 · 커밋 %d건 반영)", res.SyncedMemories, res.SyncedCommits),
 		)
 		renderProgressAfterMutation(w, r, d, lang, msg, r.Form)
-	}))
+	})))
 }

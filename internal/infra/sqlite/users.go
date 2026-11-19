@@ -259,7 +259,8 @@ func EnsureBootstrapAdmin(ctx context.Context, db *sql.DB, rawAccount, explicitT
 	`, acc, domain.RoleAdmin, hash, hint); err != nil {
 		return domain.UserTokenIssue{}, false, err
 	}
-	_, _ = db.ExecContext(ctx, `UPDATE memories SET account = ? WHERE scope = 'personal' AND COALESCE(account, '') = ''`, acc)
+	_, _ = db.ExecContext(ctx, `UPDATE memories SET account = ? WHERE scope IN ('personal', 'global') AND COALESCE(account, '') = ''`, acc)
+	_, _ = db.ExecContext(ctx, `UPDATE project_progress SET account = ? WHERE scope IN ('personal', 'global') AND COALESCE(account, '') = ''`, acc)
 	u, err := GetUser(ctx, db, acc)
 	if err != nil {
 		return domain.UserTokenIssue{}, false, err

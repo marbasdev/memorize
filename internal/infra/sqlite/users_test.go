@@ -29,8 +29,14 @@ func openTestUsersDB(t *testing.T) (*sql.DB, context.Context) {
 func TestUsersCRUDTokenRotationCookiesAndLastAdminGuard(t *testing.T) {
 	db, ctx := openTestUsersDB(t)
 
-	// Legacy empty-account personal memories should be claimed by initial bootstrap admin cleanly.
+	// Legacy empty-account personal & global rows should be claimed by initial bootstrap admin cleanly.
 	if _, err := db.ExecContext(ctx, `INSERT INTO memories (scope, account, category, content, confidence, pinned, active) VALUES ('personal', '', 'convention', 'Legacy note', 0.9, 0, 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO memories (scope, account, category, content, confidence, pinned, active) VALUES ('global', '', 'architecture', 'Legacy global dev rule', 0.9, 1, 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO project_progress (scope, account, category, summary) VALUES ('global', '', 'dev', 'Legacy global prog')`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -39,9 +45,26 @@ func TestUsersCRUDTokenRotationCookiesAndLastAdminGuard(t *testing.T) {
 	if err != nil || !created {
 		t.Fatalf("EnsureBootstrapAdmin first: created=%v err=%v", created, err)
 	}
-	var claimedAcc string
+	var claimedAcc, claimedGlobAcc, claimedProgAcc string
 	if err := db.QueryRowContext(ctx, `SELECT account FROM memories WHERE content = 'Legacy note'`).Scan(&claimedAcc); err != nil || claimedAcc != "hostadmin" {
 		t.Fatalf("expected legacy blank-account personal memory claimed by hostadmin, got %q (err=%v)", claimedAcc, err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT account FROM memories WHERE content = 'Legacy global dev rule'`).Scan(&claimedGlobAcc); err != nil || claimedGlobAcc != "hostadmin" {
+		t.Fatalf("expected legacy blank-account global memory claimed by hostadmin, got %q (err=%v)", claimedGlobAcc, err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT account FROM project_progress WHERE summary = 'Legacy global prog'`).Scan(&claimedProgAcc); err != nil || claimedProgAcc != "hostadmin" {
+		t.Fatalf("expected legacy blank-account global progress claimed by hostadmin, got %q (err=%v)", claimedProgAcc, err)
+	}
+
+	// ServerMode never probes host filesystem for client repository paths.
+	srvCtx := domain.WithAuthPrincipal(ctx, domain.AuthPrincipal{
+		Account:       "hostadmin",
+		Role:          domain.RoleAdmin,
+		ServerMode:    true,
+		Authenticated: true,
+	})
+	if resolved := sqlite.ResolveScopeRepoPath(srvCtx, db, "project:memorize", "."); resolved != "" {
+		t.Fatalf("expected empty ResolveScopeRepoPath in ServerMode, got %q", resolved)
 	}
 	if adminIssue.User.Account != "hostadmin" || adminIssue.User.Role != domain.RoleAdmin || !strings.HasPrefix(adminIssue.PlainToken, "mem_") {
 		t.Fatalf("unexpected bootstrap admin: %+v", adminIssue)

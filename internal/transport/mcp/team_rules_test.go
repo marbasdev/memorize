@@ -237,4 +237,31 @@ func TestMCPTeamRulesToolWorkflow(t *testing.T) {
 	if !strings.Contains(syncOut, "TEAM_RULES_SYNCED") || !strings.Contains(syncOut, "rules=1") {
 		t.Fatalf("expected TEAM_RULES_SYNCED with 1 remaining rule, got:\n%s", syncOut)
 	}
+
+	// In ServerMode, git-based sync/publish actions are blocked against host filesystem while list remains allowed.
+	srvMemberCtx := domain.WithAuthPrincipal(context.Background(), domain.AuthPrincipal{
+		Account:       "alice",
+		Role:          domain.RoleMember,
+		ServerMode:    true,
+		Authenticated: true,
+	})
+	for _, blockedAct := range []string{"sync", "add", "promote", "update", "remove"} {
+		res, callErr := handler(srvMemberCtx, mcpReq(map[string]any{
+			"action":    blockedAct,
+			"scope":     "project:teamrepo",
+			"repo_path": repoDir,
+			"content":   "Should not mutate host git",
+			"id":        float64(1),
+		}))
+		if callErr != nil || !res.IsError {
+			t.Fatalf("expected ServerMode team_rules(action=%q) to return tool error, got err=%v res=%+v", blockedAct, callErr, res)
+		}
+	}
+	srvListRes, err := handler(srvMemberCtx, mcpReq(map[string]any{
+		"action": "list",
+		"scope":  "project:teamrepo",
+	}))
+	if err != nil || srvListRes.IsError {
+		t.Fatalf("expected ServerMode team_rules(action=list) to succeed cleanly: err=%v res=%+v", err, srvListRes)
+	}
 }

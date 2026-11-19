@@ -3,7 +3,6 @@ package memory_test
 import (
 	"context"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"memorize/internal/domain"
@@ -54,34 +53,57 @@ func TestServerModeSharedToPersonalRestrictionAndUndoIsolation(t *testing.T) {
 
 	p1 := commitAndID(t, ctxAlice, svc, "Shared project rule #1", "architecture", "project:teamapp")
 	p2 := commitAndID(t, ctxAlice, svc, "Shared project rule #2", "architecture", "project:teamapp")
-	g1 := commitAndID(t, ctxAdmin, svc, "Shared global rule #1", "architecture", "global")
+	aliceGlobal := commitAndID(t, ctxAlice, svc, "Alice cross-project dev rule #1", "architecture", "global")
+	adminGlobal := commitAndID(t, ctxAdmin, svc, "Admin cross-project dev rule #1", "architecture", "global")
 	alicePers := commitAndID(t, ctxAlice, svc, "Alice personal draft note", "preference", "personal")
 
-	// 1. Server mode blocks moving shared project:* or global rules into personal via UpdateMemoryFull.
+	// 1. In ServerMode, member & admin each isolate their own global & personal rules,
+	//    while moving shared project:* memories into personal OR global is rejected.
 	for name, tc := range map[string]struct {
-		ctx context.Context
-		id  int64
+		ctx   context.Context
+		id    int64
+		scope string
 	}{
-		"member_project_to_personal": {ctx: ctxAlice, id: p1},
-		"admin_project_to_personal":  {ctx: ctxAdmin, id: p1},
-		"admin_global_to_personal":   {ctx: ctxAdmin, id: g1},
+		"member_project_to_personal": {ctx: ctxAlice, id: p1, scope: "personal"},
+		"member_project_to_global":   {ctx: ctxAlice, id: p1, scope: "global"},
+		"admin_project_to_personal":  {ctx: ctxAdmin, id: p1, scope: "personal"},
+		"admin_project_to_global":    {ctx: ctxAdmin, id: p1, scope: "global"},
 	} {
-		if err := svc.UpdateMemoryFull(tc.ctx, tc.id, "personal", "", nil, "", nil); err == nil || !strings.Contains(err.Error(), "personal") {
-			t.Fatalf("%s: expected shared->personal move rejected in ServerMode, got err=%v", name, err)
+		if err := svc.UpdateMemoryFull(tc.ctx, tc.id, tc.scope, "", nil, "", nil); err == nil {
+			t.Fatalf("%s: expected shared->%s move rejected in ServerMode", name, tc.scope)
 		}
 	}
 
-	// Moving personal -> project:* remains permitted cleanly.
+	// Each user's personal <-> global <-> project moves work for their own rows, while other accounts are blocked.
+	if err := svc.UpdateMemoryFull(ctxAlice, alicePers, "global", "", nil, "", nil); err != nil {
+		t.Fatalf("expected Alice own personal -> global move allowed: %v", err)
+	}
 	if err := svc.UpdateMemoryFull(ctxAlice, alicePers, "project:teamapp", "", nil, "", nil); err != nil {
-		t.Fatalf("expected personal -> project move allowed: %v", err)
+		t.Fatalf("expected Alice own global -> project move allowed: %v", err)
+	}
+	if err := svc.UpdateMemoryFull(ctxBob, aliceGlobal, "project:teamapp", "", nil, "", nil); err == nil {
+		t.Fatalf("expected Bob mutating Alice global memory to fail in ServerMode")
+	}
+	if err := svc.UpdateMemoryFull(ctxAdmin, aliceGlobal, "project:teamapp", "", nil, "", nil); err == nil {
+		t.Fatalf("expected Admin mutating Alice global memory to fail in ServerMode")
+	}
+	if pageBob, err := svc.QueryRecordsPage(ctxBob, domain.RecordQuery{Scope: "global", State: "all"}); err != nil || len(pageBob.Records) != 0 {
+		t.Fatalf("expected Bob to see 0 other-user global records, got %+v (err=%v)", pageBob.Records, err)
+	}
+	if pageAdmin, err := svc.QueryRecordsPage(ctxAdmin, domain.RecordQuery{Scope: "global", State: "all"}); err != nil || len(pageAdmin.Records) != 1 || pageAdmin.Records[0].ID != adminGlobal {
+		t.Fatalf("expected Admin to see only Admin's global record #%d, got %+v (err=%v)", adminGlobal, pageAdmin.Records, err)
 	}
 
-	// ConsolidateMemories also blocks merging shared rules into personal and blocks member deactivating global.
+	// ConsolidateMemories blocks merging shared project rules into personal/global,
+	// and blocks a member consolidating another account's private global rule.
 	if _, err := svc.ConsolidateMemories(ctxAlice, "personal", "architecture", []int64{p1, p2}, "Cannot privatize team rules", true); err == nil {
 		t.Fatalf("expected ConsolidateMemories moving project rules to personal rejected")
 	}
-	if _, err := svc.ConsolidateMemories(ctxAlice, "project:teamapp", "architecture", []int64{p1, g1}, "Member cannot retire global", true); err == nil {
-		t.Fatalf("expected ConsolidateMemories by member containing global child rejected")
+	if _, err := svc.ConsolidateMemories(ctxAlice, "global", "architecture", []int64{p1, p2}, "Cannot privatize team rules", true); err == nil {
+		t.Fatalf("expected ConsolidateMemories moving project rules to global rejected")
+	}
+	if _, err := svc.ConsolidateMemories(ctxAlice, "project:teamapp", "architecture", []int64{p1, adminGlobal}, "Cannot include admin personal global", true); err == nil {
+		t.Fatalf("expected ConsolidateMemories containing another account global child rejected")
 	}
 
 	// Solo mode (!ServerMode) retains full scope move flexibility.
@@ -90,18 +112,18 @@ func TestServerModeSharedToPersonalRestrictionAndUndoIsolation(t *testing.T) {
 		t.Fatalf("expected solo mode shared -> personal move still permitted: %v", err)
 	}
 
-	// 2. UndoMemory cannot restore global or another user's personal superseded children.
+	// 2. UndoMemory cannot restore another user's personal or global superseded children.
 	aliceChild := commitAndID(t, ctxAlice, svc, "Alice secret child note", "preference", "personal")
 	parentProj := commitAndID(t, ctxAdmin, svc, "Merged parent project rule", "architecture", "project:teamapp")
-	if _, err := svc.DB().Exec(`UPDATE memories SET active = 0, superseded_by = ? WHERE id IN (?, ?)`, parentProj, aliceChild, g1); err != nil {
+	if _, err := svc.DB().Exec(`UPDATE memories SET active = 0, superseded_by = ? WHERE id IN (?, ?)`, parentProj, aliceChild, adminGlobal); err != nil {
 		t.Fatalf("seed superseded children: %v", err)
 	}
 
 	if _, err := svc.UndoMemory(ctxBob, parentProj); err == nil {
-		t.Fatalf("expected Bob UndoMemory on parent superseding Alice personal / global child to fail")
+		t.Fatalf("expected Bob UndoMemory on parent superseding Alice personal / Admin global child to fail")
 	}
 	// Verify atomic preservation: parent stayed active=1, children stayed active=0.
-	recs, err := svc.GetRecordsByIDs(ctxAdmin, []int64{parentProj, g1})
+	recs, err := svc.GetRecordsByIDs(ctxAdmin, []int64{parentProj, adminGlobal})
 	if err != nil || len(recs) != 2 {
 		t.Fatalf("GetRecordsByIDs: %v", err)
 	}
@@ -109,8 +131,8 @@ func TestServerModeSharedToPersonalRestrictionAndUndoIsolation(t *testing.T) {
 		if r.ID == parentProj && !r.Active {
 			t.Fatalf("expected parentProj to stay active after rejected UndoMemory")
 		}
-		if r.ID == g1 && r.Active {
-			t.Fatalf("expected g1 to remain inactive after rejected UndoMemory")
+		if r.ID == adminGlobal && r.Active {
+			t.Fatalf("expected adminGlobal to remain inactive after rejected UndoMemory")
 		}
 	}
 	aliceRecs, err := svc.GetRecordsByIDs(ctxAlice, []int64{aliceChild})

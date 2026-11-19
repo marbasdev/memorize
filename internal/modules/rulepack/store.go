@@ -621,8 +621,9 @@ func (s *Service) ListTeamRuleFacts(ctx context.Context, rawScope string) ([]dom
 		return nil, err
 	}
 	var out []domain.Fact
+	serverMode := domain.IsServerMode(ctx)
 	for _, r := range rules {
-		if r.Resolution == domain.RuleStateLocalOverride {
+		if !serverMode && r.Resolution == domain.RuleStateLocalOverride {
 			continue
 		}
 		out = append(out, r.ToFact(virtualRuleID(r.RuleKey)))
@@ -756,6 +757,9 @@ func (s *Service) ResolveConflict(ctx context.Context, rawScope, ruleKey, decisi
 		}
 		err = s.UpsertConflictState(ctx, sc, key, domain.RuleStateAdopted, localMemID, "", "", "")
 	case "local_override", "override", "keep_local":
+		if domain.IsServerMode(ctx) {
+			return errors.New("team rules take precedence in server mode; adopt the team rule or update .memorize/TEAM_RULES.md")
+		}
 		err = s.UpsertConflictState(ctx, sc, key, domain.RuleStateLocalOverride, localMemID, "", "", note)
 	case "mark_updated", "resolved", "draft_updated":
 		err = s.UpsertConflictState(ctx, sc, key, domain.RuleStateAdopted, localMemID, "", "", "")

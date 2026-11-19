@@ -415,31 +415,69 @@ func TestDashboardServerModeTeamReadOnlyConfigRBACAndSharedToPersonalGuard(t *te
 		}
 	}
 
-	// GET /ui/modal/detail for shared project memory omits "personal" scope option & promote button in ServerMode,
-	// and POST /ui/memories/update moving shared project memory into personal fails.
+	// GET /ui/modal/detail for shared project memory omits BOTH "personal" and "global" target scopes & promote button in ServerMode,
+	// and POST /ui/memories/update moving shared project memory into personal OR global fails.
 	recDetail := httptest.NewRecorder()
 	reqDetail := httptest.NewRequest(http.MethodGet, "http://"+host+"/ui/modal/detail?id="+url.QueryEscape(strings.TrimSpace(strconv.FormatInt(projMemID, 10))), nil)
 	reqDetail.Host = host
 	reqDetail.AddCookie(aliceCookie)
 	h.ServeHTTP(recDetail, reqDetail)
 	detailBody := recDetail.Body.String()
-	if recDetail.Code != http.StatusOK || strings.Contains(detailBody, `"personal"`) || strings.Contains(detailBody, "/ui/modal/team-promote") {
-		t.Fatalf("expected ServerMode modal_detail to omit personal target & promote button (%d):\n%s", recDetail.Code, detailBody)
+	if recDetail.Code != http.StatusOK || strings.Contains(detailBody, `"personal"`) || strings.Contains(detailBody, `"global"`) || strings.Contains(detailBody, "/ui/modal/team-promote") {
+		t.Fatalf("expected ServerMode modal_detail to omit personal/global target & promote button (%d):\n%s", recDetail.Code, detailBody)
 	}
 
-	updForm := url.Values{
-		"id":      {strconv.FormatInt(projMemID, 10)},
-		"scope":   {"personal"},
-		"content": {"SHARED_PROJECT_RULE"},
-	}.Encode()
-	recUpd := httptest.NewRecorder()
-	reqUpd := httptest.NewRequest(http.MethodPost, "http://"+host+"/ui/memories/update", strings.NewReader(updForm))
-	reqUpd.Host = host
-	reqUpd.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	reqUpd.Header.Set("HX-Request", "true")
-	reqUpd.AddCookie(aliceCookie)
-	h.ServeHTTP(recUpd, reqUpd)
-	if recUpd.Code == http.StatusOK {
-		t.Fatalf("expected POST /ui/memories/update moving shared memory into personal to fail in ServerMode")
+	for _, privScope := range []string{"personal", "global"} {
+		updForm := url.Values{
+			"id":      {strconv.FormatInt(projMemID, 10)},
+			"scope":   {privScope},
+			"content": {"SHARED_PROJECT_RULE"},
+		}.Encode()
+		recUpd := httptest.NewRecorder()
+		reqUpd := httptest.NewRequest(http.MethodPost, "http://"+host+"/ui/memories/update", strings.NewReader(updForm))
+		reqUpd.Host = host
+		reqUpd.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		reqUpd.Header.Set("HX-Request", "true")
+		reqUpd.AddCookie(aliceCookie)
+		h.ServeHTTP(recUpd, reqUpd)
+		if recUpd.Code == http.StatusOK {
+			t.Fatalf("expected POST /ui/memories/update moving shared memory into %s to fail in ServerMode", privScope)
+		}
+	}
+
+	// Team Rule Pack conflicts cannot use local_override in ServerMode; Progress hides host sync button and gates /ui/progress/sync to admin.
+	recConf := httptest.NewRecorder()
+	reqConf := httptest.NewRequest(http.MethodPost, "http://"+host+"/ui/team/conflict", strings.NewReader(url.Values{
+		"team_scope": {"project:teamapp"},
+		"rule_key":   {"sample-rule"},
+		"decision":   {"local_override"},
+	}.Encode()))
+	reqConf.Host = host
+	reqConf.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqConf.Header.Set("HX-Request", "true")
+	reqConf.AddCookie(adminCookie)
+	h.ServeHTTP(recConf, reqConf)
+	if recConf.Code != http.StatusBadRequest {
+		t.Fatalf("expected ServerMode local_override conflict resolution rejected (400), got %d %s", recConf.Code, recConf.Body.String())
+	}
+
+	recProg := httptest.NewRecorder()
+	reqProg := httptest.NewRequest(http.MethodGet, "http://"+host+"/ui/progress", nil)
+	reqProg.Host = host
+	reqProg.AddCookie(aliceCookie)
+	h.ServeHTTP(recProg, reqProg)
+	if recProg.Code != http.StatusOK || strings.Contains(recProg.Body.String(), `id="btnSyncProgress"`) {
+		t.Fatalf("expected ServerMode /ui/progress to hide btnSyncProgress (%d):\n%s", recProg.Code, recProg.Body.String())
+	}
+
+	recProgSync := httptest.NewRecorder()
+	reqProgSync := httptest.NewRequest(http.MethodPost, "http://"+host+"/ui/progress/sync", strings.NewReader("scope=project:teamapp"))
+	reqProgSync.Host = host
+	reqProgSync.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqProgSync.Header.Set("HX-Request", "true")
+	reqProgSync.AddCookie(aliceCookie)
+	h.ServeHTTP(recProgSync, reqProgSync)
+	if recProgSync.Code != http.StatusForbidden {
+		t.Fatalf("expected member POST /ui/progress/sync 403 in ServerMode, got %d", recProgSync.Code)
 	}
 }

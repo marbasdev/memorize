@@ -86,7 +86,7 @@ func (s *Service) RecordGuardrailLog(ctx context.Context, inp domain.GuardrailLo
 		}
 	}
 	privInt := 0
-	if inp.IsPrivate || sc == "personal" {
+	if inp.IsPrivate || domain.IsUserPrivateScope(ctx, sc) {
 		privInt = 1
 	}
 	src := strings.TrimSpace(inp.Source)

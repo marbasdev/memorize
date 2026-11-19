@@ -113,6 +113,9 @@ func filterAndSortViolations(violations []domain.PlanViolation, minProb float64)
 		}
 	}
 	sort.Slice(filtered, func(i, j int) bool {
+		if filtered[i].Fact.IsTeam() != filtered[j].Fact.IsTeam() {
+			return filtered[i].Fact.IsTeam()
+		}
 		if filtered[i].Probability != filtered[j].Probability {
 			return filtered[i].Probability > filtered[j].Probability
 		}
@@ -136,15 +139,16 @@ func (s *Service) loadEnforceableFacts(ctx context.Context, scA, scB string) ([]
 			return nil, rerr
 		}
 		if len(extra) > 0 {
-			loaded = append(loaded, extra...)
+			// Enforce Team Rule Pack rules ahead of DB project/global/personal rules.
+			loaded = append(extra, loaded...)
 		}
 	}
 	return filterEnforceableRules(loaded), nil
 }
 
-func hasPersonalViolation(violations []domain.PlanViolation) bool {
+func hasPrivateViolation(ctx context.Context, violations []domain.PlanViolation) bool {
 	for _, v := range violations {
-		if domain.NormalizeScope(v.Scope) == "personal" {
+		if domain.IsUserPrivateScope(ctx, v.Scope) {
 			return true
 		}
 	}
@@ -204,7 +208,7 @@ func (s *Service) VerifyPlan(ctx context.Context, proposedPlan string, scope ...
 	vIDs, vDetails := formatViolationDetails(violations)
 	_, _ = s.RecordGuardrailLog(ctx, domain.GuardrailLogInput{
 		Scope:       scA,
-		IsPrivate:   hasPersonalViolation(violations),
+		IsPrivate:   hasPrivateViolation(ctx, violations),
 		Source:      src,
 		ToolName:    "verify_plan",
 		Verdict:     domain.GuardrailVerdictPlanViolation,

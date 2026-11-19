@@ -72,7 +72,11 @@ func RememberRepoPath(ctx context.Context, db *sql.DB, rawScope, repoDir string)
 }
 
 // ResolveScopeRepoPath resolves the Git root path for rawScope from explicitRepo, repo_sync, or CWD siblings.
+// In authenticated team server mode, the server never probes host-local filesystem repositories.
 func ResolveScopeRepoPath(ctx context.Context, db *sql.DB, rawScope, explicitRepo string) string {
+	if domain.IsServerMode(ctx) {
+		return ""
+	}
 	sc := domain.NormalizeScope(rawScope)
 	if !strings.HasPrefix(sc, "project:") {
 		return ""

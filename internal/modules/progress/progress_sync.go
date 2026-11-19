@@ -209,7 +209,15 @@ func (s *Service) collectPendingGitCommits(ctx context.Context, scope, repoRoot,
 
 func (s *Service) unlinkedActiveMemories(ctx context.Context, scope string) ([]domain.Fact, error) {
 	linked := make(map[int64]bool)
-	if rows, err := s.db.QueryContext(ctx, `SELECT COALESCE(memory_ids, '') FROM project_progress WHERE scope = ? AND COALESCE(memory_ids, '') != ''`, scope); err == nil {
+	strictPrivate := 0
+	if domain.IsServerMode(ctx) && domain.IsUserPrivateScope(ctx, scope) {
+		strictPrivate = 1
+	}
+	curAcc := domain.EffectivePrincipalAccount(ctx)
+	if rows, err := s.db.QueryContext(ctx, `
+		SELECT COALESCE(memory_ids, '') FROM project_progress
+		WHERE scope = ? AND COALESCE(memory_ids, '') != ''
+		  AND (? = 0 OR COALESCE(account, '') = ?)`, scope, strictPrivate, curAcc); err == nil {
 		for rows.Next() {
 			var raw string
 			if rows.Scan(&raw) == nil {

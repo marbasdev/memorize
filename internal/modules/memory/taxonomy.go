@@ -284,8 +284,7 @@ func (s *Service) ApplyTaxonomyRebalance(ctx context.Context, rawScope string, i
 	if err := domain.CanModifyScope(ctx, targetScope); err != nil {
 		return 0, err
 	}
-	isAdmin := s.canBypassPersonal(ctx)
-	curAcc := s.CurrentAccount(ctx)
+	privSQL, privArgs := s.privateScopeSQL(ctx, "", true)
 	updated := 0
 	var taxPairs [][2]string
 	if err := s.withTx(ctx, func(tx *sql.Tx) error {
@@ -297,12 +296,12 @@ func (s *Service) ApplyTaxonomyRebalance(ctx context.Context, rawScope string, i
 			if !isValidTaxonomySlug(newCat) {
 				continue
 			}
+			qArgs := append([]any{newCat, newSub, it.ID, targetScope}, privArgs...)
 			res, err := tx.ExecContext(ctx, `
 				UPDATE memories
 				SET category = ?, sub_category = ?
 				WHERE id = ? AND scope = ? AND active = 1
-				  AND (? = 1 OR scope != 'personal' OR account = ?)
-			`, newCat, newSub, it.ID, targetScope, boolToInt(isAdmin), curAcc)
+				  AND `+privSQL, qArgs...)
 			if err != nil {
 				return err
 			}

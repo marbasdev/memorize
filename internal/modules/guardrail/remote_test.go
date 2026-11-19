@@ -73,22 +73,26 @@ func TestRemoteThinClientIsolationAndHooks(t *testing.T) {
 		t.Fatalf("alice commit personal rule: %v", err)
 	}
 
-	// Global scope mutation rejected for member Alice, allowed for admin.
-	if _, err := st.mem.CommitMemoryFull(ctxAlice, "Member cannot change global", "architecture", "", "", "global"); err == nil {
-		t.Fatalf("expected member CommitMemoryFull on global scope to fail")
+	// Global scope represents each user's cross-project dev rules in ServerMode (writable by members, isolated per account).
+	if _, err := st.mem.CommitMemoryFull(ctxAlice, "Never call GLOBAL_PRIVATE_TOKEN", "architecture", "", "", "global"); err != nil {
+		t.Fatalf("alice commit own global rule: %v", err)
 	}
 	if _, err := st.mem.CommitMemoryFull(ctxAdmin, "Always run CGO_ENABLED=0 builds", "build", "", "", "global"); err != nil {
-		t.Fatalf("admin commit global rule: %v", err)
+		t.Fatalf("admin commit own global rule: %v", err)
 	}
 
-	// Strict personal isolation: neither Bob nor Admin can see Alice's personal memory.
-	for name, callerCtx := range map[string]context.Context{"bob": ctxBob, "admin": ctxAdmin} {
-		page, err := st.mem.QueryRecordsPage(callerCtx, domain.RecordQuery{Scope: "personal", State: "all"})
-		if err != nil {
-			t.Fatalf("%s QueryRecordsPage(personal): %v", name, err)
-		}
-		if len(page.Records) != 0 {
-			t.Fatalf("%s unexpectedly saw Alice personal memories: %+v", name, page.Records)
+	// Strict personal AND global isolation: neither Bob nor Admin can see Alice's personal or global memories.
+	for _, sc := range []string{"personal", "global"} {
+		for name, callerCtx := range map[string]context.Context{"bob": ctxBob, "admin": ctxAdmin} {
+			page, err := st.mem.QueryRecordsPage(callerCtx, domain.RecordQuery{Scope: sc, State: "all"})
+			if err != nil {
+				t.Fatalf("%s QueryRecordsPage(%s): %v", name, sc, err)
+			}
+			for _, rec := range page.Records {
+				if rec.Account == "alice" {
+					t.Fatalf("%s unexpectedly saw Alice %s memory: %+v", name, sc, rec)
+				}
+			}
 		}
 	}
 
@@ -318,5 +322,72 @@ func TestRemoteServerTeamRuleDocsPerAccountIsolation(t *testing.T) {
 	}
 	if err := rp.SetAuthorName(ctxAdmin, "@lead"); err != nil {
 		t.Fatalf("expected SetAuthorName by admin to succeed: %v", err)
+	}
+
+	// Team Rule Pack precedence: in ServerMode, local_override is blocked and ignored,
+	// QuerySessionMemory injects TEAM rules before project/global/personal, and VerifyPlan lists TEAM violations first.
+	evalTeam := &remoteViolEval{
+		stubEval: stubEval{dec: domain.MutationDecision{Action: "INSERT", Category: "security", IsPermanent: 0.95, IsGlobalInvariant: 0.95, Confidence: 0.95}},
+	}
+	stPrio := newTestStack(t, "", evalTeam)
+	rpPrio := rulepack.New(stPrio.mem)
+	stPrio.mem.AttachExtraFactsProvider(rpPrio)
+	stPrio.gr.AttachRulePack(rpPrio)
+
+	if _, err := stPrio.mem.CommitMemoryFull(ctxAlice, "Never call PROJECT_FORBIDDEN_TOKEN", "security", "", "", "project:teamapp"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stPrio.mem.CommitMemoryFull(ctxAlice, "Never call PERSONAL_ONLY_TOKEN", "architecture", "", "", "global"); err != nil {
+		t.Fatal(err)
+	}
+	teamDoc := "# Team Rules\n\n## Architecture (`architecture`)\n- Never call PROJECT_FORBIDDEN_TOKEN from team rule. · `@lead` · `2026-11-18`\n"
+	if err := rpPrio.IngestTeamRuleDoc(ctxAlice, "project:teamapp", teamDoc); err != nil {
+		t.Fatal(err)
+	}
+	rulesAlice, err := rpPrio.ListTeamRules(ctxAlice, "project:teamapp")
+	if err != nil || len(rulesAlice) != 1 {
+		t.Fatalf("expected 1 ingested team rule, got %+v (err=%v)", rulesAlice, err)
+	}
+	if err := rpPrio.ResolveConflict(ctxAlice, "project:teamapp", rulesAlice[0].RuleKey, "local_override", "try override"); err == nil {
+		t.Fatalf("expected local_override resolution rejected in ServerMode")
+	}
+	// Even if team_rule_states contains a legacy local_override row, ServerMode still enforces the Team Rule.
+	if err := rpPrio.UpsertConflictState(ctxAlice, "project:teamapp", rulesAlice[0].RuleKey, domain.RuleStateLocalOverride, 0, "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	factsAlice, err := rpPrio.ListTeamRuleFacts(ctxAlice, "project:teamapp")
+	if err != nil || len(factsAlice) != 1 {
+		t.Fatalf("expected Team Rule Pack still enforced in ServerMode despite local_override row, got %+v (err=%v)", factsAlice, err)
+	}
+
+	ctxSession := domain.WithSessionID(ctxAlice, "s-prio")
+	qOut, err := stPrio.mem.QuerySessionMemory(ctxSession, "s-prio", "write code", "", "project:teamapp", false)
+	if err != nil {
+		t.Fatalf("QuerySessionMemory: %v", err)
+	}
+	idxTeam := strings.Index(qOut, "TEAM]")
+	if idxTeam < 0 {
+		idxTeam = strings.Index(qOut, "TEAM ")
+	}
+	idxProj := strings.Index(qOut, "Never call PROJECT_FORBIDDEN_TOKEN")
+	idxGlob := strings.Index(qOut, "Never call PERSONAL_ONLY_TOKEN")
+	if idxTeam < 0 || idxProj < 0 || idxGlob < 0 || !(idxTeam < idxProj && idxProj < idxGlob) {
+		t.Fatalf("expected Team -> project -> global injection order, got:\n%s", qOut)
+	}
+
+	// VerifyPlan sorts TEAM violations ahead of private global rule violations and marks global violation IsPrivate=true.
+	verOut, err := stPrio.gr.VerifyPlan(ctxAlice, "PROJECT_FORBIDDEN_TOKEN() and PERSONAL_ONLY_TOKEN()", "project:teamapp")
+	if err != nil {
+		t.Fatalf("VerifyPlan: %v", err)
+	}
+	vTeam := strings.Index(verOut, "TEAM]")
+	vPriv := strings.Index(verOut, "PERSONAL_ONLY_TOKEN")
+	if vTeam < 0 || vPriv < 0 || vTeam >= vPriv {
+		t.Fatalf("expected VerifyPlan TEAM violation listed before global/personal violation, got:\n%s", verOut)
+	}
+	privLogs, _ := stPrio.gr.QueryGuardrailLogsPage(ctxAlice, domain.GuardrailLogQuery{State: "all", PageSize: 20})
+	otherLogs, _ := stPrio.gr.QueryGuardrailLogsPage(ctxAdmin, domain.GuardrailLogQuery{State: "all", PageSize: 20})
+	if privLogs.TotalCount != 1 || !privLogs.Records[0].IsPrivate || otherLogs.TotalCount != 0 {
+		t.Fatalf("expected Alice global violation logged IsPrivate=true and hidden from admin: alice=%+v admin=%+v", privLogs, otherLogs)
 	}
 }

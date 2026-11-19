@@ -227,7 +227,23 @@ func (s *Service) memoryVisibilitySQL(ctx context.Context, alias string) (string
 		scCol = alias + ".scope"
 		accCol = alias + ".account"
 	}
-	return fmt.Sprintf("(%s != 'personal' OR %s = ?)", scCol, accCol), []any{s.CurrentAccount(ctx)}
+	return fmt.Sprintf("(%s NOT IN ('personal', 'global') OR COALESCE(%s, '') = ?)", scCol, accCol), []any{s.CurrentAccount(ctx)}
+}
+
+func (s *Service) privateScopeSQL(ctx context.Context, alias string, allowBypass bool) (string, []any) {
+	if allowBypass && s.canBypassPersonal(ctx) {
+		return "1 = 1", nil
+	}
+	scCol, accCol := "scope", "account"
+	if alias != "" {
+		scCol = alias + ".scope"
+		accCol = alias + ".account"
+	}
+	curAcc := s.CurrentAccount(ctx)
+	if domain.IsServerMode(ctx) {
+		return fmt.Sprintf("(%s NOT IN ('personal', 'global') OR COALESCE(%s, '') = ?)", scCol, accCol), []any{curAcc}
+	}
+	return fmt.Sprintf("(%s != 'personal' OR COALESCE(%s, '') = ?)", scCol, accCol), []any{curAcc}
 }
 
 // ResolveEffectiveSessionID resolves the active conversation/session ID:
@@ -292,15 +308,19 @@ func (s *Service) LoadActiveFacts(ctx context.Context, scopeA, scopeB, category 
 			cat = domain.NormalizeCategoryForScope(scopeA, rawCat)
 		}
 	}
-	acc := s.CurrentAccount(ctx)
+	privSQL, privArgs := s.privateScopeSQL(ctx, "", false)
+	args := make([]any, 0, 8+len(privArgs))
+	args = append(args, scopeA, scopeB, scopeC)
+	args = append(args, privArgs...)
+	args = append(args, cat, cat, cat, subCat, subCat)
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+factSelectColumns+`
 		 FROM memories
 		 WHERE active = 1 AND scope IN (?, ?, ?)
-		   AND (scope != 'personal' OR account = ?)
+		   AND `+privSQL+`
 		   AND (? = '' OR category = ? OR sub_category = ?)
 		   AND (? = '' OR sub_category = ?)
-		 ORDER BY id ASC`, scopeA, scopeB, scopeC, acc, cat, cat, cat, subCat, subCat)
+		 ORDER BY id ASC`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -340,7 +360,8 @@ func (s *Service) loadQueryFacts(ctx context.Context, scopeA, scopeB, category s
 			return nil, err
 		}
 		if len(extra) > 0 {
-			facts = append(facts, extra...)
+			// Team Rule Pack facts always take precedence ahead of DB memories.
+			facts = append(extra, facts...)
 		}
 	}
 	return facts, nil
@@ -546,13 +567,15 @@ func (s *Service) applyEvaluatedCommit(ctx context.Context, targetScope, candida
 		targetIDs = []int64{dec.ConflictFactID}
 	}
 
+	privSQL, privArgs := s.privateScopeSQL(ctx, "", false)
 	if dec.Action == "IGNORE" && len(targetIDs) > 0 {
 		_ = s.withTx(ctx, func(tx *sql.Tx) error {
 			for _, id := range targetIDs {
+				qArgs := append([]any{id, targetScope}, privArgs...)
 				_, _ = tx.ExecContext(ctx,
 					`UPDATE memories SET confidence = MIN(1.0, 1.0 - (1.0 - confidence) * 0.8)
-					 WHERE id = ? AND scope = ? AND (scope != 'personal' OR account = ?) AND active = 1`,
-					id, targetScope, acc)
+					 WHERE id = ? AND scope = ? AND `+privSQL+` AND active = 1`,
+					qArgs...)
 			}
 			return nil
 		})
@@ -591,10 +614,11 @@ func (s *Service) applyEvaluatedCommit(ctx context.Context, targetScope, candida
 		if dec.Action == "OVERWRITE" && len(targetIDs) > 0 {
 			actionKind = "overwrite"
 			for _, oldID := range targetIDs {
+				qArgs := append([]any{newID, oldID, targetScope}, privArgs...)
 				_, err := tx.ExecContext(ctx,
 					`UPDATE memories SET active = 0, superseded_by = ?
-					 WHERE id = ? AND scope = ? AND (scope != 'personal' OR account = ?) AND active = 1`,
-					newID, oldID, targetScope, acc)
+					 WHERE id = ? AND scope = ? AND `+privSQL+` AND active = 1`,
+					qArgs...)
 				if err != nil {
 					return err
 				}

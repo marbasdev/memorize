@@ -182,7 +182,7 @@ func (s *Service) recordVerifyOutcomeLog(ctx context.Context, scope, source, too
 	vIDs, vDetails := formatViolationDetails(blocking)
 	_, _ = s.RecordGuardrailLog(ctx, domain.GuardrailLogInput{
 		Scope:       scope,
-		IsPrivate:   hasPersonalViolation(blocking),
+		IsPrivate:   hasPrivateViolation(ctx, blocking),
 		Source:      source,
 		ToolName:    toolName,
 		Verdict:     domain.GuardrailVerdictRuleViolation,

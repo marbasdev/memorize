@@ -403,6 +403,11 @@ func (s *Service) GetProgressOverviewWithQuery(ctx context.Context, q domain.Pro
 		out.Sync = s.InspectProgressSync(ctx, sqlScope, q.ExplicitRepo)
 	}
 
+	strictPrivate := 0
+	if domain.IsServerMode(ctx) {
+		strictPrivate = 1
+	}
+	curAcc := domain.EffectivePrincipalAccount(ctx)
 	accFilter := strings.TrimSpace(q.Account)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, scope, COALESCE(account, ''), COALESCE(session_id, ''), COALESCE(track, ''), category, COALESCE(sub_category, ''),
@@ -412,9 +417,10 @@ func (s *Service) GetProgressOverviewWithQuery(ctx context.Context, q domain.Pro
 		FROM project_progress
 		WHERE (? = '' OR scope = ?)
 		  AND (? = '' OR LOWER(COALESCE(account, '')) = LOWER(?))
+		  AND (? = 0 OR scope NOT IN ('personal', 'global') OR COALESCE(account, '') = ?)
 		ORDER BY id DESC
 		LIMIT 2000
-	`, sqlScope, sqlScope, accFilter, accFilter)
+	`, sqlScope, sqlScope, accFilter, accFilter, strictPrivate, curAcc)
 	if err != nil {
 		return out, err
 	}
