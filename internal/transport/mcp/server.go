@@ -20,7 +20,7 @@ const ServerInstructions = `Memorize Protocol:
 4. Onboarding: if [ONBOARDING AVAILABLE], ask user first; call manage_memory(skip_onboarding) if declined, or inspect files, resolve conflicts, commit, and offer cleanup.
 5. SSOT: active memories replace static rule files (CLAUDE.md/AGENTS.md) and override older turns; ignore (Replaces: ...) and [REVOKED ...].
 6. Progress: optionally call project_progress(action="record") after completing notable tasks or milestones to log completed work in the activity feed.
-7. Team Rules: use team_rules for shared .memorize/TEAM_RULES.md rules (list/sync/add/promote/resolve_conflict/duplicates); NEVER hand-edit TEAM_RULES.md so workspace code stays unmixed.
+7. Team Rules: use team_rules for shared .memorize/TEAM_RULES.md rules (list/sync/add/promote/update/remove/resolve_conflict/duplicates); NEVER hand-edit TEAM_RULES.md so workspace code stays unmixed.
 8. Verify Plan: call verify_plan_against_memory once before multi-file refactors; shell commands gate PreToolUse while file edits batch-verify on Stop.`
 
 type BridgeReqMeta struct {

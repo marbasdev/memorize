@@ -108,6 +108,7 @@ The local daemon and Web Console (**`http://127.0.0.1:18095`**) start automatica
 
 - **macOS · Linux**: Download a recommended **Local GGUF** model in 1 click *(or connect `Gemini`, `System 1`, or `Custom Local URL`)*
 - **Windows**: Built-in GGUF is disabled → connect a **Custom Local URL** (`Ollama` · `LM Studio` · `vLLM`), `System 1`, or a `Gemini API key`
+- **Team Thin Client *(Optional)***: Connecting to an existing team server (`memorize connect` or Web Console **`Remote Servers`**) requires no local database or inference engine—see [Team Collaboration Guide](./TEAM.md)
 
 ### 3. Onboarding an Existing Project *(First Run on a Repo)*
 
@@ -166,7 +167,7 @@ As sessions accumulate rules over time, the **Memories** tab provides safe curat
 - **2D Treemap Distribution & Non-Destructive Re-Categorization**: The **Category & Sub-Category Distribution** map surfaces `unclassified` entries and `Cross-category sub` overlaps at a glance. Manage preset taxonomies and autocomplete labels via **`Categories...`**, then run **`AI Categorize...`** to clean up category and sub-category tags **without rewriting or altering any memory wording**.
 - **AI Duplicate Merge & Manual Consolidation (`Consolidate...`)**: Merge overlapping memories across sessions using **AI Merge Recommendations** or manual multi-select, compressing redundant entries into one canonical rule while keeping `Replaces` lineage intact.
 - **Core Rules (Pinned) & Reversible Lifecycle**: Promote critical rules to **`Core Rule (Pinned)`** via inline edit so they stay injected regardless of scoring, and retire outdated entries safely with **`Forget`** -> **`Undo / Restore`** -> **`Purge Tombstones`** *(active `Replaces` lineage remains preserved after purging)*.
-- **Per-Project Isolation via Git Repositories (3 Scopes)**: Designed around **Git repository (`.git`) detection**, `memorize` automatically resolves the repository root into an isolated `project:<repo>` scope so rules and progress never bleed across repositories. Shared and personal preferences remain separated in `global` and `personal`, with an **`Include personal`** toolbar toggle when you want personal rules overlaid during project lookups.
+- **Per-Project Isolation via Git Repositories**: Designed around **Git repository (`.git`) detection**, `memorize` automatically resolves the repository root into an isolated `project:<repo>` scope so rules and progress never bleed across repositories. Cross-project dev rules (`global`) and non-dev personal notes (`personal`) stay cleanly separated—with per-account isolation in **Team Server Mode** and an **`Include personal`** toggle when you want personal notes overlaid during project lookups.
 
 ---
 
@@ -194,6 +195,7 @@ Both the Daemon / Web Console port (default `18095`) and the built-in Local GGUF
 ~/.memorize/bin/memorize daemon port                   # Inspect configured & active ports
 ~/.memorize/bin/memorize daemon port 19095 19088       # Set Daemon & GGUF ports (or --daemon N --gguf N)
 ~/.memorize/bin/memorize daemon port reset             # Reset both ports to defaults (18095 / 18088)
+~/.memorize/bin/memorize serve --addr 0.0.0.0:18095    # Start shared Team Server (see TEAM.md for user/connect commands)
 ```
 
 ### Upgrade (`memories.db` Preserved & Migrated Automatically)

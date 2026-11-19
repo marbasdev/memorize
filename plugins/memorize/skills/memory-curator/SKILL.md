@@ -27,6 +27,7 @@ description: >-
 ## 5. Project Activity History
 - Optionally call `project_progress(action="record", track="...", summary="...")` after completing notable work milestones or non-commit tasks to record them in the chronological project activity timeline alongside automatic memory and Git commit sync entries.
 
-## 6. Team Rule Pack (`.memorize/TEAM_RULES.md`)
-- Use the `team_rules` MCP tool (`list`, `sync`, `add`, `promote`, `update`, `remove`, `resolve_conflict`, `duplicates`, `clean_duplicates`, `set_config`) to manage shared Git-backed Team Rules; NEVER hand-edit `.memorize/TEAM_RULES.md` or mix uncommitted feature code into Team Rule commits (`memorize` commits and pushes strictly via an isolated `git worktree`).
-- If `[TEAM RULE CONFLICT DETECTED]` appears or `add`/`promote` pauses with `conflict_pending`, stop and ask the user whether to adopt the Team Rule (`adopt_team`) or keep their local override (`local_override`).
+## 6. Team Rule Pack & Team Server Mode
+- Use `team_rules` (`list`, `sync`, `add`, `promote`, `update`, `remove`, `resolve_conflict`, `duplicates`, `clean_duplicates`, `set_config`) for shared `.memorize/TEAM_RULES.md` rules; NEVER hand-edit `.memorize/TEAM_RULES.md` or mix uncommitted feature code into Team Rule commits (`memorize` commits and pushes strictly via an isolated `git worktree`).
+- On `[TEAM RULE CONFLICT DETECTED]` or `conflict_pending`, pause and ask the user to adopt (`adopt_team`) or keep their local override (`local_override`).
+- In authenticated Team Server Mode (`memorize serve`), Team Rules always take top priority (`local_override` and server-host Git mutations are disabled), `project:*` rules are shared across teammates, `global` is isolated per user for cross-project dev rules, and `personal` is isolated per user for non-dev notes.
