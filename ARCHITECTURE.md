@@ -32,8 +32,8 @@ flowchart LR
 
 ## 2. Package Layering
 
-**Strict Acyclic DAG**: `domain -> infra -> inference -> modules -> transport -> app <- cmd/memorize`
-*(Lower layers never import higher layers; `cmd` injects `RuntimeHooks` into `transport/cli` so `transport/*` never imports `app/*`; `infra/sqlite` has zero `infra/git` coupling; production `git` execution stays confined to `internal/infra/git`; `transport/*` holds zero raw SQL queries.)*
+**Dependency Direction (Acyclic DAG)**: `cmd/memorize → app → transport → modules → inference → infra → domain`  
+*(Dependencies flow strictly downward; Git execution and SQLite access stay encapsulated within their owning layers.)*
 
 | Layer | Packages | Role & Boundary |
 | :--- | :--- | :--- |

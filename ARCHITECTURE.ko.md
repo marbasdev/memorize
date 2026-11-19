@@ -32,8 +32,8 @@ flowchart LR
 
 ## 2. 패키지 아키텍처
 
-**단방향 비순환 계층(DAG)**: `domain -> infra -> inference -> modules -> transport -> app <- cmd/memorize`
-*(하위 계층은 상위 계층을 임포트하지 않으며, `cmd`가 `RuntimeHooks`를 주입해 `transport/*`의 `app/*` 의존을 차단하고, `infra/sqlite`는 `infra/git`에 의존하지 않으며, 프로덕션 `git` 호출은 `internal/infra/git`에만 격리하고 `transport/*`에는 프로덕션 Raw SQL을 두지 않습니다.)*
+**의존성 방향 (비순환 DAG)**: `cmd/memorize → app → transport → modules → inference → infra → domain`  
+*(상위 계층만 하위 계층을 참조하며, Git 실행과 SQLite 접근은 각 소유 계층 내부로 격리합니다.)*
 
 | 계층 | 패키지 | 역할 및 경계 |
 | :--- | :--- | :--- |

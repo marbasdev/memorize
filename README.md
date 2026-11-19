@@ -244,6 +244,6 @@ rm -rf ~/.memorize                            # Or $MEMORY_DATA_DIR if overridde
 ## Roadmap, Feedback, & Docs
 
 - **Roadmap**
-  - [ ] **Cross-Device Sync *(Later)***: Keep one user's memories synced across multiple machines without manually copying DB files
+  - Cross-device sync is on hold; **Shared Team Server Mode** has been added.
 - **Feedback & Issues**: External code pull requests are not accepted at this time, but suggestions, bug reports, and questions are welcome via [GitHub Issues](https://github.com/marbasdev/memorize/issues)—any issue or report is reviewed and addressed immediately once seen *(do not post vulnerability exploit details publicly; see [SECURITY.md](./SECURITY.md))*.
 - **Docs & License**: [Team Collaboration](./TEAM.md) · [Architecture & Env Reference](./ARCHITECTURE.md) · [Feedback Policy](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [MIT License](./LICENSE)
