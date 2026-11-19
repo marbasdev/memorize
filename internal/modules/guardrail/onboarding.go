@@ -16,9 +16,10 @@ func (s *Service) GetOnboardingStatus(ctx context.Context, rawScope string) stri
 	if err := s.db.QueryRowContext(ctx, `SELECT status FROM project_onboarding WHERE scope = ?`, sc).Scan(&st); err == nil && strings.TrimSpace(st) != "" {
 		return strings.TrimSpace(st)
 	}
-	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM memories WHERE scope = ?`, sc).Scan(&count); err == nil && count > 0 {
-		return "completed"
+	if s.mem != nil {
+		if page, err := s.mem.QueryRecordsPage(ctx, domain.RecordQuery{Scope: sc, State: "all", PageSize: 1}); err == nil && page.FilteredRecords > 0 {
+			return "completed"
+		}
 	}
 	return "pending"
 }
@@ -31,7 +32,7 @@ func (s *Service) SkipOnboarding(ctx context.Context, rawScope string) error {
 		ON CONFLICT(scope) DO UPDATE SET status = 'skipped', updated_at = CURRENT_TIMESTAMP
 	`, sc)
 	if err == nil && s.mem != nil {
-		s.mem.MarkTurnScopeMutated(sc)
+		s.mem.MarkTurnScopeMutatedCtx(ctx, sc)
 	}
 	return err
 }

@@ -5,7 +5,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -644,4 +648,209 @@ func TestEnsureRunningSkipsDuplicateDaemonWhenTeamServerActive(t *testing.T) {
 	if st == nil || !st.ServerMode || !st.Running {
 		t.Fatalf("expected authRequired team server status hint, got %+v", st)
 	}
+}
+
+func TestArchitectureBoundaries(t *testing.T) {
+	repoRoot, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("dag_layer_imports", func(t *testing.T) {
+		cmd := exec.Command("go", "list", "-json", "./...")
+		cmd.Dir = repoRoot
+		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("go list -json ./... failed: %v\n%s", err, string(out))
+		}
+
+		type pkgInfo struct {
+			ImportPath string   `json:"ImportPath"`
+			Imports    []string `json:"Imports"`
+		}
+		var pkgs []pkgInfo
+		dec := json.NewDecoder(bytes.NewReader(out))
+		for dec.More() {
+			var p pkgInfo
+			if err := dec.Decode(&p); err != nil {
+				t.Fatalf("decode go list output: %v", err)
+			}
+			pkgs = append(pkgs, p)
+		}
+		if len(pkgs) == 0 {
+			t.Fatalf("go list returned no packages")
+		}
+
+		forbiddenFor := func(pkg string) []string {
+			switch {
+			case pkg == "memorize/internal/domain":
+				return []string{"memorize/internal/"}
+			case pkg == "memorize/internal/infra/sqlite":
+				return []string{
+					"memorize/internal/infra/git",
+					"memorize/internal/inference/",
+					"memorize/internal/modules/",
+					"memorize/internal/transport/",
+					"memorize/internal/app/",
+				}
+			case strings.HasPrefix(pkg, "memorize/internal/infra/"):
+				return []string{
+					"memorize/internal/inference/",
+					"memorize/internal/modules/",
+					"memorize/internal/transport/",
+					"memorize/internal/app/",
+				}
+			case strings.HasPrefix(pkg, "memorize/internal/inference/"):
+				return []string{
+					"memorize/internal/modules/",
+					"memorize/internal/transport/",
+					"memorize/internal/app/",
+				}
+			case strings.HasPrefix(pkg, "memorize/internal/modules/"):
+				return []string{
+					"memorize/internal/transport/",
+					"memorize/internal/app/",
+				}
+			case strings.HasPrefix(pkg, "memorize/internal/transport/"):
+				return []string{
+					"memorize/internal/app/",
+				}
+			default:
+				return nil
+			}
+		}
+
+		for _, p := range pkgs {
+			forbidden := forbiddenFor(p.ImportPath)
+			for _, imp := range p.Imports {
+				for _, bad := range forbidden {
+					if imp == bad || strings.HasPrefix(imp, bad) {
+						t.Errorf("DAG violation: %s imports forbidden package %s", p.ImportPath, imp)
+					}
+				}
+			}
+		}
+	})
+
+	t.Run("production_source_isolation", func(t *testing.T) {
+		fset := token.NewFileSet()
+		rawSQLMethods := map[string]bool{
+			"QueryContext":    true,
+			"QueryRowContext": true,
+			"QueryRow":        true,
+			"ExecContext":     true,
+			"PrepareContext":  true,
+			"BeginTx":         true,
+		}
+		sqlVerbs := []string{"SELECT ", "INSERT ", "UPDATE ", "DELETE ", "CREATE ", "DROP ", "ALTER ", "PRAGMA "}
+
+		for _, root := range []string{"internal", "cmd"} {
+			walkRoot := filepath.Join(repoRoot, root)
+			err := filepath.WalkDir(walkRoot, func(path string, d fs.DirEntry, walkErr error) error {
+				if walkErr != nil {
+					return walkErr
+				}
+				if d.IsDir() || !strings.HasSuffix(d.Name(), ".go") || strings.HasSuffix(d.Name(), "_test.go") {
+					return nil
+				}
+				rel, err := filepath.Rel(repoRoot, path)
+				if err != nil {
+					return err
+				}
+				rel = filepath.ToSlash(rel)
+
+				file, err := parser.ParseFile(fset, path, nil, 0)
+				if err != nil {
+					t.Errorf("parse %s: %v", rel, err)
+					return nil
+				}
+
+				execAliases := map[string]bool{}
+				sqlAliases := map[string]bool{}
+				for _, imp := range file.Imports {
+					impPath, err := strconv.Unquote(imp.Path.Value)
+					if err != nil {
+						continue
+					}
+					alias := ""
+					if imp.Name != nil {
+						alias = imp.Name.Name
+					}
+					switch impPath {
+					case "os/exec":
+						if alias == "" {
+							alias = "exec"
+						}
+						execAliases[alias] = true
+					case "database/sql":
+						if alias == "" {
+							alias = "sql"
+						}
+						sqlAliases[alias] = true
+					}
+				}
+
+				inInfraGit := strings.HasPrefix(rel, "internal/infra/git/")
+				inInfraSQLite := strings.HasPrefix(rel, "internal/infra/sqlite/")
+				inTransport := strings.HasPrefix(rel, "internal/transport/")
+
+				ast.Inspect(file, func(n ast.Node) bool {
+					call, ok := n.(*ast.CallExpr)
+					if !ok {
+						return true
+					}
+					sel, ok := call.Fun.(*ast.SelectorExpr)
+					if !ok {
+						return true
+					}
+					pos := fset.Position(call.Pos())
+
+					if id, ok := sel.X.(*ast.Ident); ok {
+						if !inInfraGit && execAliases[id.Name] {
+							argIdx := -1
+							if sel.Sel.Name == "Command" {
+								argIdx = 0
+							} else if sel.Sel.Name == "CommandContext" {
+								argIdx = 1
+							}
+							if argIdx >= 0 && len(call.Args) > argIdx {
+								if lit, ok := call.Args[argIdx].(*ast.BasicLit); ok && lit.Kind == token.STRING {
+									if v, err := strconv.Unquote(lit.Value); err == nil && v == "git" {
+										t.Errorf("git exec isolation violation at %s:%d: production git commands belong in internal/infra/git", rel, pos.Line)
+									}
+								}
+							}
+						}
+						if !inInfraSQLite && sqlAliases[id.Name] && sel.Sel.Name == "Open" {
+							t.Errorf("sqlite isolation violation at %s:%d: sql.Open belongs in internal/infra/sqlite", rel, pos.Line)
+						}
+					}
+
+					if inTransport {
+						if rawSQLMethods[sel.Sel.Name] {
+							t.Errorf("transport raw SQL violation at %s:%d: %s() should live in modules/infra", rel, pos.Line, sel.Sel.Name)
+						} else if (sel.Sel.Name == "Exec" || sel.Sel.Name == "Query") && len(call.Args) > 0 {
+							if lit, ok := call.Args[0].(*ast.BasicLit); ok && lit.Kind == token.STRING {
+								if v, err := strconv.Unquote(lit.Value); err == nil {
+									up := strings.ToUpper(strings.TrimSpace(v))
+									for _, verb := range sqlVerbs {
+										if strings.HasPrefix(up, verb) {
+											t.Errorf("transport raw SQL violation at %s:%d: %s(%q) should live in modules/infra", rel, pos.Line, sel.Sel.Name, verb)
+											break
+										}
+									}
+								}
+							}
+						}
+					}
+					return true
+				})
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("walk %s: %v", root, err)
+			}
+		}
+	})
 }

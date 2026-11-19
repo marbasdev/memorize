@@ -717,7 +717,7 @@ func TestGeminiHeaderAndLogprobsDebiasing(t *testing.T) {
 
 	t.Setenv("GEMINI_API_BASE", srv.URL)
 	t.Setenv("GEMINI_API_KEY", "header-only-test-key")
-	gem := NewGeminiAdapter()
+	gem := NewGeminiAdapterConfig("", "")
 
 	facts := []domain.Fact{{ID: 1, Scope: "project:gem", Category: "security", Content: "Use HttpOnly cookies"}}
 	scored1, err := gem.ScoreRelevance(context.Background(), "login handler", facts)

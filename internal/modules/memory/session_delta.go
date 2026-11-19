@@ -409,7 +409,6 @@ func (s *Service) RecordTurnState(ctx context.Context, sessionID, rawScope, user
 			last_input = excluded.last_input,
 			updated_at = excluded.updated_at
 	`, sid, sc, inp, now)
-	_, _ = s.db.ExecContext(ctx, `DELETE FROM turn_pending_edits WHERE session_id = ? AND scope = ? AND turn_input != '' AND turn_input != ?`, sid, sc, inp)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM turn_state WHERE updated_at < ?`, now-7200)
 }
 
@@ -429,14 +428,11 @@ func (s *Service) TouchTurnSession(ctx context.Context, sessionID, rawScope stri
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM turn_state WHERE updated_at < ?`, now-7200)
 }
 
-func (s *Service) MarkTurnScopeMutated(rawScope string) {
-	s.MarkTurnScopeMutatedCtx(context.Background(), rawScope)
-}
-
 func (s *Service) MarkTurnScopeMutatedCtx(ctx context.Context, rawScope string) {
 	sc := domain.NormalizeScope(rawScope)
-	if p, ok := domain.AuthPrincipalFromContext(ctx); ok && p.ServerMode && p.Account != "" && sc == "personal" {
-		_, _ = s.db.ExecContext(ctx, `UPDATE turn_state SET mutated = 1 WHERE scope = ? AND session_id LIKE ?`, sc, "u:"+p.Account+":%")
+	// In ServerMode, isolate turn_state updates to the acting account so one member's commit never clears another's gate.
+	if p, ok := domain.AuthPrincipalFromContext(ctx); ok && p.ServerMode && p.Account != "" {
+		_, _ = s.db.ExecContext(ctx, `UPDATE turn_state SET mutated = 1 WHERE (scope = ? OR ? = 'global') AND session_id LIKE ?`, sc, sc, "u:"+p.Account+":%")
 	} else {
 		_, _ = s.db.ExecContext(ctx, `UPDATE turn_state SET mutated = 1 WHERE scope = ? OR ? = 'global'`, sc, sc)
 	}

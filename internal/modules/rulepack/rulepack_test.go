@@ -724,3 +724,50 @@ func TestRulePackAIWorkflowConflictsDedupeAndSessionInvalidation(t *testing.T) {
 		t.Fatalf("expected trimmed fact to preserve pinned=true & sub_category=sqlite, got %+v", remaining[0])
 	}
 }
+
+func TestPromoteLocalMemoryServerModePrivateIsolation(t *testing.T) {
+	_, repoDir, _ := initTestRepoWithOrigin(t)
+	dbPath := filepath.Join(t.TempDir(), "memories.db")
+	memSvc, err := memory.Open(dbPath, &aiRuleEval{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = memSvc.Close() })
+	rpSvc := New(memSvc)
+
+	ctxAlice := domain.WithAuthPrincipal(context.Background(), domain.AuthPrincipal{
+		Account: "alice", Role: domain.RoleMember, ServerMode: true, Authenticated: true,
+	})
+	ctxBob := domain.WithAuthPrincipal(context.Background(), domain.AuthPrincipal{
+		Account: "bob", Role: domain.RoleMember, ServerMode: true, Authenticated: true,
+	})
+	ctxAdmin := domain.WithAuthPrincipal(context.Background(), domain.AuthPrincipal{
+		Account: "admin", Role: domain.RoleAdmin, ServerMode: true, Authenticated: true,
+	})
+
+	if _, err := memSvc.CommitMemoryFull(ctxAlice, "Alice private global convention", "convention", "", "", "global"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := memSvc.CommitMemoryFull(ctxAlice, "Alice personal shortcut", "preference", "", "", "personal"); err != nil {
+		t.Fatal(err)
+	}
+	aliceFacts, err := memSvc.LoadActiveFacts(ctxAlice, "global", "personal", "")
+	if err != nil || len(aliceFacts) != 2 {
+		t.Fatalf("expected 2 private facts for alice, got %d err=%v", len(aliceFacts), err)
+	}
+
+	for _, f := range aliceFacts {
+		for name, otherCtx := range map[string]context.Context{"bob": ctxBob, "admin": ctxAdmin} {
+			if _, _, err := rpSvc.PromoteLocalMemory(otherCtx, f.ID, "project:teamapp", repoDir); err == nil {
+				t.Fatalf("expected %s PromoteLocalMemory on alice %s #%d to be denied", name, f.Scope, f.ID)
+			}
+			cleanRes, err := rpSvc.ApplyDuplicateCleanup(otherCtx, f.Scope, []DuplicateCleanupAction{{LocalMemoryID: f.ID, Action: "delete"}})
+			if err != nil || len(cleanRes.DeletedIDs) != 0 {
+				t.Fatalf("expected %s ApplyDuplicateCleanup on alice %s #%d to skip private record, got res=%+v err=%v", name, f.Scope, f.ID, cleanRes, err)
+			}
+		}
+		if _, src, err := rpSvc.PromoteLocalMemory(ctxAlice, f.ID, "project:teamapp", repoDir); err != nil || src.ID != f.ID {
+			t.Fatalf("expected alice to promote own %s #%d, got src=%+v err=%v", f.Scope, f.ID, src, err)
+		}
+	}
+}

@@ -168,35 +168,39 @@ func (s *Service) DraftProposalFromText(ctx context.Context, rawScope, repoDir, 
 }
 
 func (s *Service) PromoteLocalMemory(ctx context.Context, localMemoryID int64, rawScope, repoDir string) (domain.RulePlacementProposal, domain.Fact, error) {
-	if s == nil || s.mem == nil || s.db == nil {
+	if s == nil || s.mem == nil {
 		return domain.RulePlacementProposal{}, domain.Fact{}, fmt.Errorf("memory service is unavailable")
 	}
 	if localMemoryID <= 0 {
 		return domain.RulePlacementProposal{}, domain.Fact{}, fmt.Errorf("invalid local_memory_id %d", localMemoryID)
 	}
 
-	var active int
-	var rowScope, acc string
-	if err := s.db.QueryRowContext(ctx, `SELECT active, scope, COALESCE(account, '') FROM memories WHERE id = ?`, localMemoryID).Scan(&active, &rowScope, &acc); err != nil {
-		return domain.RulePlacementProposal{}, domain.Fact{}, fmt.Errorf("local memory #%d not found", localMemoryID)
-	}
-	if active != 1 {
-		return domain.RulePlacementProposal{}, domain.Fact{}, fmt.Errorf("local memory #%d is inactive/archived", localMemoryID)
-	}
-	if rowScope == "personal" && !domain.IsAdminContext(ctx) {
-		cur := s.mem.CurrentAccount(ctx)
-		if acc != "" && acc != cur {
-			return domain.RulePlacementProposal{}, domain.Fact{}, fmt.Errorf("permission denied: personal memory #%d belongs to %q", localMemoryID, acc)
-		}
-	}
-
-	facts, err := s.mem.FactsByIDs(ctx, []int64{localMemoryID})
+	recs, err := s.mem.GetRecordsByIDs(ctx, []int64{localMemoryID})
 	if err != nil {
 		return domain.RulePlacementProposal{}, domain.Fact{}, err
 	}
-	src, ok := facts[localMemoryID]
-	if !ok {
+	if len(recs) == 0 {
 		return domain.RulePlacementProposal{}, domain.Fact{}, fmt.Errorf("local memory #%d not found", localMemoryID)
+	}
+	rec := recs[0]
+	if !rec.Active {
+		return domain.RulePlacementProposal{}, domain.Fact{}, fmt.Errorf("local memory #%d is inactive/archived", localMemoryID)
+	}
+	if domain.IsUserPrivateScope(ctx, rec.Scope) && !domain.IsAdminContext(ctx) {
+		cur := s.mem.CurrentAccount(ctx)
+		if rec.Account != "" && rec.Account != cur {
+			return domain.RulePlacementProposal{}, domain.Fact{}, fmt.Errorf("permission denied: private memory #%d belongs to %q", localMemoryID, rec.Account)
+		}
+	}
+	src := domain.Fact{
+		ID:          rec.ID,
+		Scope:       rec.Scope,
+		Account:     rec.Account,
+		Category:    rec.Category,
+		SubCategory: rec.SubCategory,
+		Tags:        rec.Tags,
+		Content:     rec.Content,
+		Pinned:      rec.Pinned,
 	}
 
 	targetScope := domain.NormalizeScope(rawScope)
@@ -481,20 +485,27 @@ func (s *Service) DetectRedundantLocalMemories(ctx context.Context, rawScope str
 
 func (s *Service) ApplyDuplicateCleanup(ctx context.Context, rawScope string, actions []DuplicateCleanupAction) (DuplicateCleanupResult, error) {
 	var res DuplicateCleanupResult
-	if s == nil || s.mem == nil || s.db == nil {
+	if s == nil || s.mem == nil {
 		return res, fmt.Errorf("memory service is unavailable")
 	}
 	sc := domain.NormalizeScope(rawScope)
+	ids := make([]int64, 0, len(actions))
 	for _, act := range actions {
-		if act.LocalMemoryID <= 0 {
-			continue
+		if act.LocalMemoryID > 0 {
+			ids = append(ids, act.LocalMemoryID)
 		}
-		var memScope string
-		var active int
-		if err := s.db.QueryRowContext(ctx, `SELECT scope, active FROM memories WHERE id = ?`, act.LocalMemoryID).Scan(&memScope, &active); err != nil {
-			continue
-		}
-		if active != 1 || (strings.HasPrefix(sc, "project:") && memScope != sc) {
+	}
+	recs, err := s.mem.GetRecordsByIDs(ctx, ids)
+	if err != nil {
+		return res, err
+	}
+	byID := make(map[int64]domain.MemoryRecord, len(recs))
+	for _, rec := range recs {
+		byID[rec.ID] = rec
+	}
+	for _, act := range actions {
+		rec, ok := byID[act.LocalMemoryID]
+		if !ok || !rec.Active || (strings.HasPrefix(sc, "project:") && rec.Scope != sc) {
 			continue
 		}
 		switch strings.ToLower(strings.TrimSpace(act.Action)) {

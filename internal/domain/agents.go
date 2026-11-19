@@ -78,9 +78,7 @@ var agentCatalog = []AgentSpec{
 
 func AllAgentSpecs() []AgentSpec {
 	out := make([]AgentSpec, len(agentCatalog))
-	for i, spec := range agentCatalog {
-		out[i] = spec
-	}
+	copy(out, agentCatalog)
 	return out
 }
 

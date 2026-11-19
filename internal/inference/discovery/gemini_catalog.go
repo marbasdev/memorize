@@ -20,10 +20,6 @@ var geminiCatalogClient = &http.Client{
 }
 
 func DefaultGeminiModels() []GeminiModelOption {
-	return defaultGeminiModels()
-}
-
-func defaultGeminiModels() []GeminiModelOption {
 	return []GeminiModelOption{
 		{
 			ID: "gemini-3.5-flash-lite", Name: "Gemini 3.5 Flash-Lite", Tier: "speed", Recommended: true, ContextTokens: 1048576,
@@ -82,7 +78,7 @@ func isCanonicalGeminiAlias(id string) bool {
 func DiscoverGeminiModels(ctx context.Context, rawCfg map[string]string, overrideKey string) ([]GeminiModelOption, string, string) {
 	apiKey := EnvOrDefault(overrideKey, "", EnvOrDefault(rawCfg["gemini_api_key"], "GEMINI_API_KEY", ""))
 	if apiKey == "" {
-		return defaultGeminiModels(), "builtin", ""
+		return DefaultGeminiModels(), "builtin", ""
 	}
 	base := strings.TrimRight(EnvOrDefault("", "GEMINI_API_BASE", "https://generativelanguage.googleapis.com"), "/")
 	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -90,7 +86,7 @@ func DiscoverGeminiModels(ctx context.Context, rawCfg map[string]string, overrid
 
 	code, body, err := httpGetBody(cctx, geminiCatalogClient, base+"/v1beta/models?pageSize=100", "x-goog-api-key", apiKey, 1<<20)
 	if err != nil {
-		return defaultGeminiModels(), "builtin", err.Error()
+		return DefaultGeminiModels(), "builtin", err.Error()
 	}
 	if code >= 300 {
 		var apiErr struct {
@@ -102,7 +98,7 @@ func DiscoverGeminiModels(ctx context.Context, rawCfg map[string]string, overrid
 		if json.Unmarshal(body, &apiErr) == nil && apiErr.Error.Message != "" {
 			msg = apiErr.Error.Message
 		}
-		return defaultGeminiModels(), "builtin", msg
+		return DefaultGeminiModels(), "builtin", msg
 	}
 
 	var payload struct {
@@ -115,7 +111,7 @@ func DiscoverGeminiModels(ctx context.Context, rawCfg map[string]string, overrid
 		} `json:"models"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return defaultGeminiModels(), "builtin", err.Error()
+		return DefaultGeminiModels(), "builtin", err.Error()
 	}
 
 	var list []GeminiModelOption
@@ -185,7 +181,7 @@ func DiscoverGeminiModels(ctx context.Context, rawCfg map[string]string, overrid
 		})
 	}
 	if len(list) == 0 {
-		return defaultGeminiModels(), "builtin", ""
+		return DefaultGeminiModels(), "builtin", ""
 	}
 	tierOrder := map[string]int{"speed": 0, "decision": 1, "balanced": 2, "accuracy": 3}
 	sort.Slice(list, func(i, j int) bool {

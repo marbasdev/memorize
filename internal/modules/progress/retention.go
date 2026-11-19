@@ -34,9 +34,7 @@ func (s *Service) SetProgressRetentionDays(ctx context.Context, days int) (domai
 
 func (s *Service) getProgressPrunedMemHWM(ctx context.Context, scope string) int64 {
 	sc := domain.NormalizeScope(scope)
-	var raw string
-	_ = s.db.QueryRowContext(ctx, `SELECT val FROM config WHERE key = ?`, config.CfgProgressPrunedMemHWM+sc).Scan(&raw)
-	v, _ := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	v, _ := strconv.ParseInt(strings.TrimSpace(s.mem.GetConfigMap(ctx)[config.CfgProgressPrunedMemHWM+sc]), 10, 64)
 	return v
 }
 

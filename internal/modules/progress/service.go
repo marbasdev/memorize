@@ -50,10 +50,6 @@ func New(mem *memory.Service) *Service {
 	return s
 }
 
-func (s *Service) Memory() *memory.Service {
-	return s.mem
-}
-
 func (s *Service) notifyProgressChange() {
 	if s != nil && s.bus != nil {
 		s.bus.Publish("progress")

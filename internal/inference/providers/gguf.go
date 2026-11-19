@@ -42,10 +42,6 @@ func NewGGUFAdapter(endpoint, model string, ensureFn ...func(context.Context) er
 	return newGGUFAdapter(endpoint, model, fn, nil)
 }
 
-func NewGGUFAdapterWithEndpoint(endpoint, model string, wakeEPFn func(context.Context) (string, error)) *BatchEvaluator {
-	return newGGUFAdapter(endpoint, model, nil, wakeEPFn)
-}
-
 func newGGUFAdapter(endpoint, model string, fn func(context.Context) error, wakeEPFn func(context.Context) (string, error)) *BatchEvaluator {
 	ep := strings.TrimSpace(endpoint)
 	if ep == "" {

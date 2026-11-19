@@ -235,12 +235,6 @@ func (s *Service) prepareContextTurn(ctx context.Context, ev NormalizedHookEvent
 	return ctx, combinedTask, compacted
 }
 
-func hasInjectedMemoryPayload(qOut string) bool {
-	return !strings.HasPrefix(qOut, "No new memories") &&
-		!strings.HasPrefix(qOut, "No active") &&
-		!strings.HasPrefix(qOut, "No relevant memories")
-}
-
 func (s *Service) collectTargetContext(
 	ctx context.Context,
 	sid string,
@@ -255,6 +249,7 @@ func (s *Service) collectTargetContext(
 	if explicitSID != "" {
 		if !isStart && rawUserPrompt != "" {
 			s.mem.RecordTurnState(localCtx, explicitSID, t.Scope, rawUserPrompt)
+			s.clearStalePendingTurnEdits(localCtx, explicitSID, t.Scope, rawUserPrompt)
 		} else {
 			s.mem.TouchTurnSession(localCtx, explicitSID, t.Scope)
 		}
@@ -308,7 +303,9 @@ func (s *Service) collectTargetContext(
 	}
 
 	qOut = strings.TrimSpace(qOut)
-	hasNew := hasInjectedMemoryPayload(qOut)
+	hasNew := !strings.HasPrefix(qOut, "No new memories") &&
+		!strings.HasPrefix(qOut, "No active") &&
+		!strings.HasPrefix(qOut, "No relevant memories")
 	hasSync := syncMsg != "" || rpConflictMsg != "" || onboardMsg != "" || partialMsg != ""
 
 	var parts []string
@@ -330,6 +327,9 @@ func (s *Service) checkTurnPreMutateGate(ctx context.Context, ev NormalizedHookE
 		return "", nil
 	}
 	cand := s.mem.ConsumeTurnPreMutateCandidate(ctx, ev.SessionID, scope, ev.Prompt)
+	if cand != "" {
+		s.clearStalePendingTurnEdits(ctx, ev.SessionID, scope, cand)
+	}
 	runes := []rune(cand)
 	if len(runes) < 6 || len(runes) > 1200 {
 		return "", nil

@@ -95,15 +95,6 @@ func (g *GeminiAdapter) InputTokenLimit(ctx context.Context) int {
 	return lookupGeminiInputTokenLimit(ctx, g.apiKey, g.model, &g.ctxLimit, &g.ctxProbed)
 }
 
-func supportsThinkingBudget(model string) bool {
-	m := strings.ToLower(strings.TrimSpace(model))
-	return strings.Contains(m, "gemini-2.5") || strings.Contains(m, "gemini-3")
-}
-
-func NewGeminiAdapter() *BatchEvaluator {
-	return NewGeminiAdapterConfig("", "")
-}
-
 func NewGeminiAdapterConfig(apiKey, model string) *BatchEvaluator {
 	k := strings.TrimSpace(apiKey)
 	if k == "" {
@@ -193,7 +184,8 @@ func (g *GeminiAdapter) CallJSON(ctx context.Context, prompt string, schema map[
 	var err error
 	for idx, model := range candidates {
 		useLP := !g.noLogprobs.Load() && (os.Getenv("GEMINI_API_BASE") != "" || os.Getenv("GEMINI_ENABLE_LOGPROBS") == "1")
-		useZeroThink := !g.noThinking.Load() && supportsThinkingBudget(model)
+		lowModel := strings.ToLower(strings.TrimSpace(model))
+		useZeroThink := !g.noThinking.Load() && (strings.Contains(lowModel, "gemini-2.5") || strings.Contains(lowModel, "gemini-3"))
 		var retryReason string
 
 		for attempt := 0; attempt < 3; attempt++ {

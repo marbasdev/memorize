@@ -147,10 +147,6 @@ type loginRateLimiter struct {
 	buckets map[string]*loginAttemptBucket
 }
 
-func newLoginRateLimiter() *loginRateLimiter {
-	return &loginRateLimiter{buckets: make(map[string]*loginAttemptBucket)}
-}
-
 func (l *loginRateLimiter) isBlocked(ip string, now time.Time) bool {
 	if l == nil || ip == "" {
 		return false
@@ -351,7 +347,7 @@ func renderUsersModalWithToast(w http.ResponseWriter, r *http.Request, d Deps, l
 }
 
 func registerSSRAuthRoutes(mux *http.ServeMux, d Deps) {
-	limiter := newLoginRateLimiter()
+	limiter := &loginRateLimiter{buckets: make(map[string]*loginAttemptBucket)}
 	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
 		if !thttp.IsAllowedOrigin(r, d.ServerMode) {
 			thttp.WriteJSON(w, http.StatusForbidden, map[string]any{"error": "cross-origin request blocked"})

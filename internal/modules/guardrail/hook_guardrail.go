@@ -102,7 +102,7 @@ func (s *Service) runGuardrailHook(ctx context.Context, ev NormalizedHookEvent, 
 		return codec.FormatDenyPreTool(gateReason)
 	}
 
-	if ev.Phase == domain.HookPhasePreTool && strings.TrimSpace(ev.Raw.ProposedPlan) == "" && isFileEditTool(toolName) {
+	if ev.Phase == domain.HookPhasePreTool && strings.TrimSpace(ev.Raw.ProposedPlan) == "" && domain.IsFileEditTool(toolName) {
 		if ev.ClientCtx == nil || !ev.ClientCtx.RemoteManagedEdit {
 			s.recordPendingTurnEdit(ctx, sid, scope, repoDir, toolName, ev, plan)
 		}

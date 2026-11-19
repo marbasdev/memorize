@@ -599,7 +599,7 @@ func TestGuardrailOmitsStaleTurnPromptAfterMutation(t *testing.T) {
 		t.Fatalf("expected Phase 1 (clean) + Phase 2 (with prompt) before mutate, got %+v", eval.capturedPlans)
 	}
 
-	st.mem.MarkTurnScopeMutated(scope)
+	st.mem.MarkTurnScopeMutatedCtx(ctx, scope)
 	if _, _, err := st.gr.ExecuteHook(ctx, "claude-pretool", buildPayload, repo); err != nil {
 		t.Fatalf("ExecuteHook pretool after mutate: %v", err)
 	}
@@ -761,7 +761,7 @@ func TestGuardrailSyncsAndEnforcesTeamRulePack(t *testing.T) {
 			"command": "CGO_ENABLED=1 go test ./internal/infra/sqlite/...",
 		},
 	})
-	stack.mem.MarkTurnScopeMutated(scope)
+	stack.mem.MarkTurnScopeMutatedCtx(ctx, scope)
 	gOut, gCode, err := stack.gr.ExecuteHook(ctx, "claude-pretool", toolPayload, repoDir)
 	if err != nil || gCode != 2 {
 		t.Fatalf("claude-pretool RunHook expected exit code 2 (block): code=%d err=%v out=%s", gCode, err, gOut)
@@ -783,7 +783,6 @@ func TestGuardrailSyncsAndEnforcesTeamRulePack(t *testing.T) {
 }
 
 type remoteViolEval struct {
-	matchRuleContent  string
 	ruleMu            sync.Mutex
 	lastVerifiedRules []domain.Fact
 	stubEval
@@ -888,7 +887,7 @@ func TestRemoteThinClientIsolationAndHooks(t *testing.T) {
 	if out, code, err := st.gr.ExecuteHook(ctxAlice, "claude-turn", turnPayload, ""); err != nil || code != 0 || out == "" {
 		t.Fatalf("claude-turn failed: code=%d err=%v out=%s", code, err, out)
 	}
-	st.mem.MarkTurnScopeMutated(domain.ScopedSessionID(ctxAlice, "s1"))
+	st.mem.MarkTurnScopeMutatedCtx(ctxAlice, "project:teamapp")
 	eval.dec.Action = "IGNORE"
 	if rules, err := rp.ListTeamRules(ctxAlice, "project:teamapp"); err != nil || len(rules) != 1 || !strings.Contains(rules[0].Title+" "+rules[0].How, "parameterized") {
 		t.Fatalf("expected remote TeamRuleDocs ingested cleanly, got %+v (err=%v)", rules, err)
@@ -965,7 +964,7 @@ func TestRemoteThinClientIsolationAndHooks(t *testing.T) {
 			}},
 		},
 	})
-	st.mem.MarkTurnScopeMutated(domain.ScopedSessionID(ctxAlice, "s2"))
+	st.mem.MarkTurnScopeMutatedCtx(ctxAlice, "project:teamapp")
 	outStopProj, _, err := st.gr.ExecuteHook(ctxAlice, "claude-stop", stopProjPayload, "")
 	if err != nil || !strings.Contains(outStopProj, "block") {
 		t.Fatalf("expected Stop hook to block on project violation, out=%s err=%v", outStopProj, err)
@@ -1181,5 +1180,21 @@ func TestRemoteServerTeamRuleDocsPerAccountIsolation(t *testing.T) {
 		!aliceRulesPassed[0].IsTeam() || aliceRulesPassed[1].Scope != "project:teamapp" || aliceRulesPassed[2].Scope != "global" ||
 		aliceRulesPassed[0].ID != bobRulesPassed[0].ID || aliceRulesPassed[1].ID != bobRulesPassed[1].ID {
 		t.Fatalf("expected shared [TEAM, project:*] KV prefix before private global tail:\nalice=%+v\nbob=%+v", aliceRulesPassed, bobRulesPassed)
+	}
+
+	stKV.mem.RecordTurnState(ctxAlice, "s-iso", "project:teamapp", "alice prompt")
+	stKV.mem.RecordTurnState(ctxBob, "s-iso", "project:teamapp", "bob prompt")
+	stKV.mem.MarkTurnScopeMutatedCtx(ctxAlice, "global")
+	if !stKV.mem.IsTurnMutated(ctxAlice, "s-iso", "project:teamapp") {
+		t.Fatalf("expected alice global mutation to mark alice's own turn mutated")
+	}
+	if stKV.mem.IsTurnMutated(ctxBob, "s-iso", "project:teamapp") {
+		t.Fatalf("expected alice global mutation NOT to mark bob's turn mutated in ServerMode")
+	}
+	if err := stKV.gr.SkipOnboarding(ctxAlice, "project:teamapp"); err != nil {
+		t.Fatalf("SkipOnboarding alice: %v", err)
+	}
+	if stKV.mem.IsTurnMutated(ctxBob, "s-iso", "project:teamapp") {
+		t.Fatalf("expected alice SkipOnboarding NOT to mark bob's turn mutated in ServerMode")
 	}
 }

@@ -58,14 +58,6 @@ func New(mem *memory.Service, prog *progress.Service) *Service {
 	}
 }
 
-func (s *Service) Memory() *memory.Service {
-	return s.mem
-}
-
-func (s *Service) Progress() *progress.Service {
-	return s.prog
-}
-
 func (s *Service) AttachRulePack(rp RulePack) {
 	if s != nil {
 		s.rp = rp

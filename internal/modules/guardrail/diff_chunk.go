@@ -98,11 +98,8 @@ func splitOversizedFileSection(label, rawSection string, maxSectionBytes int) []
 	if len(rawSection) <= maxSectionBytes || maxSectionBytes <= 256 {
 		return []fileDiffSection{{Label: label, Body: rawSection}}
 	}
-	body := rawSection
 	headerPrefix := "File: " + label + "\n"
-	if strings.HasPrefix(body, headerPrefix) {
-		body = strings.TrimPrefix(body, headerPrefix)
-	}
+	body := strings.TrimPrefix(rawSection, headerPrefix)
 	lines := strings.Split(body, "\n")
 	partCap := max(256, maxSectionBytes-len(label)-28)
 

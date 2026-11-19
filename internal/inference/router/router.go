@@ -131,14 +131,10 @@ func (r *Router) CheckReadiness(ctx context.Context) (bool, string) {
 	return false, "no inference engine configured"
 }
 
-func providerDefaultModel(prov string, cfg map[string]string) string {
-	return domain.ProviderModelFromConfig(cfg, prov)
-}
-
 func safeGenerativeModel(prov, rawMod string, cfg map[string]string) string {
 	mod := strings.TrimSpace(rawMod)
 	if mod == "" {
-		mod = providerDefaultModel(prov, cfg)
+		mod = domain.ProviderModelFromConfig(cfg, prov)
 	}
 	if domain.NormalizeProviderID(prov) == "gemini" && domain.IsDecisionOnlySpec("gemini", mod) {
 		return "gemini-3.5-flash-lite"
@@ -186,7 +182,7 @@ func NewTaskResolverWithEndpoint(wakeFn func(ctx context.Context, model string) 
 			return nil
 		}
 		bulkProv := domain.NormalizeProviderID(cfg[config.CfgActiveProvider])
-		bulkMod := providerDefaultModel(bulkProv, cfg)
+		bulkMod := domain.ProviderModelFromConfig(cfg, bulkProv)
 		genProv := domain.NormalizeProviderID(cfg["gen_provider"])
 		genMod := strings.TrimSpace(cfg["gen_model"])
 
@@ -232,7 +228,7 @@ func NewTaskResolverWithEndpoint(wakeFn func(ctx context.Context, model string) 
 
 	return func(cfg map[string]string, task domain.EvalTask) (domain.Evaluator, bool) {
 		bulkProv := domain.NormalizeProviderID(cfg[config.CfgActiveProvider])
-		bulkMod := providerDefaultModel(bulkProv, cfg)
+		bulkMod := domain.ProviderModelFromConfig(cfg, bulkProv)
 
 		spec, hasSpec := domain.FindEvalTask(task)
 		if hasSpec {

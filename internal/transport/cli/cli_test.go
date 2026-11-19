@@ -283,7 +283,7 @@ func TestCLIUserConnectAndThinClientEndToEnd(t *testing.T) {
 	ctxAlice := domain.WithAuthPrincipal(context.Background(), domain.AuthPrincipal{
 		Account: "alice", Role: domain.RoleMember, ServerMode: true, Authenticated: true,
 	})
-	mem.MarkTurnScopeMutated(domain.ScopedSessionID(ctxAlice, "cli-s1"))
+	mem.MarkTurnScopeMutatedCtx(ctxAlice, "project:team-service")
 
 	preJSON, _ := json.Marshal(map[string]any{
 		"session_id":      "cli-s1",

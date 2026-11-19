@@ -140,7 +140,7 @@ func init() {
 			ep := cfgVal(in.Config, "gguf_endpoint")
 			if in.WakeGGUF != nil {
 				targetMod := mod
-				return NewGGUFAdapterWithEndpoint(ep, mod, func(ctx context.Context) (string, error) {
+				return newGGUFAdapter(ep, mod, nil, func(ctx context.Context) (string, error) {
 					return in.WakeGGUF(ctx, targetMod)
 				})
 			}
@@ -183,7 +183,7 @@ func init() {
 			return NewGeminiAdapterConfig(cfgVal(in.Config, "gemini_api_key"), resolveDriverModel("gemini", in))
 		},
 		Startup: func(_ string, _ DriverBuildInput) domain.Evaluator {
-			return NewGeminiAdapter()
+			return NewGeminiAdapterConfig("", "")
 		},
 		CheckReadiness: func(_ context.Context, in DriverBuildInput) (bool, string) {
 			if domain.FirstNonEmpty(cfgVal(in.Config, "gemini_api_key"), os.Getenv("GEMINI_API_KEY")) == "" {
@@ -251,7 +251,7 @@ func init() {
 			if strings.ToLower(strings.TrimSpace(rawProv)) == "flide" {
 				return NewFlideAdapter("", "", "")
 			}
-			return NewJevAdapter()
+			return NewJevAdapterConfig("", "")
 		},
 		CheckReadiness: func(ctx context.Context, in DriverBuildInput) (bool, string) {
 			jevURL := domain.FirstNonEmpty(cfgVal(in.Config, "jev_api_url"), os.Getenv("JEV_API_URL"), "https://api.typesafe.ai/v1/sys"+"temone")

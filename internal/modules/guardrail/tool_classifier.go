@@ -31,10 +31,6 @@ func isGuardrailExemptTool(name string) bool {
 	return false
 }
 
-func isFileEditTool(name string) bool {
-	return domain.IsFileEditTool(name)
-}
-
 var (
 	readOnlyShellBins  = map[string]bool{"ls": true, "pwd": true, "cat": true, "head": true, "tail": true, "wc": true, "ps": true, "lsof": true, "which": true, "type": true, "uname": true, "date": true, "stat": true, "file": true, "shasum": true, "grep": true, "rg": true, "echo": true, "true": true}
 	safeGoEnvKeys      = map[string]map[string]bool{"CGO_ENABLED": {"0": true}, "GOOS": {"darwin": true, "linux": true, "windows": true, "freebsd": true, "openbsd": true, "netbsd": true}, "GOARCH": {"amd64": true, "arm64": true, "386": true, "arm": true, "riscv64": true, "ppc64le": true, "s390x": true}}

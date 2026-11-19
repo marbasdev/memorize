@@ -47,14 +47,6 @@ type SystemOneDiscovery struct {
 }
 
 func DefaultFlideModels() []SystemOneModelOption {
-	return defaultFlideModels()
-}
-
-func DefaultTypesafeJevModels() []SystemOneModelOption {
-	return defaultTypesafeJevModels()
-}
-
-func defaultFlideModels() []SystemOneModelOption {
 	return []SystemOneModelOption{
 		{
 			ID: "jev-latest", Name: "jev-latest (Universal Alias)", Engine: "flide", Recommended: true,
@@ -71,7 +63,7 @@ func defaultFlideModels() []SystemOneModelOption {
 	}
 }
 
-func defaultTypesafeJevModels() []SystemOneModelOption {
+func DefaultTypesafeJevModels() []SystemOneModelOption {
 	return []SystemOneModelOption{
 		{
 			ID: "jev-1.13.0", Name: "TypeSafe Jev 1.13.0", Engine: "jev", Recommended: true,
@@ -101,7 +93,7 @@ func DiscoverSystemOneEndpoint(ctx context.Context, rawCfg map[string]string, ov
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return SystemOneDiscovery{
 			Source: "builtin", Engine: "flide", HealthStatus: "offline",
-			Models: defaultFlideModels(), APIError: "invalid System 1 API URL",
+			Models: DefaultFlideModels(), APIError: "invalid System 1 API URL",
 		}
 	}
 
@@ -110,7 +102,7 @@ func DiscoverSystemOneEndpoint(ctx context.Context, rawCfg map[string]string, ov
 			Source:       "typesafe_cloud",
 			Engine:       "jev",
 			HealthStatus: "cloud",
-			Models:       defaultTypesafeJevModels(),
+			Models:       DefaultTypesafeJevModels(),
 		}
 	}
 
@@ -216,7 +208,7 @@ func DiscoverSystemOneEndpoint(ctx context.Context, rawCfg map[string]string, ov
 			Desc: "Currently loaded on Flide server",
 		})
 	}
-	for _, def := range defaultFlideModels() {
+	for _, def := range DefaultFlideModels() {
 		addModel(def)
 	}
 	out.Models = liveModels

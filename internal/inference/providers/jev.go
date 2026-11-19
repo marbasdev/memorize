@@ -69,10 +69,6 @@ type JevAdapter struct {
 	model    string
 }
 
-func NewJevAdapter() *BatchEvaluator {
-	return NewJevAdapterConfig("", "")
-}
-
 func NewFlideAdapter(endpoint, apiKey, model string) *BatchEvaluator {
 	ep := strings.TrimSpace(endpoint)
 	if ep == "" {
@@ -162,15 +158,15 @@ func (j *JevAdapter) CallDecisions(ctx context.Context, state string, questions 
 	}
 	resp, err := postJSONRaw(ctx, httpClient, j.endpoint, body, "Authorization", bearerAuth(j.apiKey))
 	if err != nil {
-		return nil, fmt.Errorf("System 1 endpoint unreachable (%s): %w", j.endpoint, err)
+		return nil, fmt.Errorf("system 1 endpoint unreachable (%s): %w", j.endpoint, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		errBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		if msg := strings.TrimSpace(string(errBytes)); msg != "" {
-			return nil, fmt.Errorf("System 1 status %d (%s): %s", resp.StatusCode, j.endpoint, msg)
+			return nil, fmt.Errorf("system 1 status %d (%s): %s", resp.StatusCode, j.endpoint, msg)
 		}
-		return nil, fmt.Errorf("System 1 status %d (%s)", resp.StatusCode, j.endpoint)
+		return nil, fmt.Errorf("system 1 status %d (%s)", resp.StatusCode, j.endpoint)
 	}
 	var out struct {
 		Answers map[string]struct {

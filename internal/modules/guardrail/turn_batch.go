@@ -75,11 +75,7 @@ func (s *Service) recordPendingTurnEdit(ctx context.Context, sid, scope, repoDir
 	turnInp = domain.FirstNonEmpty(turnInp, ev.TurnPrompt)
 
 	now := time.Now().Unix()
-	if turnInp != "" {
-		_, _ = s.db.ExecContext(ctx,
-			`DELETE FROM turn_pending_edits WHERE session_id = ? AND scope = ? AND turn_input != '' AND turn_input != ?`,
-			sid, sc, turnInp)
-	}
+	s.clearStalePendingTurnEdits(ctx, sid, sc, turnInp)
 
 	baselineExists, baselineContent := captureFileBaseline(targetPath)
 	fallbackSnippet := ""
@@ -107,6 +103,17 @@ func (s *Service) recordPendingTurnEdit(ctx context.Context, sid, scope, repoDir
 	`, sid, sc, targetPath, strings.TrimSpace(repoDir), turnInp, baselineExists, baselineContent, fallbackSnippet, now)
 
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM turn_pending_edits WHERE updated_at < ?`, now-7200)
+}
+
+func (s *Service) clearStalePendingTurnEdits(ctx context.Context, sid, rawScope, turnInput string) {
+	sid = domain.ScopedSessionID(ctx, sid)
+	inp := strings.TrimSpace(turnInput)
+	if sid == "" || inp == "" || s.db == nil {
+		return
+	}
+	_, _ = s.db.ExecContext(ctx,
+		`DELETE FROM turn_pending_edits WHERE session_id = ? AND scope = ? AND turn_input != '' AND turn_input != ?`,
+		sid, domain.NormalizeScope(rawScope), inp)
 }
 
 func (s *Service) clearPendingTurnEdits(ctx context.Context, sid string) {
@@ -246,7 +253,7 @@ func (s *Service) runStopHook(ctx context.Context, ev NormalizedHookEvent, codec
 	persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer persistCancel()
 
-	if ev.isCancelTermination() {
+	if tr := strings.ToUpper(strings.TrimSpace(ev.Raw.TerminationReason)); tr != "" && tr != "NO_TOOL_CALL" {
 		s.clearPendingTurnEdits(persistCtx, sid)
 		s.mem.ClearTurnStopRetries(persistCtx, sid)
 		return codec.FormatEmpty()
@@ -318,7 +325,7 @@ func (s *Service) runStopHook(ctx context.Context, ev NormalizedHookEvent, codec
 	}
 
 	curRetry := s.mem.MaxTurnStopRetry(ctx, sid)
-	if ev.isStopContinuation() && curRetry <= 0 {
+	if (ev.Raw.ContinuationActive || ev.Raw.StopHookActive) && curRetry <= 0 {
 		s.clearPendingTurnEdits(persistCtx, sid)
 		return codec.FormatEmpty()
 	}

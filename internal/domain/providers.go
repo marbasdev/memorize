@@ -66,9 +66,7 @@ var providerCatalog = []ProviderSpec{
 
 func ProviderCatalog() []ProviderSpec {
 	out := make([]ProviderSpec, len(providerCatalog))
-	for i, spec := range providerCatalog {
-		out[i] = spec
-	}
+	copy(out, providerCatalog)
 	return out
 }
 

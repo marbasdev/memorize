@@ -242,12 +242,8 @@ func (r *ScopeResolver) Resolve(ctx context.Context, explicitScope, explicitRepo
 	return domain.DefaultScope(), ""
 }
 
-func isASCIILetter(b byte) bool {
-	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
-}
-
 func hasWindowsDrivePrefix(p string) bool {
-	return len(p) >= 2 && isASCIILetter(p[0]) && p[1] == ':' && (len(p) == 2 || p[2] == '/' || p[2] == '\\')
+	return len(p) >= 2 && ((p[0] >= 'a' && p[0] <= 'z') || (p[0] >= 'A' && p[0] <= 'Z')) && p[1] == ':' && (len(p) == 2 || p[2] == '/' || p[2] == '\\')
 }
 
 func parseRootURI(rawURI string) (string, string) {

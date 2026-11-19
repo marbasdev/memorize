@@ -21,11 +21,6 @@ func clampProb(v float64) float64 {
 	return math.Min(1.0, math.Max(0.0, v))
 }
 
-func isSemanticDecisionToken(tok string) bool {
-	clean := strings.Trim(tok, " \t\r\n\"{}[]:,")
-	return clean != "" && !jsonSyntaxOrSchemaKeys[clean]
-}
-
 type tokenLogprob struct {
 	Token   string
 	Logprob float64
@@ -35,7 +30,8 @@ func semanticConfidence(tokens []tokenLogprob, avgFallback float64) float64 {
 	var sumLP float64
 	var cntLP int
 	for _, tk := range tokens {
-		if isSemanticDecisionToken(tk.Token) {
+		clean := strings.Trim(tk.Token, " \t\r\n\"{}[]:,")
+		if clean != "" && !jsonSyntaxOrSchemaKeys[clean] {
 			sumLP += tk.Logprob
 			cntLP++
 		}

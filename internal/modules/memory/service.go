@@ -291,12 +291,8 @@ func (s *Service) canBypassPersonal(ctx context.Context) bool {
 	return !domain.IsServerMode(ctx) && domain.IsAdminContext(ctx)
 }
 
-func (s *Service) enforceStrictPersonalVisibility(ctx context.Context) bool {
-	return domain.IsServerMode(ctx)
-}
-
 func (s *Service) memoryVisibilitySQL(ctx context.Context, alias string) (string, []any) {
-	if !s.enforceStrictPersonalVisibility(ctx) {
+	if !domain.IsServerMode(ctx) {
 		return "1 = 1", nil
 	}
 	scCol, accCol := "scope", "account"
@@ -440,43 +436,6 @@ func (s *Service) loadQueryFacts(ctx context.Context, scopeA, scopeB, category s
 	}
 	domain.SortFactsByPrefixTier(facts)
 	return facts, nil
-}
-
-func (s *Service) FactsByIDs(ctx context.Context, ids []int64) (map[int64]domain.Fact, error) {
-	out := make(map[int64]domain.Fact)
-	if len(ids) == 0 {
-		return out, nil
-	}
-	ph := make([]string, 0, len(ids))
-	args := make([]any, 0, len(ids))
-	seen := make(map[int64]bool, len(ids))
-	for _, id := range ids {
-		if id <= 0 || seen[id] {
-			continue
-		}
-		seen[id] = true
-		ph = append(ph, "?")
-		args = append(args, id)
-	}
-	if len(ph) == 0 {
-		return out, nil
-	}
-	visSQL, visArgs := s.memoryVisibilitySQL(ctx, "")
-	args = append(args, visArgs...)
-	q := fmt.Sprintf(`SELECT %s FROM memories WHERE id IN (%s) AND %s`, factSelectColumns, strings.Join(ph, ","), visSQL)
-	rows, err := s.db.QueryContext(ctx, q, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	facts, err := scanFactRows(rows)
-	if err != nil {
-		return nil, err
-	}
-	for _, f := range facts {
-		out[f.ID] = f
-	}
-	return out, nil
 }
 
 func formatFactLine(f domain.Fact, suffix string, compact bool) string {
