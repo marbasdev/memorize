@@ -271,4 +271,97 @@ func TestDaemonMuxServerAuthAndAntiSpoofing(t *testing.T) {
 	if len(alicePage.Records) != 1 || alicePage.Records[0].Account != "alice" || len(bobPage.Records) != 0 {
 		t.Fatalf("anti-spoofing failed: alice=%+v bob=%+v", alicePage.Records, bobPage.Records)
 	}
+
+	t.Run("healthz_unauthenticated_in_server_mode", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "http://10.0.0.5:18095/healthz", nil)
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ok":true`) {
+			t.Fatalf("GET /healthz expected 200 ok, got %d %s", rec.Code, rec.Body.String())
+		}
+
+		headRec := httptest.NewRecorder()
+		headReq := httptest.NewRequest(http.MethodHead, "http://10.0.0.5:18095/healthz", nil)
+		h.ServeHTTP(headRec, headReq)
+		if headRec.Code != http.StatusOK {
+			t.Fatalf("HEAD /healthz expected 200, got %d", headRec.Code)
+		}
+
+		postRec := httptest.NewRecorder()
+		postReq := httptest.NewRequest(http.MethodPost, "http://10.0.0.5:18095/healthz", nil)
+		h.ServeHTTP(postRec, postReq)
+		if postRec.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("POST /healthz expected 405, got %d", postRec.Code)
+		}
+	})
+}
+
+func TestProxySecurityHelpersAndHealthzDBFailure(t *testing.T) {
+	t.Run("trusted_proxy_and_client_ip", func(t *testing.T) {
+		if !thttp.IsTrustedProxyPeer("127.0.0.1:4321") || !thttp.IsTrustedProxyPeer("10.0.0.2:80") || thttp.IsTrustedProxyPeer("8.8.8.8:443") {
+			t.Fatalf("unexpected IsTrustedProxyPeer classification")
+		}
+		reqProxy := httptest.NewRequest(http.MethodGet, "http://internal:18095/", nil)
+		reqProxy.RemoteAddr = "10.0.0.10:5555"
+		reqProxy.Header.Set("X-Forwarded-For", "203.0.113.7, 10.0.0.10")
+		reqProxy.Header.Set("X-Forwarded-Host", "memorize.team.example")
+		reqProxy.Header.Set("X-Forwarded-Proto", "https")
+		reqProxy.Header.Set("Origin", "https://memorize.team.example")
+		if got := thttp.ClientPeerIP(reqProxy); got != "203.0.113.7" {
+			t.Fatalf("ClientPeerIP = %q", got)
+		}
+		if !thttp.IsSecureRequest(reqProxy) || !thttp.IsAllowedOrigin(reqProxy, true) {
+			t.Fatalf("expected trusted proxy https/origin accepted in ServerMode")
+		}
+		reqProxy.Header.Set("X-Forwarded-Host", "bad/host")
+		if thttp.TrustedForwardedHost(reqProxy) != "" {
+			t.Fatalf("expected malformed X-Forwarded-Host rejected")
+		}
+
+		reqUntrusted := httptest.NewRequest(http.MethodGet, "http://team.example/", nil)
+		reqUntrusted.RemoteAddr = "198.51.100.2:9000"
+		reqUntrusted.Header.Set("X-Forwarded-For", "1.2.3.4")
+		reqUntrusted.Header.Set("X-Forwarded-Proto", "https")
+		if got := thttp.ClientPeerIP(reqUntrusted); got != "198.51.100.2" || thttp.IsSecureRequest(reqUntrusted) {
+			t.Fatalf("untrusted peer must not spoof X-Forwarded-* headers")
+		}
+	})
+
+	t.Run("bearer_post_json_and_closed_db_healthz", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:18095/test", strings.NewReader(`{"x":1}`))
+		req.Host = "127.0.0.1:18095"
+		req.Header.Set("Authorization", "Bearer mem_abc")
+		if tok, ok := thttp.ExtractBearerToken(req); !ok || tok != "mem_abc" {
+			t.Fatalf("ExtractBearerToken = %q %v", tok, ok)
+		}
+		handler := thttp.PostJSONMode(false, func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]int
+			if thttp.DecodeJSON(w, r, &body) {
+				thttp.WriteJSON(w, http.StatusOK, body)
+			}
+		})
+		recNoCT := httptest.NewRecorder()
+		handler.ServeHTTP(recNoCT, req)
+		if recNoCT.Code != http.StatusUnsupportedMediaType {
+			t.Fatalf("expected 415 without Content-Type, got %d", recNoCT.Code)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		recOK := httptest.NewRecorder()
+		handler.ServeHTTP(recOK, req)
+		if recOK.Code != http.StatusOK || !strings.Contains(recOK.Body.String(), `"x":1`) {
+			t.Fatalf("expected 200 JSON echo, got %d %s", recOK.Code, recOK.Body.String())
+		}
+
+		db, err := sqlite.Open(filepath.Join(t.TempDir(), "closed.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = db.Close()
+		hClosed := thttp.NewDaemonMux(thttp.DaemonDeps{ServerMode: true, DB: db})
+		rec503 := httptest.NewRecorder()
+		hClosed.ServeHTTP(rec503, httptest.NewRequest(http.MethodGet, "http://127.0.0.1:18095/healthz", nil))
+		if rec503.Code != http.StatusServiceUnavailable {
+			t.Fatalf("expected /healthz 503 on closed DB, got %d", rec503.Code)
+		}
+	})
 }

@@ -3,12 +3,16 @@ package router
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"memorize/internal/domain"
+	"memorize/internal/infra/sqlite"
 )
 
 func TestDynamicResolverAndPerFeatureRouting(t *testing.T) {
@@ -204,5 +208,63 @@ func TestFallbackEvaluatorInputTokenLimitPropagation(t *testing.T) {
 	evUnknown, _ := res(cfgUnknownFB, domain.TaskVerify)
 	if got := domain.EvaluatorInputTokenLimit(context.Background(), evUnknown); got != 0 {
 		t.Fatalf("expected conservative 0 when fallback context limit is unknown, got %d", got)
+	}
+}
+
+type stubRouterEval struct{ name string }
+
+func (s stubRouterEval) Name() string { return s.name }
+func (stubRouterEval) ScoreRelevance(_ context.Context, _ string, _ []domain.Fact) ([]domain.ScoredFact, error) {
+	return nil, nil
+}
+func (stubRouterEval) EvaluateMutation(_ context.Context, _, _ string, _ []domain.Fact) (domain.MutationDecision, error) {
+	return domain.MutationDecision{}, nil
+}
+func (stubRouterEval) VerifyPlan(_ context.Context, _ string, _ []domain.Fact) ([]domain.PlanViolation, error) {
+	return nil, nil
+}
+
+func TestRouterTelemetryAndReadiness(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "router.db")
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	ctx := context.Background()
+	r := New(db, dbPath, stubRouterEval{name: "stub:v1"}, nil)
+	if got := r.ProviderNameForTask(ctx, domain.TaskVerify); got != "stub:v1" {
+		t.Fatalf("ProviderNameForTask = %q", got)
+	}
+
+	r.RecordTelemetry(ctx, domain.TaskVerify, stubRouterEval{name: "gemini:flash"}, time.Now().Add(-20*time.Millisecond), 5, nil)
+	r.RecordTelemetry(ctx, domain.TaskVerify, stubRouterEval{name: "gemini:flash"}, time.Now().Add(-50*time.Millisecond), 5, context.DeadlineExceeded)
+	r.RecordTelemetry(ctx, domain.TaskRelevance, stubRouterEval{name: "gemini:flash"}, time.Now().Add(-15*time.Millisecond), 3, errors.New("upstream 500"))
+
+	rep, err := r.SummarizeTelemetry(ctx, 24)
+	if err != nil {
+		t.Fatalf("SummarizeTelemetry: %v", err)
+	}
+	if rep.TotalCalls != 3 || rep.TotalTimeouts != 1 || rep.TotalErrors != 1 || len(rep.Engines) != 1 {
+		t.Fatalf("unexpected telemetry summary: %+v", rep)
+	}
+	if rep.ByTask[string(domain.TaskVerify)].Calls != 2 || rep.P95ElapsedMs <= 0 {
+		t.Fatalf("unexpected verify task telemetry: %+v", rep.ByTask[string(domain.TaskVerify)])
+	}
+	if err := r.ResetTelemetry(ctx); err != nil {
+		t.Fatalf("ResetTelemetry: %v", err)
+	}
+	afterReset, err := r.SummarizeTelemetry(ctx, 24)
+	if err != nil || afterReset.TotalCalls != 0 {
+		t.Fatalf("expected 0 calls after reset, got %+v err=%v", afterReset, err)
+	}
+
+	t.Setenv("GEMINI_API_KEY", "")
+	if ready, _ := CheckConfiguredEngineReadiness(ctx, map[string]string{"active_provider": "gemini"}, nil); ready {
+		t.Fatalf("expected gemini without key to report not ready")
+	}
+	if ready, reason := CheckConfiguredEngineReadiness(ctx, map[string]string{"active_provider": "gemini", "gemini_api_key": "k-ok"}, nil); !ready || reason != "" {
+		t.Fatalf("expected gemini with key ready, got ready=%v reason=%q", ready, reason)
 	}
 }

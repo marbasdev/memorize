@@ -10,11 +10,13 @@ import (
 
 func SecurityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy",
-			"default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+		if w.Header().Get("Content-Security-Policy") == "" {
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("X-Frame-Options", "DENY")
+			w.Header().Set("Referrer-Policy", "no-referrer")
+			w.Header().Set("Content-Security-Policy",
+				"default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -136,12 +138,16 @@ func IsAllowedOrigin(r *http.Request, serverMode bool) bool {
 	return false
 }
 
-func IsJSONPost(r *http.Request, serverMode bool) bool {
-	if r == nil || r.Method != http.MethodPost || !IsAllowedOrigin(r, serverMode) {
+func hasJSONContentType(r *http.Request) bool {
+	if r == nil {
 		return false
 	}
 	ct := strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type")))
 	return strings.HasPrefix(ct, "application/json")
+}
+
+func IsJSONPost(r *http.Request, serverMode bool) bool {
+	return r != nil && r.Method == http.MethodPost && IsAllowedOrigin(r, serverMode) && hasJSONContentType(r)
 }
 
 func PostJSONMode(serverMode bool, fn http.HandlerFunc) http.HandlerFunc {
@@ -154,7 +160,7 @@ func PostJSONMode(serverMode bool, fn http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "forbidden origin", http.StatusForbidden)
 			return
 		}
-		if !IsJSONPost(r, serverMode) {
+		if !hasJSONContentType(r) {
 			http.Error(w, "unsupported media type", http.StatusUnsupportedMediaType)
 			return
 		}

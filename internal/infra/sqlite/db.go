@@ -84,7 +84,7 @@ func Open(dbPath string) (*sql.DB, error) {
 func InitSchema(db *sql.DB) error {
 	if _, err := db.Exec(`
 		PRAGMA journal_mode=WAL;
-		PRAGMA busy_timeout=5000;
+		PRAGMA busy_timeout=10000;
 		CREATE TABLE IF NOT EXISTS memories (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			scope TEXT NOT NULL DEFAULT 'global',
@@ -287,6 +287,7 @@ func InitSchema(db *sql.DB) error {
 	_, _ = db.Exec(`ALTER TABLE guardrail_logs ADD COLUMN account TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE guardrail_logs ADD COLUMN is_private INTEGER NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_guardrail_logs_account_id ON guardrail_logs(account, id DESC)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_guardrail_logs_created ON guardrail_logs(created_at)`)
 	_, _ = db.Exec(`ALTER TABLE project_progress ADD COLUMN track TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE project_progress ADD COLUMN details TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE project_progress ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`)
@@ -295,9 +296,11 @@ func InitSchema(db *sql.DB) error {
 	dropProgressStatusColumnIfPresent(db)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_progress_scope_cat ON project_progress(scope, category, id DESC)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_progress_scope_track ON project_progress(scope, track, id DESC)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_progress_updated_id ON project_progress(updated_at DESC, id DESC)`)
 	_, _ = db.Exec(`ALTER TABLE repo_sync ADD COLUMN repo_path TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE turn_state ADD COLUMN partial_notice TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE turn_state ADD COLUMN stop_retry INTEGER NOT NULL DEFAULT 0`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_turn_state_scope ON turn_state(scope, updated_at)`)
 	_, _ = db.Exec(`ALTER TABLE session_sent ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`)
 	SweepTransientSessionTables(context.Background(), db)
 	_, _ = db.Exec(`DELETE FROM project_progress WHERE source = 'session_auto'`)

@@ -340,7 +340,7 @@ func (d *decisionEvaluator) EvaluateMutations(ctx context.Context, scope string,
 }
 
 var verifyPlanCriteria = map[string]string{
-	"ALLOW":     "Proposed Action/Diff is compatible with or unrelated to this rule, executes a partial/preparatory step of a broader workflow, follows Turn Context overrides, or only reflects Turn Context prose.",
+	"ALLOW":     "Proposed Action/Diff is compatible with or unrelated to this rule (e.g., an internal source-code implementation rule evaluated against a shell command), executes a partial/preparatory step of a broader workflow, follows Turn Context overrides, or only reflects Turn Context prose.",
 	"VIOLATION": "Proposed Action/Diff clearly and directly introduces prohibited behavior or values contradicting this rule.",
 }
 

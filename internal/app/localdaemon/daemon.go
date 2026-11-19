@@ -7,11 +7,9 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/mark3labs/mcp-go/server"
@@ -372,19 +370,6 @@ func RunTeamServer(version, explicitAddr, dbPath, modelsDir string) int {
 		fmt.Fprintf(os.Stderr, "Add Users:    memorize user add <account> --role member\n")
 		fmt.Fprintf(os.Stderr, "====================================================================\n\n")
 	}
-
-	sigCh := make(chan os.Signal, 2)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigCh)
-	go func() {
-		if _, ok := <-sigCh; ok {
-			select {
-			case lc.stopRequested <- struct{}{}:
-			default:
-			}
-			_ = lc.close()
-		}
-	}()
 
 	return lc.serve(ln)
 }

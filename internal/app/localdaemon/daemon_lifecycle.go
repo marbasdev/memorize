@@ -8,10 +8,12 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"memorize/internal/domain"
@@ -359,6 +361,23 @@ func (d *daemonLifecycle) watchBinaryReload(startMtime int64) {
 
 func (d *daemonLifecycle) serve(ln net.Listener) int {
 	defer func() { _ = d.close() }()
+
+	sigCtx, stopSig := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSig()
+	go func() {
+		select {
+		case <-sigCtx.Done():
+			select {
+			case d.stopRequested <- struct{}{}:
+			default:
+			}
+			if d.bundle != nil && d.bundle.mgr != nil {
+				_ = d.bundle.mgr.StopServer()
+			}
+			_ = d.close()
+		case <-d.stopWatch:
+		}
+	}()
 
 	d.srv.Handler = d.buildRootHandler()
 	_, startMtime := NewestWatchedBinary(0)

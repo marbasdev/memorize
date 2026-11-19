@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"memorize/internal/domain"
 	"memorize/internal/inference/discovery"
 	"memorize/internal/inference/localmodel"
 )
@@ -124,4 +125,95 @@ func TestModelRecommendationCriteriaAndLiveDiscovery(t *testing.T) {
 	if !ok0 || !ok1 || !ok2 || !ok3 || !(i0 < i1 && i1 < i2 && i2 < i3) {
 		t.Fatalf("expected ranked Gemini models (flash-lite < flash-lite-001 < 3.8-flash < 3.5-pro), pos=%v", pos)
 	}
+}
+
+func TestDiscoveryConfigRoutingLocalProbeAndSystemOneSSRF(t *testing.T) {
+	t.Run("preset_categories_mask_and_public_config", func(t *testing.T) {
+		if got := discovery.NormalizePresetCategoriesJSON("invalid-json"); got != domain.DefaultPresetCategoriesJSON {
+			t.Fatalf("expected default preset JSON on invalid input")
+		}
+		norm := discovery.NormalizePresetCategoriesJSON(`{"Architecture":["Build","api","build"]}`)
+		if norm != `{"architecture":["api","build"]}` {
+			t.Fatalf("unexpected normalized presets: %s", norm)
+		}
+		if masked := discovery.MaskSecret("sk-1234567890abcdef", "UNUSED_ENV"); masked != "Stored in DB (sk-1••••cdef)" {
+			t.Fatalf("unexpected MaskSecret: %q", masked)
+		}
+		pub := discovery.PublicConfigWithGGUFPort(map[string]string{
+			"active_provider": "flide",
+			"gemini_api_key":  "AIza1234567890abcdef",
+		}, "", 18088)
+		if pub["effective_provider"] != "jev" || pub["gguf_endpoint"] != "http://127.0.0.1:18088" {
+			t.Fatalf("unexpected PublicConfigWithGGUFPort: %+v", pub)
+		}
+	})
+
+	t.Run("validate_and_apply_routing_pairs", func(t *testing.T) {
+		pairs := map[string]string{}
+		if err := discovery.ValidateAndApplyRoutingPairs("jev", "jev-latest", true, nil, pairs); err == nil {
+			t.Fatalf("expected decision-only generative companion to fail")
+		}
+		if err := discovery.ValidateAndApplyRoutingPairs("gemini", "gemini-3.5-flash-lite", true, map[domain.EvalTask][2]string{
+			domain.TaskVerify: {"gemini", "gemini-decision-1"},
+		}, pairs); err != nil {
+			t.Fatalf("expected valid routing pairs, got %v", err)
+		}
+		if pairs["gen_provider"] != "gemini" || pairs["task_verify_model"] != "gemini-decision-1" {
+			t.Fatalf("unexpected applied pairs: %+v", pairs)
+		}
+	})
+
+	t.Run("systemone_ssrf_and_local_probe", func(t *testing.T) {
+		var savedHostAuth, foreignHostAuth string
+		savedSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			savedHostAuth = r.Header.Get("Authorization")
+			w.Header().Set("Content-Type", "application/json")
+			switch r.URL.Path {
+			case "/health":
+				_, _ = w.Write([]byte(`{"status":"ok","model":"OmniJev/OneJev1.6-0.8B"}`))
+			case "/v1/models":
+				_, _ = w.Write([]byte(`{"data":[{"id":"OmniJev/OneJev1.6-0.8B"}]}`))
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer savedSrv.Close()
+
+		foreignSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			foreignHostAuth = r.Header.Get("Authorization")
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		}))
+		defer foreignSrv.Close()
+
+		cfg := map[string]string{
+			"jev_api_url":      savedSrv.URL,
+			"typesafe_api_key": "secret-ts-key",
+		}
+		resSaved := discovery.DiscoverSystemOneEndpoint(context.Background(), cfg, savedSrv.URL, "")
+		if resSaved.Source != "live_flide" || savedHostAuth != "Bearer secret-ts-key" {
+			t.Fatalf("expected saved host to receive key and discover live_flide, got %+v auth=%q", resSaved, savedHostAuth)
+		}
+		// Different port on loopback has same Hostname() ("127.0.0.1"), so test an unreachable non-matching hostname to confirm SSRF guard without leaking key.
+		_ = discovery.DiscoverSystemOneEndpoint(context.Background(), map[string]string{
+			"jev_api_url":      "https://saved.example.invalid",
+			"typesafe_api_key": "secret-ts-key",
+		}, foreignSrv.URL, "")
+		if foreignHostAuth != "" {
+			t.Fatalf("SSRF guard leaked saved API key to foreign host: %q", foreignHostAuth)
+		}
+
+		resCloud := discovery.DiscoverSystemOneEndpoint(context.Background(), map[string]string{}, "https://api.typesafe.ai/v1/systemone", "")
+		if resCloud.Source != "typesafe_cloud" || len(resCloud.Models) == 0 {
+			t.Fatalf("expected typesafe_cloud discovery, got %+v", resCloud)
+		}
+
+		detected := discovery.ProbeLocalInferenceServers(context.Background(),
+			discovery.LocalProbeTarget{Label: "Flide", Provider: "jev", BaseURL: savedSrv.URL},
+			discovery.LocalProbeTarget{Label: "OpenAI", Provider: "local", BaseURL: savedSrv.URL},
+		)
+		if len(detected) != 2 {
+			t.Fatalf("expected 2 detected local servers, got %+v", detected)
+		}
+	})
 }

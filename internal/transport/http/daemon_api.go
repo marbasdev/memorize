@@ -86,14 +86,35 @@ func NewDaemonMux(deps DaemonDeps) http.Handler {
 		return true
 	}
 
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		if deps.DB != nil {
+			pingCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+			err := deps.DB.PingContext(pingCtx)
+			cancel()
+			if err != nil {
+				WriteJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false})
+				return
+			}
+		}
+		if r.Method == http.MethodHead {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+	})
+
 	mux.Handle("/mcp", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !IsAllowedOrigin(r, deps.ServerMode) {
 			http.Error(w, `{"error":"non-local request blocked"}`, http.StatusForbidden)
 			return
 		}
 		if r.Method == http.MethodPost {
-			ct := strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type")))
-			if !strings.HasPrefix(ct, "application/json") {
+			if !hasJSONContentType(r) {
 				http.Error(w, `{"error":"Content-Type application/json required"}`, http.StatusUnsupportedMediaType)
 				return
 			}

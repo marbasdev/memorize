@@ -330,6 +330,7 @@ func (e *schemaEvaluator) VerifyPlan(ctx context.Context, proposedPlan string, r
 	var sb strings.Builder
 	sb.WriteString(`Verify whether the concrete Proposed Action/Diff directly executes behavior forbidden by any Rule below (never infer violations from keyword similarity or unrelated Turn Context prose).
 - First write "a_verdict": inspect the specific command/diff against the Rules and state "COMPLIES: <why allowed/unrelated>" unless an unambiguous direct contradiction exists ("VIOLATES #<id>: <exact conflict>").
+- Match rule scope to action type: for shell commands (e.g. Bash/run_command), only flag rules governing shell, git, or workflow execution—never apply internal source-code structure or package implementation rules unless the Proposed Plan is a code edit/diff.
 - If "a_verdict" starts with "COMPLIES", or if the action is compatible, unrelated, partial/preparatory, uncertain, or authorized by Turn Context overrides, return an EMPTY "violations" array; otherwise include only directly violated rules with honest "probability" (0.00-1.00; >= 0.80 only for clear direct contradiction) and "confidence" (0.00-1.00).
 Rules:
 `)
