@@ -25,6 +25,14 @@ type ssrLoginData struct {
 	HasReferer bool
 }
 
+type ssrAccountsModalData struct {
+	Lang           string
+	CurrentAccount string
+	CurrentRole    string
+	Accounts       []domain.AuthPrincipal
+	Error          string
+}
+
 type ssrUsersModalData struct {
 	Lang           string
 	CurrentAccount string
@@ -346,6 +354,42 @@ func renderUsersModalWithToast(w http.ResponseWriter, r *http.Request, d Deps, l
 	writeHTMLTemplate(w, "modal_users", data)
 }
 
+func readAccountsCookie(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if c, err := r.Cookie(domain.AccountsCookieName); err == nil {
+		return strings.TrimSpace(c.Value)
+	}
+	return ""
+}
+
+func buildAccountsModalData(r *http.Request, d Deps, lang, errMsg string) ssrAccountsModalData {
+	db := d.DB
+	if db == nil && d.Memory != nil {
+		db = d.Memory.DB()
+	}
+	cur, _ := domain.AuthPrincipalFromContext(r.Context())
+	accounts := sqlite.ParseAccountsCookie(r.Context(), db, readAccountsCookie(r))
+	hasCur := false
+	for _, a := range accounts {
+		if a.Account == cur.Account {
+			hasCur = true
+			break
+		}
+	}
+	if cur.Account != "" && !hasCur {
+		accounts = append([]domain.AuthPrincipal{cur}, accounts...)
+	}
+	return ssrAccountsModalData{
+		Lang:           lang,
+		CurrentAccount: cur.Account,
+		CurrentRole:    cur.Role,
+		Accounts:       accounts,
+		Error:          errMsg,
+	}
+}
+
 func registerSSRAuthRoutes(mux *http.ServeMux, d Deps) {
 	limiter := &loginRateLimiter{buckets: make(map[string]*loginAttemptBucket)}
 	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
@@ -437,6 +481,9 @@ func registerSSRAuthRoutes(mux *http.ServeMux, d Deps) {
 			return
 		}
 		thttp.SetSessionCookie(w, r, cookieVal, int(domain.DefaultSessionTTL.Seconds()))
+		if accVal, uerr := sqlite.UpsertAccountInCookieValue(r.Context(), db, readAccountsCookie(r), p, domain.DefaultSessionTTL); uerr == nil && accVal != "" {
+			thttp.SetAccountsCookie(w, r, accVal, int(domain.DefaultSessionTTL.Seconds()))
+		}
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	})
 
@@ -449,7 +496,9 @@ func registerSSRAuthRoutes(mux *http.ServeMux, d Deps) {
 			http.Error(w, "POST required", http.StatusMethodNotAllowed)
 			return
 		}
+		// Full logout clears both active session and multi-account switcher cookie for shared-machine safety.
 		thttp.ClearSessionCookie(w, r)
+		thttp.ClearAccountsCookie(w, r)
 		if r.Header.Get("HX-Request") == "true" {
 			w.Header().Set("HX-Redirect", "/login")
 			w.WriteHeader(http.StatusOK)
@@ -457,6 +506,135 @@ func registerSSRAuthRoutes(mux *http.ServeMux, d Deps) {
 		}
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 	})
+
+	mux.HandleFunc("/ui/modal/accounts", getHX(func(w http.ResponseWriter, r *http.Request) {
+		if !d.ServerMode {
+			http.Error(w, "account switcher is available in server mode only", http.StatusNotFound)
+			return
+		}
+		writeHTMLTemplate(w, "modal_accounts", buildAccountsModalData(r, d, requestLang(r), ""))
+	}))
+
+	mux.HandleFunc("/ui/accounts/add", postHX(func(w http.ResponseWriter, r *http.Request) {
+		if !d.ServerMode {
+			http.Error(w, "account switcher is available in server mode only", http.StatusNotFound)
+			return
+		}
+		lang := requestLang(r)
+		db := d.DB
+		if db == nil && d.Memory != nil {
+			db = d.Memory.DB()
+		}
+		now := time.Now()
+		peerIP := thttp.ClientPeerIP(r)
+		if limiter.isBlocked(peerIP, now) {
+			w.WriteHeader(http.StatusTooManyRequests)
+			writeHTMLTemplate(w, "modal_accounts", buildAccountsModalData(r, d, lang, langText(lang, "Too many failed attempts. Please wait a few minutes.", "실패 횟수가 너무 많습니다. 잠시 후 다시 시도하세요.")))
+			return
+		}
+		tok := strings.TrimSpace(r.FormValue("token"))
+		p, ok := sqlite.AuthenticateToken(r.Context(), db, tok)
+		if !ok {
+			limiter.recordFailure(peerIP, now)
+			writeHTMLTemplate(w, "modal_accounts", buildAccountsModalData(r, d, lang, langText(lang, "Invalid or disabled access token.", "액세스 토큰이 유효하지 않거나 비활성화되었습니다.")))
+			return
+		}
+		limiter.reset(peerIP)
+
+		accCookie := readAccountsCookie(r)
+		if cur, hasCur := domain.AuthPrincipalFromContext(r.Context()); hasCur && cur.Account != "" && cur.TokenHint != "" {
+			if next, err := sqlite.UpsertAccountInCookieValue(r.Context(), db, accCookie, cur, domain.DefaultSessionTTL); err == nil {
+				accCookie = next
+			}
+		}
+		accCookie, err := sqlite.UpsertAccountInCookieValue(r.Context(), db, accCookie, p, domain.DefaultSessionTTL)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		sessVal, err := sqlite.IssueSessionCookieValue(r.Context(), db, p, domain.DefaultSessionTTL)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		thttp.SetSessionCookie(w, r, sessVal, int(domain.DefaultSessionTTL.Seconds()))
+		thttp.SetAccountsCookie(w, r, accCookie, int(domain.DefaultSessionTTL.Seconds()))
+		w.Header().Set("HX-Refresh", "true")
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	mux.HandleFunc("/ui/accounts/switch", postHX(func(w http.ResponseWriter, r *http.Request) {
+		if !d.ServerMode {
+			http.Error(w, "account switcher is available in server mode only", http.StatusNotFound)
+			return
+		}
+		lang := requestLang(r)
+		db := d.DB
+		if db == nil && d.Memory != nil {
+			db = d.Memory.DB()
+		}
+		targetAcc := strings.TrimSpace(r.FormValue("account"))
+		p, ok := sqlite.AuthenticateSwitcherAccount(r.Context(), db, readAccountsCookie(r), targetAcc)
+		if !ok {
+			if cur, hasCur := domain.AuthPrincipalFromContext(r.Context()); hasCur && cur.Account == domain.NormalizeAccount(targetAcc) {
+				p = cur
+				ok = true
+			}
+		}
+		if !ok {
+			writeHTMLTemplate(w, "modal_accounts", buildAccountsModalData(r, d, lang, langText(lang, "Account session expired or token rotated. Add its token again.", "계정 세션이 만료되었거나 토큰이 변경되었습니다. 토큰을 다시 추가하세요.")))
+			return
+		}
+		sessVal, err := sqlite.IssueSessionCookieValue(r.Context(), db, p, domain.DefaultSessionTTL)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		thttp.SetSessionCookie(w, r, sessVal, int(domain.DefaultSessionTTL.Seconds()))
+		w.Header().Set("HX-Refresh", "true")
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	mux.HandleFunc("/ui/accounts/remove", postHX(func(w http.ResponseWriter, r *http.Request) {
+		if !d.ServerMode {
+			http.Error(w, "account switcher is available in server mode only", http.StatusNotFound)
+			return
+		}
+		lang := requestLang(r)
+		db := d.DB
+		if db == nil && d.Memory != nil {
+			db = d.Memory.DB()
+		}
+		targetAcc := domain.NormalizeAccount(r.FormValue("account"))
+		nextCookie, remaining, err := sqlite.RemoveAccountFromCookieValue(r.Context(), db, readAccountsCookie(r), targetAcc)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		thttp.SetAccountsCookie(w, r, nextCookie, int(domain.DefaultSessionTTL.Seconds()))
+		cur, _ := domain.AuthPrincipalFromContext(r.Context())
+		if cur.Account == targetAcc {
+			if len(remaining) > 0 {
+				if sessVal, serr := sqlite.IssueSessionCookieValue(r.Context(), db, remaining[0], domain.DefaultSessionTTL); serr == nil {
+					thttp.SetSessionCookie(w, r, sessVal, int(domain.DefaultSessionTTL.Seconds()))
+					w.Header().Set("HX-Refresh", "true")
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+			}
+			thttp.ClearSessionCookie(w, r)
+			w.Header().Set("HX-Redirect", "/login")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		setHXTriggers(w, langText(lang, fmt.Sprintf("Removed @%s from switcher", targetAcc), fmt.Sprintf("스위처에서 @%s 계정을 제거했습니다", targetAcc)), false, false)
+		writeHTMLTemplate(w, "modal_accounts", ssrAccountsModalData{
+			Lang:           lang,
+			CurrentAccount: cur.Account,
+			CurrentRole:    cur.Role,
+			Accounts:       remaining,
+		})
+	}))
 
 	mux.HandleFunc("/ui/modal/users", getHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		if !d.ServerMode {

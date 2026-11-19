@@ -294,6 +294,61 @@ func TestDaemonMuxServerAuthAndAntiSpoofing(t *testing.T) {
 			t.Fatalf("POST /healthz expected 405, got %d", postRec.Code)
 		}
 	})
+
+	t.Run("daemon_export_and_import_bundle_with_auth_isolation", func(t *testing.T) {
+		impBody, _ := json.Marshal(map[string]any{
+			"bundle": domain.MemoryBundle{
+				Format: domain.MemoryBundleFormat,
+				Items: []domain.MemoryBundleItem{
+					{Scope: "global", Category: "convention", Content: "Alice imported global rule", Pinned: true},
+				},
+			},
+			"options": domain.BundleImportOptions{Mode: "exact"},
+		})
+		recNoAuth := httptest.NewRecorder()
+		reqNoAuth := httptest.NewRequest(http.MethodPost, "http://team.local:18095/api/daemon/import", bytes.NewReader(impBody))
+		reqNoAuth.Header.Set("Content-Type", "application/json")
+		h.ServeHTTP(recNoAuth, reqNoAuth)
+		if recNoAuth.Code != http.StatusUnauthorized {
+			t.Fatalf("unauthenticated /api/daemon/import expected 401, got %d", recNoAuth.Code)
+		}
+
+		recImp := httptest.NewRecorder()
+		reqImp := httptest.NewRequest(http.MethodPost, "http://team.local:18095/api/daemon/import", bytes.NewReader(impBody))
+		reqImp.Header.Set("Content-Type", "application/json")
+		reqImp.Header.Set("Authorization", "Bearer "+aliceIss.PlainToken)
+		reqImp.Header.Set("X-Memorize-Account", "hostadmin") // spoof attempt must be ignored
+		h.ServeHTTP(recImp, reqImp)
+		if recImp.Code != http.StatusOK {
+			t.Fatalf("alice /api/daemon/import failed: %d %s", recImp.Code, recImp.Body.String())
+		}
+		var impRes domain.BundleImportResult
+		if err := json.NewDecoder(recImp.Body).Decode(&impRes); err != nil || impRes.Inserted != 1 {
+			t.Fatalf("unexpected import result: %+v err=%v", impRes, err)
+		}
+
+		recExpAlice := httptest.NewRecorder()
+		reqExpAlice := httptest.NewRequest(http.MethodGet, "http://team.local:18095/api/daemon/export?scope=global&download=1", nil)
+		reqExpAlice.Header.Set("Authorization", "Bearer "+aliceIss.PlainToken)
+		h.ServeHTTP(recExpAlice, reqExpAlice)
+		if recExpAlice.Code != http.StatusOK || !strings.Contains(recExpAlice.Header().Get("Content-Disposition"), "memorize-bundle.json") {
+			t.Fatalf("alice /api/daemon/export failed: %d hdr=%q", recExpAlice.Code, recExpAlice.Header().Get("Content-Disposition"))
+		}
+		var expAlice domain.MemoryBundle
+		if err := json.NewDecoder(recExpAlice.Body).Decode(&expAlice); err != nil || len(expAlice.Items) != 1 {
+			t.Fatalf("expected 1 global rule for alice export, got %+v err=%v", expAlice, err)
+		}
+
+		recExpAdm := httptest.NewRecorder()
+		reqExpAdm := httptest.NewRequest(http.MethodGet, "http://team.local:18095/api/daemon/export?scope=global", nil)
+		reqExpAdm.Header.Set("Authorization", "Bearer "+adminIss.PlainToken)
+		h.ServeHTTP(recExpAdm, reqExpAdm)
+		var expAdm domain.MemoryBundle
+		_ = json.NewDecoder(recExpAdm.Body).Decode(&expAdm)
+		if len(expAdm.Items) != 0 {
+			t.Fatalf("admin export must not see alice's private global rule: %+v", expAdm)
+		}
+	})
 }
 
 func TestProxySecurityHelpersAndHealthzDBFailure(t *testing.T) {

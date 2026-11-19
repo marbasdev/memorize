@@ -393,3 +393,154 @@ func AuthenticateSessionCookie(ctx context.Context, db *sql.DB, cookieVal string
 		Authenticated: true,
 	}, true
 }
+
+type signedAccountSlot struct {
+	principal domain.AuthPrincipal
+	expUnix   int64
+}
+
+func parseSignedAccountSlots(ctx context.Context, db *sql.DB, cookieVal string) []signedAccountSlot {
+	if db == nil || strings.TrimSpace(cookieVal) == "" {
+		return nil
+	}
+	sepIdx := strings.LastIndex(strings.TrimSpace(cookieVal), "|")
+	if sepIdx <= 0 {
+		return nil
+	}
+	raw := strings.TrimSpace(cookieVal)
+	body, sigHex := raw[:sepIdx], raw[sepIdx+1:]
+	secret, err := ensureSessionSecret(ctx, db)
+	if err != nil {
+		return nil
+	}
+	sigBytes, err := hex.DecodeString(sigHex)
+	if err != nil {
+		return nil
+	}
+	expectedBytes, _ := hex.DecodeString(signCookiePayload(secret, body))
+	if len(expectedBytes) == 0 || !hmac.Equal(sigBytes, expectedBytes) {
+		return nil
+	}
+
+	now := time.Now().Unix()
+	seen := make(map[string]bool)
+	var slots []signedAccountSlot
+	for _, item := range strings.Split(body, ",") {
+		parts := strings.Split(strings.TrimSpace(item), ":")
+		if len(parts) != 3 {
+			continue
+		}
+		acc := domain.NormalizeAccount(parts[0])
+		hint := strings.TrimSpace(parts[1])
+		expUnix, err := strconv.ParseInt(parts[2], 10, 64)
+		if acc == "" || hint == "" || err != nil || now > expUnix || seen[acc] {
+			continue
+		}
+		var dbRole, dbHint string
+		var act int
+		if err := db.QueryRowContext(ctx, `
+			SELECT role, COALESCE(token_hint, ''), active
+			FROM users WHERE account = ?
+		`, acc).Scan(&dbRole, &dbHint, &act); err != nil || act != 1 || dbHint != hint {
+			continue
+		}
+		seen[acc] = true
+		slots = append(slots, signedAccountSlot{
+			principal: domain.AuthPrincipal{
+				Account:       acc,
+				Role:          domain.NormalizeRole(dbRole),
+				TokenHint:     dbHint,
+				ServerMode:    true,
+				Authenticated: true,
+			},
+			expUnix: expUnix,
+		})
+		if len(slots) >= domain.MaxSwitcherAccounts {
+			break
+		}
+	}
+	return slots
+}
+
+func encodeSignedAccountSlots(ctx context.Context, db *sql.DB, slots []signedAccountSlot) (string, error) {
+	if len(slots) == 0 {
+		return "", nil
+	}
+	secret, err := ensureSessionSecret(ctx, db)
+	if err != nil {
+		return "", err
+	}
+	if len(slots) > domain.MaxSwitcherAccounts {
+		slots = slots[len(slots)-domain.MaxSwitcherAccounts:]
+	}
+	parts := make([]string, 0, len(slots))
+	for _, s := range slots {
+		parts = append(parts, fmt.Sprintf("%s:%s:%d", s.principal.Account, s.principal.TokenHint, s.expUnix))
+	}
+	body := strings.Join(parts, ",")
+	return body + "|" + signCookiePayload(secret, body), nil
+}
+
+func ParseAccountsCookie(ctx context.Context, db *sql.DB, cookieVal string) []domain.AuthPrincipal {
+	slots := parseSignedAccountSlots(ctx, db, cookieVal)
+	out := make([]domain.AuthPrincipal, 0, len(slots))
+	for _, s := range slots {
+		out = append(out, s.principal)
+	}
+	return out
+}
+
+func UpsertAccountInCookieValue(ctx context.Context, db *sql.DB, existingCookieVal string, p domain.AuthPrincipal, ttl time.Duration) (string, error) {
+	acc := domain.NormalizeAccount(p.Account)
+	if acc == "" || strings.TrimSpace(p.TokenHint) == "" {
+		return existingCookieVal, fmt.Errorf("valid authenticated account required")
+	}
+	if ttl <= 0 {
+		ttl = domain.DefaultSessionTTL
+	}
+	p.Account = acc
+	newExp := time.Now().Add(ttl).Unix()
+	slots := parseSignedAccountSlots(ctx, db, existingCookieVal)
+	updated := false
+	for i := range slots {
+		if slots[i].principal.Account == acc {
+			slots[i].principal = p
+			slots[i].expUnix = newExp
+			updated = true
+			break
+		}
+	}
+	if !updated {
+		slots = append(slots, signedAccountSlot{principal: p, expUnix: newExp})
+	}
+	return encodeSignedAccountSlots(ctx, db, slots)
+}
+
+func RemoveAccountFromCookieValue(ctx context.Context, db *sql.DB, existingCookieVal, rawAccount string) (string, []domain.AuthPrincipal, error) {
+	target := domain.NormalizeAccount(rawAccount)
+	slots := parseSignedAccountSlots(ctx, db, existingCookieVal)
+	var kept []signedAccountSlot
+	var remaining []domain.AuthPrincipal
+	for _, s := range slots {
+		if s.principal.Account == target {
+			continue
+		}
+		kept = append(kept, s)
+		remaining = append(remaining, s.principal)
+	}
+	val, err := encodeSignedAccountSlots(ctx, db, kept)
+	return val, remaining, err
+}
+
+func AuthenticateSwitcherAccount(ctx context.Context, db *sql.DB, cookieVal, rawAccount string) (domain.AuthPrincipal, bool) {
+	target := domain.NormalizeAccount(rawAccount)
+	if target == "" {
+		return domain.AuthPrincipal{}, false
+	}
+	for _, p := range ParseAccountsCookie(ctx, db, cookieVal) {
+		if p.Account == target {
+			return p, true
+		}
+	}
+	return domain.AuthPrincipal{}, false
+}

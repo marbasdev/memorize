@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -316,6 +317,80 @@ func NewDaemonMux(deps DaemonDeps) http.Handler {
 			"exit_code": code,
 		})
 	})
+
+	mux.HandleFunc("/api/daemon/export", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		if !IsAllowedOrigin(r, deps.ServerMode) {
+			http.Error(w, `{"error":"non-local request blocked"}`, http.StatusForbidden)
+			return
+		}
+		p, ok := resolveDaemonAuth(deps, r)
+		if !ok {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		if deps.Memory == nil {
+			http.Error(w, `{"error":"memory service unavailable"}`, http.StatusServiceUnavailable)
+			return
+		}
+		q := r.URL.Query()
+		var ids []int64
+		if rawIDs := strings.TrimSpace(q.Get("ids")); rawIDs != "" {
+			for _, part := range strings.Split(rawIDs, ",") {
+				if id, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64); err == nil && id > 0 {
+					ids = append(ids, id)
+				}
+			}
+		}
+		rq := domain.RecordQuery{
+			Scope:       strings.TrimSpace(q.Get("scope")),
+			Account:     strings.TrimSpace(q.Get("account")),
+			State:       strings.TrimSpace(q.Get("state")),
+			Category:    strings.TrimSpace(q.Get("category")),
+			SubCategory: strings.TrimSpace(q.Get("sub_category")),
+			Search:      q.Get("q"),
+		}
+		reqCtx := attachAuthContext(r.Context(), deps, p, r.Header.Get("X-Memorize-Account"))
+		bundle, err := deps.Memory.ExportBundle(reqCtx, rq, ids)
+		if err != nil {
+			WriteErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		if q.Get("download") == "1" {
+			w.Header().Set("Content-Disposition", `attachment; filename="memorize-bundle.json"`)
+		}
+		WriteJSON(w, http.StatusOK, bundle)
+	})
+
+	mux.HandleFunc("/api/daemon/import", PostJSONMode(deps.ServerMode, func(w http.ResponseWriter, r *http.Request) {
+		p, ok := resolveDaemonAuth(deps, r)
+		if !ok {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		if deps.Memory == nil {
+			http.Error(w, `{"error":"memory service unavailable"}`, http.StatusServiceUnavailable)
+			return
+		}
+		var req struct {
+			Bundle  domain.MemoryBundle        `json:"bundle"`
+			Options domain.BundleImportOptions `json:"options"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 4<<20)).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid bundle import json"}`, http.StatusBadRequest)
+			return
+		}
+		reqCtx := attachAuthContext(r.Context(), deps, p, r.Header.Get("X-Memorize-Account"))
+		res, err := deps.Memory.ImportBundle(reqCtx, req.Bundle, req.Options)
+		if err != nil {
+			WriteErr(w, http.StatusBadRequest, err)
+			return
+		}
+		WriteJSON(w, http.StatusOK, res)
+	}))
 
 	if deps.Dashboard != nil {
 		mux.Handle("/", deps.Dashboard)

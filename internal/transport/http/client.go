@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -345,4 +346,76 @@ func PostDaemonMCPWithAuth(addrOrURL, bearerToken, sid, cwd, account string, roo
 		return nil, false, err
 	}
 	return nil, false, fmt.Errorf("daemon mcp HTTP %d", resp.StatusCode)
+}
+
+func FetchDaemonExportWithAuth(ctx context.Context, addrOrURL, bearerToken string, query url.Values) (domain.MemoryBundle, error) {
+	ep := buildEndpointURL(addrOrURL, "/api/daemon/export")
+	if encoded := query.Encode(); encoded != "" {
+		ep += "?" + encoded
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ep, nil)
+	if err != nil {
+		return domain.MemoryBundle{}, err
+	}
+	if tok := strings.TrimSpace(bearerToken); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	resp, err := daemonRPCClient.Do(req)
+	if err != nil {
+		return domain.MemoryBundle{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return domain.MemoryBundle{}, ErrDaemonAuthRequired
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return domain.MemoryBundle{}, fmt.Errorf("export HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var out domain.MemoryBundle
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&out); err != nil {
+		return domain.MemoryBundle{}, err
+	}
+	return out, nil
+}
+
+func PostDaemonImportWithAuth(ctx context.Context, addrOrURL, bearerToken string, bundle domain.MemoryBundle, opts domain.BundleImportOptions) (domain.BundleImportResult, error) {
+	payload, err := json.Marshal(map[string]any{
+		"bundle":  bundle,
+		"options": opts,
+	})
+	if err != nil {
+		return domain.BundleImportResult{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, buildEndpointURL(addrOrURL, "/api/daemon/import"), bytes.NewReader(payload))
+	if err != nil {
+		return domain.BundleImportResult{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if tok := strings.TrimSpace(bearerToken); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	resp, err := daemonHookHTTP.Do(req)
+	if err != nil {
+		return domain.BundleImportResult{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return domain.BundleImportResult{}, ErrDaemonAuthRequired
+	}
+	if resp.StatusCode != http.StatusOK {
+		var errBody struct {
+			Error string `json:"error"`
+		}
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if json.Unmarshal(raw, &errBody) == nil && strings.TrimSpace(errBody.Error) != "" {
+			return domain.BundleImportResult{}, fmt.Errorf("%s", errBody.Error)
+		}
+		return domain.BundleImportResult{}, fmt.Errorf("import HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	var out domain.BundleImportResult
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&out); err != nil {
+		return domain.BundleImportResult{}, err
+	}
+	return out, nil
 }

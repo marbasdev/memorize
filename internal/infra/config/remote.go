@@ -16,8 +16,9 @@ import (
 )
 
 type RemoteBindingsFile struct {
-	Default *domain.RemoteTargetConfig           `json:"default,omitempty"`
-	Repos   map[string]domain.RemoteTargetConfig `json:"repos,omitempty"`
+	Default  *domain.RemoteTargetConfig           `json:"default,omitempty"`
+	Repos    map[string]domain.RemoteTargetConfig `json:"repos,omitempty"`
+	Profiles map[string]domain.RemoteTargetConfig `json:"profiles,omitempty"`
 }
 
 func RemotesFilePath(dataDir string) string {
@@ -80,6 +81,13 @@ func SaveRemoteBinding(dataDir, repoRoot string, global bool, target domain.Remo
 	if cur.Repos == nil {
 		cur.Repos = make(map[string]domain.RemoteTargetConfig)
 	}
+	if cur.Profiles == nil {
+		cur.Profiles = make(map[string]domain.RemoteTargetConfig)
+	}
+	if acc := domain.NormalizeAccount(target.Account); acc != "" {
+		target.Account = acc
+		cur.Profiles[acc] = target
+	}
 	if global || strings.TrimSpace(repoRoot) == "" {
 		cp := target
 		cur.Default = &cp
@@ -91,6 +99,40 @@ func SaveRemoteBinding(dataDir, repoRoot string, global bool, target domain.Remo
 		cur.Repos[cleanRepo] = target
 	}
 	return saveRemoteBindings(dataDir, cur)
+}
+
+func LookupRemoteProfile(dataDir, name string) (domain.RemoteTargetConfig, bool) {
+	key := domain.NormalizeAccount(name)
+	if key == "" {
+		return domain.RemoteTargetConfig{}, false
+	}
+	cur := LoadRemoteBindings(dataDir)
+	if t, ok := cur.Profiles[key]; ok && NormalizeRemoteURL(t.URL) != "" && strings.TrimSpace(t.Token) != "" {
+		t.URL = NormalizeRemoteURL(t.URL)
+		return t, true
+	}
+	if cur.Default != nil && domain.NormalizeAccount(cur.Default.Account) == key {
+		t := *cur.Default
+		t.URL = NormalizeRemoteURL(t.URL)
+		return t, true
+	}
+	return domain.RemoteTargetConfig{}, false
+}
+
+func RemoveRemoteProfile(dataDir, name string) (bool, error) {
+	key := domain.NormalizeAccount(name)
+	if key == "" {
+		return false, nil
+	}
+	cur := LoadRemoteBindings(dataDir)
+	if cur.Profiles == nil {
+		return false, nil
+	}
+	if _, ok := cur.Profiles[key]; !ok {
+		return false, nil
+	}
+	delete(cur.Profiles, key)
+	return true, saveRemoteBindings(dataDir, cur)
 }
 
 func RemoveRemoteBinding(dataDir, repoRoot string, global bool) (bool, error) {

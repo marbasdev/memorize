@@ -46,7 +46,10 @@
 
     <div style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;">
       {{if .ServerMode}}
-        <span class="badge b-accent" id="authPrincipalBadge" title="{{.AuthRole}}">@{{.AuthAccount}} · {{.AuthRole}}</span>
+        <button type="button" class="badge b-accent" id="authPrincipalBadge"
+          style="cursor:pointer;border:1px solid var(--accent);"
+          title="{{t .Lang "accounts_switch_tip"}}"
+          hx-get="/ui/modal/accounts" hx-target="#modalHost" hx-swap="innerHTML">@{{.AuthAccount}} · {{.AuthRole}} ▾</button>
         {{if .CanAdmin}}
           <button type="button" class="btn btn-sm" id="btnOpenUsers"
             hx-get="/ui/modal/users" hx-target="#modalHost" hx-swap="innerHTML">{{t .Lang "btn_users"}}</button>

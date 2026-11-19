@@ -220,3 +220,64 @@
   </div>
 </dialog>
 {{end}}
+
+{{define "modal_accounts"}}
+<dialog id="accountsDialog" aria-labelledby="accountsDlgTitle" style="width:min(560px,94vw);"
+  x-init="$el.showModal()" @click="if ($event.target === $el) $el.close()">
+  <div class="dlg-head">
+    <div style="display:flex;align-items:center;gap:0.5rem;">
+      <strong id="accountsDlgTitle">{{t .Lang "accounts_title"}}</strong>
+      <span class="badge b-muted">{{len .Accounts}}</span>
+    </div>
+    <button type="button" class="btn btn-sm" @click="$el.closest('dialog').close()">{{t .Lang "btn_close"}}</button>
+  </div>
+
+  <div class="dlg-body" style="gap:0.85rem;">
+    <div style="font-size:0.8rem;color:var(--muted);">{{t .Lang "accounts_desc"}}</div>
+
+    {{if .Error}}
+      <div class="sub-panel" style="border-color:var(--danger);background:rgba(239,68,68,0.1);color:var(--danger);font-size:0.8rem;">{{.Error}}</div>
+    {{end}}
+
+    <div style="display:flex;flex-direction:column;gap:0.45rem;">
+      {{range .Accounts}}
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;padding:0.55rem 0.7rem;background:var(--bg);border:1px solid {{if eq .Account $.CurrentAccount}}var(--accent){{else}}var(--border){{end}};border-radius:var(--radius-sm);">
+          <div style="display:flex;align-items:center;gap:0.45rem;flex-wrap:wrap;">
+            <strong style="font-family:var(--mono);font-size:0.85rem;">@{{.Account}}</strong>
+            <span class="badge {{if eq .Role "admin"}}b-warn{{else}}b-muted{{end}}">{{.Role}}</span>
+            {{if eq .Account $.CurrentAccount}}
+              <span class="badge b-accent">{{t $.Lang "accounts_active_badge"}}</span>
+            {{end}}
+          </div>
+          <div style="display:flex;gap:0.35rem;align-items:center;">
+            {{if ne .Account $.CurrentAccount}}
+              <button type="button" class="btn btn-primary btn-sm"
+                hx-post="/ui/accounts/switch" hx-vals='{"account":"{{.Account}}"}'
+                hx-target="#modalHost" hx-swap="innerHTML">{{t $.Lang "accounts_btn_switch"}}</button>
+            {{end}}
+            <button type="button" class="btn btn-sm"
+              hx-post="/ui/accounts/remove" hx-vals='{"account":"{{.Account}}"}'
+              hx-target="#modalHost" hx-swap="innerHTML">{{t $.Lang "accounts_btn_remove"}}</button>
+          </div>
+        </div>
+      {{end}}
+    </div>
+
+    <form style="display:flex;flex-direction:column;gap:0.5rem;padding:0.7rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);"
+      hx-post="/ui/accounts/add" hx-target="#modalHost" hx-swap="innerHTML">
+      <label for="switchAddToken" style="font-size:0.78rem;font-weight:600;">{{t .Lang "accounts_add_title"}}</label>
+      <div style="display:flex;gap:0.45rem;align-items:center;">
+        <input id="switchAddToken" name="token" type="password" class="input" style="flex:1;font-family:var(--mono);"
+          placeholder="mem_..." required autocomplete="off">
+        <button type="submit" class="btn btn-primary btn-sm">{{t .Lang "accounts_btn_add"}}</button>
+      </div>
+      <div style="font-size:0.73rem;color:var(--subtle);">{{t .Lang "accounts_add_note"}}</div>
+    </form>
+  </div>
+
+  <div class="dlg-foot">
+    <button type="button" class="btn btn-danger btn-sm" hx-post="/logout" hx-swap="none">{{t .Lang "accounts_btn_logout_all"}}</button>
+    <button type="button" class="btn btn-sm" @click="$el.closest('dialog').close()">{{t .Lang "btn_close"}}</button>
+  </div>
+</dialog>
+{{end}}

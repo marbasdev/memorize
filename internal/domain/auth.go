@@ -14,6 +14,8 @@ const (
 
 	DefaultServeAddr          = "0.0.0.0:18095"
 	SessionCookieName         = "memorize_session"
+	AccountsCookieName        = "memorize_accounts"
+	MaxSwitcherAccounts       = 10
 	DefaultSessionTTL         = 7 * 24 * time.Hour
 	LangCookieName            = "memorize_lang"
 	LangCookieMaxAge          = 365 * 24 * time.Hour

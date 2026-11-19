@@ -420,3 +420,59 @@ func TestLegacyConfigSessionSecretMigratesToInternalSecrets(t *testing.T) {
 		t.Fatalf("expected pre-migration session cookie valid after migration, ok=%v p=%+v", ok, p)
 	}
 }
+
+func TestAccountsSwitcherCookieLifecycleAndInvalidation(t *testing.T) {
+	db, ctx := openTestUsersDB(t)
+	admIss, _, err := EnsureBootstrapAdmin(ctx, db, "home", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workIss, err := CreateUser(ctx, db, "work", domain.RoleMember)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pHome, ok := AuthenticateToken(ctx, db, admIss.PlainToken)
+	if !ok {
+		t.Fatal("AuthenticateToken home failed")
+	}
+	pWork, ok := AuthenticateToken(ctx, db, workIss.PlainToken)
+	if !ok {
+		t.Fatal("AuthenticateToken work failed")
+	}
+
+	accCookie, err := UpsertAccountInCookieValue(ctx, db, "", pHome, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accCookie, err = UpsertAccountInCookieValue(ctx, db, accCookie, pWork, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	list := ParseAccountsCookie(ctx, db, accCookie)
+	if len(list) != 2 || list[0].Account != "home" || list[1].Account != "work" {
+		t.Fatalf("unexpected switcher accounts: %+v", list)
+	}
+	if _, ok := AuthenticateSwitcherAccount(ctx, db, accCookie+"tamper", "work"); ok {
+		t.Fatalf("tampered switcher cookie must fail")
+	}
+	if sw, ok := AuthenticateSwitcherAccount(ctx, db, accCookie, "work"); !ok || sw.Account != "work" || sw.Role != domain.RoleMember {
+		t.Fatalf("AuthenticateSwitcherAccount(work) = %+v ok=%v", sw, ok)
+	}
+
+	if _, err := RotateUserToken(ctx, db, "work"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := AuthenticateSwitcherAccount(ctx, db, accCookie, "work"); ok {
+		t.Fatalf("rotated user token must immediately invalidate switcher entry")
+	}
+	if sw, ok := AuthenticateSwitcherAccount(ctx, db, accCookie, "home"); !ok || sw.Account != "home" {
+		t.Fatalf("unrotated account home must remain valid in switcher")
+	}
+
+	nextCookie, remaining, err := RemoveAccountFromCookieValue(ctx, db, accCookie, "home")
+	if err != nil || nextCookie != "" || len(remaining) != 0 {
+		t.Fatalf("expected empty switcher after removing last valid account, got cookie=%q rem=%+v err=%v", nextCookie, remaining, err)
+	}
+}

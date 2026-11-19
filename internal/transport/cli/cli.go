@@ -161,6 +161,14 @@ func executeArgs(args []string, version string, hooks RuntimeHooks) int {
 			return runConnectCLI(args[1:], dbPath)
 		case "disconnect":
 			return runDisconnectCLI(args[1:], dbPath)
+		case "switch":
+			return runSwitchCLI(args[1:], dbPath)
+		case "push":
+			return runPushCLI(args[1:], dbPath)
+		case "export":
+			return runExportCLI(args[1:], dbPath)
+		case "import":
+			return runImportCLI(args[1:], dbPath, modelsDir, hooks)
 		}
 	}
 

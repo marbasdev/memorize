@@ -765,3 +765,112 @@ func TestServiceTaskRoutingDecisionAndGenerativeFallbacks(t *testing.T) {
 		t.Fatalf("expected TaskVerify to remain gemini:gemini-decision-1, got %q", pname)
 	}
 }
+
+type bundleMergeStubEval struct{}
+
+func (bundleMergeStubEval) Name() string { return "stub:bundle" }
+func (bundleMergeStubEval) ScoreRelevance(_ context.Context, _ string, _ []domain.Fact) ([]domain.ScoredFact, error) {
+	return nil, nil
+}
+func (bundleMergeStubEval) VerifyPlan(_ context.Context, _ string, _ []domain.Fact) ([]domain.PlanViolation, error) {
+	return nil, nil
+}
+func (bundleMergeStubEval) EvaluateMutation(_ context.Context, _, cand string, existing []domain.Fact) (domain.MutationDecision, error) {
+	switch {
+	case strings.Contains(cand, "duplicate-semantic"):
+		var tgt int64
+		if len(existing) > 0 {
+			tgt = existing[0].ID
+		}
+		return domain.MutationDecision{Action: "IGNORE", ConflictFactID: tgt, Confidence: 0.95, IsPermanent: 0.95}, nil
+	case strings.Contains(cand, "replace-existing"):
+		var tgt int64
+		for _, f := range existing {
+			if strings.Contains(f.Content, "Old port rule") {
+				tgt = f.ID
+				break
+			}
+		}
+		return domain.MutationDecision{Action: "OVERWRITE", ConflictFactID: tgt, Category: "architecture", Confidence: 0.95, IsPermanent: 0.95}, nil
+	default:
+		return domain.MutationDecision{Action: "INSERT", Category: "architecture", Confidence: 0.95, IsPermanent: 0.95}, nil
+	}
+}
+
+func TestBundleExportImportExactMergeAndServerIsolation(t *testing.T) {
+	svc, err := memory.Open(filepath.Join(t.TempDir(), "bundle.db"), bundleMergeStubEval{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+
+	ctxAlice := domain.WithAuthPrincipal(context.Background(), domain.AuthPrincipal{Account: "alice", Role: domain.RoleMember, ServerMode: true, Authenticated: true})
+	ctxBob := domain.WithAuthPrincipal(context.Background(), domain.AuthPrincipal{Account: "bob", Role: domain.RoleMember, ServerMode: true, Authenticated: true})
+
+	inBundle := domain.MemoryBundle{
+		Format: domain.MemoryBundleFormat,
+		Items: []domain.MemoryBundleItem{
+			{Scope: "global", Category: "architecture", SubCategory: "ports", Content: "Old port rule: default 18095", Pinned: true, Confidence: 0.95},
+			{Scope: "global", Category: "architecture", SubCategory: "ports", Content: "  old port   rule: default 18095 ", Pinned: false},
+			{Scope: "global", Category: "security", Content: "never commit sk-1234567890abcdefghijklmnop"},
+			{Scope: "project:team", Category: "testing", Content: "Always run race detector"},
+		},
+	}
+
+	dryRes, err := svc.ImportBundle(ctxAlice, inBundle, domain.BundleImportOptions{Mode: "exact", DryRun: true})
+	if err != nil || !dryRes.DryRun || dryRes.Inserted != 2 || dryRes.Skipped != 2 {
+		t.Fatalf("exact dry-run unexpected: %+v err=%v", dryRes, err)
+	}
+
+	exactRes, err := svc.ImportBundle(ctxAlice, inBundle, domain.BundleImportOptions{Mode: "exact"})
+	if err != nil || exactRes.Inserted != 2 || exactRes.Skipped != 2 {
+		t.Fatalf("exact apply unexpected: %+v err=%v", exactRes, err)
+	}
+
+	// Re-importing the exact same bundle must be 100% idempotent.
+	reRes, err := svc.ImportBundle(ctxAlice, inBundle, domain.BundleImportOptions{Mode: "exact"})
+	if err != nil || reRes.Inserted != 0 || reRes.Skipped != 4 {
+		t.Fatalf("expected idempotent exact re-import, got %+v err=%v", reRes, err)
+	}
+
+	// ServerMode export by Bob must see shared project:team but NOT Alice's private global.
+	bobExport, err := svc.ExportBundle(ctxBob, domain.RecordQuery{}, nil)
+	if err != nil || len(bobExport.Items) != 1 || bobExport.Items[0].Scope != "project:team" {
+		t.Fatalf("ServerMode export leaked private memory to Bob: %+v err=%v", bobExport, err)
+	}
+	aliceExport, err := svc.ExportBundle(ctxAlice, domain.RecordQuery{Scope: "global"}, nil)
+	if err != nil || len(aliceExport.Items) != 1 || !aliceExport.Items[0].Pinned {
+		t.Fatalf("expected Alice to export her own pinned global memory, got %+v err=%v", aliceExport, err)
+	}
+
+	mergeBundle := domain.MemoryBundle{
+		Format: domain.MemoryBundleFormat,
+		Items: []domain.MemoryBundleItem{
+			{Scope: "global", Category: "architecture", Content: "New port rule (replace-existing)"},
+			{Scope: "global", Category: "architecture", Content: "Already covered (duplicate-semantic)"},
+			{Scope: "global", Category: "testing", Content: "Brand new convention"},
+		},
+	}
+	mergeDry, err := svc.ImportBundle(ctxAlice, mergeBundle, domain.BundleImportOptions{Mode: "merge", DryRun: true})
+	if err != nil || mergeDry.Overwritten != 1 || mergeDry.Inserted != 1 || mergeDry.Skipped != 1 {
+		t.Fatalf("merge dry-run unexpected: %+v err=%v", mergeDry, err)
+	}
+	mergeApply, err := svc.ImportBundle(ctxAlice, mergeBundle, domain.BundleImportOptions{Mode: "merge"})
+	if err != nil || mergeApply.Overwritten != 1 || mergeApply.Inserted != 1 || mergeApply.Skipped != 1 {
+		t.Fatalf("merge apply unexpected: %+v err=%v", mergeApply, err)
+	}
+	aliceAfter, err := svc.LoadActiveFacts(ctxAlice, "global", "global", "")
+	if err != nil || len(aliceAfter) != 2 {
+		t.Fatalf("expected 2 active global facts after merge overwrite+insert, got %+v err=%v", aliceAfter, err)
+	}
+	// Overwriting a pinned memory preserves pinned=true.
+	foundPinnedReplacement := false
+	for _, f := range aliceAfter {
+		if strings.Contains(f.Content, "replace-existing") && f.Pinned {
+			foundPinnedReplacement = true
+		}
+	}
+	if !foundPinnedReplacement {
+		t.Fatalf("expected overwritten pinned rule to preserve pinned=true: %+v", aliceAfter)
+	}
+}

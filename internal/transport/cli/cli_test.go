@@ -23,6 +23,7 @@ import (
 
 	"memorize/internal/domain"
 	"memorize/internal/infra/config"
+	"memorize/internal/infra/sqlite"
 	"memorize/internal/modules/guardrail"
 	"memorize/internal/modules/memory"
 	"memorize/internal/modules/progress"
@@ -723,5 +724,125 @@ func TestPluginManifestsAndAutoUpdateBootstrapper(t *testing.T) {
 	)
 	if out, err := cmdInsecure.CombinedOutput(); err == nil {
 		t.Fatalf("expected run-memorize.sh to reject non-HTTPS MEMORIZE_RELEASE_BASE_URL, output:\n%s", string(out))
+	}
+}
+
+func TestCLISwitchPushExportAndImportEndToEnd(t *testing.T) {
+	tmp := t.TempDir()
+	srvDBPath := filepath.Join(tmp, "server", "memories.db")
+	cliDataDir := filepath.Join(tmp, "client")
+	cliDBPath := filepath.Join(cliDataDir, "memories.db")
+	if err := os.MkdirAll(filepath.Dir(srvDBPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cliDataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	srvMem, err := memory.Open(srvDBPath, cliTeamEval{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = srvMem.Close() })
+	ctx := context.Background()
+	homeIss, _, err := sqlite.EnsureBootstrapAdmin(ctx, srvMem.DB(), "home", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliceIss, err := sqlite.CreateUser(ctx, srvMem.DB(), "alice", domain.RoleMember)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(thttp.NewDaemonMux(thttp.DaemonDeps{
+		ServerMode:    true,
+		DB:            srvMem.DB(),
+		Memory:        srvMem,
+		BuildStatusFn: func() thttp.DaemonStatus { return thttp.DaemonStatus{Running: true, Version: "test"} },
+	}))
+	defer srv.Close()
+
+	// Seed local Solo DB on the client machine with global + project memories.
+	locMem, err := memory.Open(cliDBPath, cliTeamEval{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := locMem.ImportBundle(ctx, domain.MemoryBundle{
+		Format: domain.MemoryBundleFormat,
+		Items: []domain.MemoryBundleItem{
+			{Scope: "global", Category: "workflow", Content: "Always use gopls before grep", Pinned: true},
+			{Scope: "project:secret-work", Category: "architecture", Content: "Internal work-only note"},
+		},
+	}, domain.BundleImportOptions{Mode: "exact"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = locMem.Close()
+
+	t.Setenv("MEMORY_DATA_DIR", cliDataDir)
+	t.Setenv("MEMORY_DB_PATH", cliDBPath)
+	t.Setenv("MEMORY_REMOTE_URL", "")
+	t.Setenv("MEMORY_REMOTE_TOKEN", "")
+
+	// Connect both @home and @alice tokens (auto-saved into remotes.json profiles).
+	if code, out := captureStdout(t, func() int {
+		return executeArgs([]string{"connect", "--global", "--url", srv.URL, "--token", homeIss.PlainToken, "--json"}, "test", RuntimeHooks{})
+	}); code != 0 || !strings.Contains(out, `"account":"home"`) {
+		t.Fatalf("connect home failed: %d %s", code, out)
+	}
+	if code, out := captureStdout(t, func() int {
+		return executeArgs([]string{"connect", "--global", "--url", srv.URL, "--token", aliceIss.PlainToken, "--json"}, "test", RuntimeHooks{})
+	}); code != 0 || !strings.Contains(out, `"account":"alice"`) {
+		t.Fatalf("connect alice failed: %d %s", code, out)
+	}
+
+	// Switch back to @home using saved profile token.
+	if code, out := captureStdout(t, func() int {
+		return executeArgs([]string{"switch", "home", "--json"}, "test", RuntimeHooks{})
+	}); code != 0 || !strings.Contains(out, `"account":"home"`) {
+		t.Fatalf("switch home failed: %d %s", code, out)
+	}
+	if code, out := captureStdout(t, func() int {
+		return executeArgs([]string{"switch", "--json"}, "test", RuntimeHooks{})
+	}); code != 0 || !strings.Contains(out, `"active_account":"home"`) || !strings.Contains(out, `"alice"`) {
+		t.Fatalf("switch list failed: %d %s", code, out)
+	}
+
+	// Safety check: `memorize push` without --scope or --all must refuse.
+	if code, _ := captureStdout(t, func() int {
+		return executeArgs([]string{"push"}, "test", RuntimeHooks{})
+	}); code == 0 {
+		t.Fatalf("expected push without --scope or --all to fail safety check")
+	}
+
+	// Push only global scope to @home (must NOT upload project:secret-work).
+	if code, out := captureStdout(t, func() int {
+		return executeArgs([]string{"push", "--scope", "global", "--json"}, "test", RuntimeHooks{})
+	}); code != 0 || !strings.Contains(out, `"inserted":1`) {
+		t.Fatalf("push --scope global failed: %d %s", code, out)
+	}
+
+	ctxHome := domain.WithAuthPrincipal(ctx, domain.AuthPrincipal{Account: "home", Role: domain.RoleAdmin, ServerMode: true, Authenticated: true})
+	homePage, _ := srvMem.QueryRecordsPage(ctxHome, domain.RecordQuery{State: "active"})
+	if len(homePage.Records) != 1 || homePage.Records[0].Scope != "global" || !homePage.Records[0].Pinned {
+		t.Fatalf("expected only pushed global memory on server for @home, got %+v", homePage.Records)
+	}
+
+	// Export @home's global rules to JSON file, then import into @alice's profile.
+	bundleFile := filepath.Join(tmp, "shared-global.json")
+	if code, _ := captureStdout(t, func() int {
+		return executeArgs([]string{"export", "--scope", "global", "-o", bundleFile}, "test", RuntimeHooks{})
+	}); code != 0 {
+		t.Fatalf("export failed: %d", code)
+	}
+	if code, out := captureStdout(t, func() int {
+		return executeArgs([]string{"import", bundleFile, "--profile", "alice", "--mode", "exact", "--json"}, "test", RuntimeHooks{})
+	}); code != 0 || !strings.Contains(out, `"inserted":1`) {
+		t.Fatalf("import to alice failed: %d %s", code, out)
+	}
+
+	ctxAlice := domain.WithAuthPrincipal(ctx, domain.AuthPrincipal{Account: "alice", Role: domain.RoleMember, ServerMode: true, Authenticated: true})
+	alicePage, _ := srvMem.QueryRecordsPage(ctxAlice, domain.RecordQuery{Scope: "global", State: "active"})
+	if len(alicePage.Records) != 1 || alicePage.Records[0].Account != "alice" {
+		t.Fatalf("expected alice to receive imported global rule under her own account, got %+v", alicePage.Records)
 	}
 }

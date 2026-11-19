@@ -725,3 +725,141 @@ func TestDashboardServerModeTeamReadOnlyConfigRBACAndSharedToPersonalGuard(t *te
 		t.Fatalf("expected non-throttled IP login 303, got %d", recOtherIP.Code)
 	}
 }
+
+func TestDashboardMultiAccountSwitcherAndBundleImportModal(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "switcher.db")
+	d := newTestDeps(t, dbPath, noopEval{}, "", thttp.DashboardHooks{})
+	d.ServerMode = true
+	d.DB = d.Memory.DB()
+	admIss, _, err := sqlite.EnsureBootstrapAdmin(ctx, d.DB, "home", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobIss, err := sqlite.CreateUser(ctx, d.DB, "bob", domain.RoleMember)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(d)
+	host := "home.local:18095"
+
+	findCookie := func(res *http.Response, name string) *http.Cookie {
+		for _, c := range res.Cookies() {
+			if c.Name == name {
+				return c
+			}
+		}
+		return nil
+	}
+
+	// Login as @home -> must set both memorize_session and memorize_accounts cookies.
+	recLogin := httptest.NewRecorder()
+	reqLogin := httptest.NewRequest(http.MethodPost, "http://"+host+"/login", strings.NewReader(url.Values{"token": {admIss.PlainToken}}.Encode()))
+	reqLogin.Host = host
+	reqLogin.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	h.ServeHTTP(recLogin, reqLogin)
+	if recLogin.Code != http.StatusSeeOther {
+		t.Fatalf("login failed: %d", recLogin.Code)
+	}
+	sessCookie := findCookie(recLogin.Result(), domain.SessionCookieName)
+	accCookie := findCookie(recLogin.Result(), domain.AccountsCookieName)
+	if sessCookie == nil || accCookie == nil {
+		t.Fatalf("expected both session and accounts cookies on login")
+	}
+
+	// Add @bob via /ui/accounts/add -> switches active session to @bob and keeps both in accounts cookie.
+	recAdd := httptest.NewRecorder()
+	reqAdd := httptest.NewRequest(http.MethodPost, "http://"+host+"/ui/accounts/add", strings.NewReader(url.Values{"token": {bobIss.PlainToken}}.Encode()))
+	reqAdd.Host = host
+	reqAdd.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqAdd.Header.Set("HX-Request", "true")
+	reqAdd.AddCookie(sessCookie)
+	reqAdd.AddCookie(accCookie)
+	h.ServeHTTP(recAdd, reqAdd)
+	if recAdd.Code != http.StatusOK || recAdd.Header().Get("HX-Refresh") != "true" {
+		t.Fatalf("add account bob failed: %d hdr=%v body=%s", recAdd.Code, recAdd.Header(), recAdd.Body.String())
+	}
+	sessCookie = findCookie(recAdd.Result(), domain.SessionCookieName)
+	accCookie = findCookie(recAdd.Result(), domain.AccountsCookieName)
+
+	// Open switcher modal as @bob -> must list both @home and @bob.
+	recModal := httptest.NewRecorder()
+	reqModal := httptest.NewRequest(http.MethodGet, "http://"+host+"/ui/modal/accounts", nil)
+	reqModal.Host = host
+	reqModal.AddCookie(sessCookie)
+	reqModal.AddCookie(accCookie)
+	h.ServeHTTP(recModal, reqModal)
+	if recModal.Code != http.StatusOK || !strings.Contains(recModal.Body.String(), "@home") || !strings.Contains(recModal.Body.String(), "@bob") {
+		t.Fatalf("modal_accounts missing accounts: %d %s", recModal.Code, recModal.Body.String())
+	}
+
+	// Switch back to @home with 1 click.
+	recSw := httptest.NewRecorder()
+	reqSw := httptest.NewRequest(http.MethodPost, "http://"+host+"/ui/accounts/switch", strings.NewReader("account=home"))
+	reqSw.Host = host
+	reqSw.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqSw.Header.Set("HX-Request", "true")
+	reqSw.AddCookie(sessCookie)
+	reqSw.AddCookie(accCookie)
+	h.ServeHTTP(recSw, reqSw)
+	if recSw.Code != http.StatusOK || recSw.Header().Get("HX-Refresh") != "true" {
+		t.Fatalf("switch back to home failed: %d %s", recSw.Code, recSw.Body.String())
+	}
+	sessCookie = findCookie(recSw.Result(), domain.SessionCookieName)
+	if p, ok := sqlite.AuthenticateSessionCookie(ctx, d.DB, sessCookie.Value); !ok || p.Account != "home" {
+		t.Fatalf("expected active session switched to home, got %+v ok=%v", p, ok)
+	}
+
+	// Import modal preview + apply + export as @home.
+	bundlePayload := `{"format":"memorize.bundle.v1","items":[{"scope":"global","category":"convention","content":"Dashboard imported rule","pinned":true}]}`
+	recPrev := httptest.NewRecorder()
+	reqPrev := httptest.NewRequest(http.MethodPost, "http://"+host+"/ui/memories/import/preview", strings.NewReader(url.Values{
+		"bundle_json": {bundlePayload},
+		"mode":        {"exact"},
+	}.Encode()))
+	reqPrev.Host = host
+	reqPrev.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqPrev.Header.Set("HX-Request", "true")
+	reqPrev.AddCookie(sessCookie)
+	h.ServeHTTP(recPrev, reqPrev)
+	if recPrev.Code != http.StatusOK || !strings.Contains(recPrev.Body.String(), "Dashboard imported rule") {
+		t.Fatalf("import preview failed: %d %s", recPrev.Code, recPrev.Body.String())
+	}
+
+	recApply := httptest.NewRecorder()
+	reqApply := httptest.NewRequest(http.MethodPost, "http://"+host+"/ui/memories/import/apply", strings.NewReader(url.Values{
+		"bundle_json": {bundlePayload},
+		"mode":        {"exact"},
+	}.Encode()))
+	reqApply.Host = host
+	reqApply.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqApply.Header.Set("HX-Request", "true")
+	reqApply.AddCookie(sessCookie)
+	h.ServeHTTP(recApply, reqApply)
+	if recApply.Code != http.StatusOK || !strings.Contains(recApply.Body.String(), "Dashboard imported rule") {
+		t.Fatalf("import apply failed: %d %s", recApply.Code, recApply.Body.String())
+	}
+
+	recExp := httptest.NewRecorder()
+	reqExp := httptest.NewRequest(http.MethodGet, "http://"+host+"/ui/memories/export?scope=global", nil)
+	reqExp.Host = host
+	reqExp.AddCookie(sessCookie)
+	h.ServeHTTP(recExp, reqExp)
+	if recExp.Code != http.StatusOK || !strings.Contains(recExp.Body.String(), "Dashboard imported rule") {
+		t.Fatalf("dashboard export failed: %d %s", recExp.Code, recExp.Body.String())
+	}
+
+	// Logout must clear BOTH session and accounts cookies.
+	recOut := httptest.NewRecorder()
+	reqOut := httptest.NewRequest(http.MethodPost, "http://"+host+"/logout", nil)
+	reqOut.Host = host
+	reqOut.Header.Set("HX-Request", "true")
+	reqOut.AddCookie(sessCookie)
+	reqOut.AddCookie(accCookie)
+	h.ServeHTTP(recOut, reqOut)
+	clearedSess := findCookie(recOut.Result(), domain.SessionCookieName)
+	clearedAcc := findCookie(recOut.Result(), domain.AccountsCookieName)
+	if clearedSess == nil || clearedSess.MaxAge >= 0 || clearedAcc == nil || clearedAcc.MaxAge >= 0 {
+		t.Fatalf("logout must clear both session and accounts cookies: sess=%+v acc=%+v", clearedSess, clearedAcc)
+	}
+}

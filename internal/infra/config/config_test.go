@@ -255,3 +255,32 @@ func TestClientTurnBaselinesAndDiffSections(t *testing.T) {
 		t.Fatalf("expected cleared baselines, got %d", len(rem))
 	}
 }
+
+func TestRemoteProfilesLookupAndRemove(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := config.SaveRemoteBinding(dataDir, "", true, domain.RemoteTargetConfig{
+		URL: "https://home.example:18095", Token: "mem_home_tok", Account: "Home", Role: "admin",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SaveRemoteBinding(dataDir, "", true, domain.RemoteTargetConfig{
+		URL: "https://home.example:18095", Token: "mem_work_tok", Account: "work", Role: "member",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	pHome, ok := config.LookupRemoteProfile(dataDir, "home")
+	if !ok || pHome.Token != "mem_home_tok" || pHome.Account != "home" {
+		t.Fatalf("LookupRemoteProfile(home) = %+v ok=%v", pHome, ok)
+	}
+	pWork, ok := config.LookupRemoteProfile(dataDir, "WORK")
+	if !ok || pWork.Token != "mem_work_tok" {
+		t.Fatalf("LookupRemoteProfile(WORK) = %+v ok=%v", pWork, ok)
+	}
+	if removed, err := config.RemoveRemoteProfile(dataDir, "home"); err != nil || !removed {
+		t.Fatalf("RemoveRemoteProfile(home) = %v %v", removed, err)
+	}
+	if _, ok := config.LookupRemoteProfile(dataDir, "home"); ok {
+		t.Fatalf("expected removed profile home not found")
+	}
+}

@@ -56,6 +56,7 @@ func NewHandler(d Deps) http.Handler {
 	mux := http.NewServeMux()
 	registerSSRAuthRoutes(mux, d)
 	registerSSRRoutes(mux, d)
+	registerSSRBundleRoutes(mux, d)
 	registerAssetRoute(mux, d)
 	registerHandoverAPIRoutes(mux, d)
 	registerRecordsExportRoute(mux, d)

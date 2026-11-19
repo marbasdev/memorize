@@ -280,3 +280,51 @@ func SortFactsByPrefixTier(facts []Fact) {
 		return FactPriorityRank(facts[i]) < FactPriorityRank(facts[j])
 	})
 }
+
+const MemoryBundleFormat = "memorize.bundle.v1"
+
+type MemoryBundleItem struct {
+	Scope       string   `json:"scope"`
+	Category    string   `json:"category"`
+	SubCategory string   `json:"sub_category,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Content     string   `json:"content"`
+	Confidence  float64  `json:"confidence,omitempty"`
+	Pinned      bool     `json:"pinned,omitempty"`
+}
+
+type MemoryBundle struct {
+	Format     string             `json:"format"`
+	ExportedAt string             `json:"exported_at"`
+	Items      []MemoryBundleItem `json:"items"`
+}
+
+type BundleImportOptions struct {
+	Mode        string `json:"mode,omitempty"`         // "merge" (AI dedup/overwrite) or "exact" (deterministic exact dedup)
+	TargetScope string `json:"target_scope,omitempty"` // optional scope override for all imported items
+	DryRun      bool   `json:"dry_run,omitempty"`
+}
+
+type BundleImportItemResult struct {
+	Index       int     `json:"index"`
+	Scope       string  `json:"scope"`
+	Category    string  `json:"category"`
+	SubCategory string  `json:"sub_category,omitempty"`
+	Content     string  `json:"content"`
+	Pinned      bool    `json:"pinned,omitempty"`
+	Action      string  `json:"action"` // "insert", "overwrite", "skip_exact", "skip_duplicate", "skip_invalid"
+	Reason      string  `json:"reason,omitempty"`
+	TargetIDs   []int64 `json:"target_ids,omitempty"`
+	NewID       int64   `json:"new_id,omitempty"`
+}
+
+type BundleImportResult struct {
+	DryRun      bool                     `json:"dry_run"`
+	Mode        string                   `json:"mode"`
+	Engine      string                   `json:"engine,omitempty"`
+	Total       int                      `json:"total"`
+	Inserted    int                      `json:"inserted"`
+	Overwritten int                      `json:"overwritten"`
+	Skipped     int                      `json:"skipped"`
+	Items       []BundleImportItemResult `json:"items"`
+}

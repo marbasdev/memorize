@@ -427,6 +427,21 @@
       } catch (err) {
         showToast(err.message);
       }
+    },
+
+    exportMemories(selectedOnly) {
+      const params = new URLSearchParams();
+      if (selectedOnly && this.selectedIDs.length > 0) {
+        params.set('ids', this.selectedIDs.join(','));
+      } else {
+        const form = document.getElementById('memoryFilterForm');
+        if (form) {
+          for (const [k, v] of new FormData(form).entries()) {
+            if (v && k !== 'page' && k !== 'page_size') params.set(k, String(v));
+          }
+        }
+      }
+      window.location.href = '/ui/memories/export?' + params.toString();
     }
   });
 

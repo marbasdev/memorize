@@ -543,3 +543,93 @@
   </form>
 </dialog>
 {{end}}
+
+{{define "modal_import"}}
+<dialog id="importBundleDialog" aria-labelledby="importDlgTitle" style="width:min(760px,95vw);"
+  x-data="{ rawJSON: '' }"
+  x-init="$el.showModal()" @click="if ($event.target === $el) $el.close()">
+  <form id="importBundleForm" hx-post="/ui/memories/import/apply" hx-include="#memoryFilterForm" hx-target="#memoriesSection" hx-swap="innerHTML">
+    <div class="dlg-head">
+      <strong id="importDlgTitle">{{t .Lang "import_title"}}</strong>
+      <button type="button" class="btn btn-sm" @click="$el.closest('dialog').close()">{{t .Lang "btn_close"}}</button>
+    </div>
+
+    <div class="dlg-body" style="gap:0.75rem;">
+      <div style="font-size:0.8rem;color:var(--muted);">{{t .Lang "import_desc"}}</div>
+
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0.65rem;">
+        <div class="field-col">
+          <label for="importTargetScope">{{t .Lang "import_scope_lbl"}}</label>
+          <select id="importTargetScope" name="target_scope">
+            <option value="">{{t .Lang "import_scope_keep"}}</option>
+            {{range .Scopes}}
+              <option value="{{.}}" {{if eq $.TargetScope .}}selected{{end}}>{{.}}</option>
+            {{end}}
+          </select>
+        </div>
+        <div class="field-col">
+          <label for="importModeSel">{{t .Lang "import_mode_lbl"}}</label>
+          <select id="importModeSel" name="mode">
+            <option value="merge" {{if ne .Mode "exact"}}selected{{end}}>{{t .Lang "import_mode_merge"}}</option>
+            <option value="exact" {{if eq .Mode "exact"}}selected{{end}}>{{t .Lang "import_mode_exact"}}</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field-col">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;">
+          <label for="importBundleText">{{t .Lang "import_json_lbl"}}</label>
+          <label class="btn btn-sm" style="cursor:pointer;">
+            {{t .Lang "import_file_lbl"}}
+            <input type="file" accept=".json,application/json" style="display:none;"
+              @change="if ($event.target.files[0]) { const r = new FileReader(); r.onload = () => { rawJSON = String(r.result || ''); }; r.readAsText($event.target.files[0]); }">
+          </label>
+        </div>
+        <textarea id="importBundleText" name="bundle_json" x-model="rawJSON" rows="6" class="input"
+          style="font-family:var(--mono);font-size:0.76rem;resize:vertical;"
+          placeholder='{{t .Lang "import_json_ph"}}' required></textarea>
+      </div>
+
+      <div id="importPreviewBox"></div>
+    </div>
+
+    <div class="dlg-foot">
+      <button type="button" class="btn btn-sm" id="btnPreviewImport"
+        hx-post="/ui/memories/import/preview" hx-include="#importBundleForm"
+        hx-target="#importPreviewBox" hx-swap="innerHTML">{{t .Lang "import_btn_preview"}}</button>
+      <div style="display:flex;gap:0.4rem;">
+        <button type="button" class="btn btn-sm" @click="$el.closest('dialog').close()">{{t .Lang "btn_cancel"}}</button>
+        <button type="submit" class="btn btn-primary btn-sm" id="btnApplyImport">{{t .Lang "import_btn_apply"}}</button>
+      </div>
+    </div>
+  </form>
+</dialog>
+{{end}}
+
+{{define "import_preview_box"}}
+{{if .Error}}
+  <div class="sub-panel" style="border-color:var(--danger);background:rgba(239,68,68,0.1);color:var(--danger);font-size:0.8rem;">{{.Error}}</div>
+{{else if .Preview}}
+  <div class="sub-panel" style="display:flex;flex-direction:column;gap:0.55rem;">
+    <div style="display:flex;gap:0.45rem;flex-wrap:wrap;align-items:center;font-size:0.78rem;">
+      <span class="badge b-ok">{{t .Lang "import_sum_inserted"}}: {{.Preview.Inserted}}</span>
+      <span class="badge b-warn">{{t .Lang "import_sum_overwritten"}}: {{.Preview.Overwritten}}</span>
+      <span class="badge b-muted">{{t .Lang "import_sum_skipped"}}: {{.Preview.Skipped}}</span>
+      {{if .Preview.Engine}}<span class="badge b-muted" style="font-family:var(--mono);">{{.Preview.Engine}}</span>{{end}}
+    </div>
+    <div style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:0.3rem;">
+      {{range .Preview.Items}}
+        <div style="display:flex;align-items:flex-start;gap:0.45rem;font-size:0.76rem;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);">
+          <span class="badge {{if eq .Action "insert"}}b-ok{{else if eq .Action "overwrite"}}b-warn{{else}}b-muted{{end}}" style="white-space:nowrap;">{{.Action}}</span>
+          <div style="min-width:0;flex:1;">
+            <div><code style="font-size:0.72rem;">{{.Scope}}/{{.Category}}</code> {{.Content}}</div>
+            {{if .Reason}}<div style="color:var(--subtle);font-size:0.71rem;">{{.Reason}}</div>{{end}}
+          </div>
+        </div>
+      {{end}}
+    </div>
+  </div>
+{{else}}
+  <div style="font-size:0.76rem;color:var(--subtle);">{{t .Lang "import_preview_empty"}}</div>
+{{end}}
+{{end}}

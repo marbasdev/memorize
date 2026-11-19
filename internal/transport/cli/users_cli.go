@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"memorize/internal/domain"
@@ -386,5 +387,158 @@ func runDisconnectCLI(args []string, dbPath string) int {
 	} else {
 		fmt.Printf("Disconnected %s (reverted to local solo mode).\n", repoRoot)
 	}
+	return 0
+}
+
+func runSwitchCLI(args []string, dbPath string) int {
+	fs := flag.NewFlagSet("switch", flag.ContinueOnError)
+	repoFlag := fs.String("repo", "", "switch binding only for a specific local repository path")
+	globalFlag := fs.Bool("global", false, "switch global default remote binding only")
+	removeFlag := fs.String("remove", "", "remove a saved account profile from remotes.json")
+	skipVerify := fs.Bool("skip-verify", false, "switch profile without live /api/daemon/status check")
+	jsonFlag := fs.Bool("json", false, "output JSON")
+
+	ordered := reorderFlagsBeforePositional(args, map[string]bool{
+		"repo": true, "remove": true,
+	})
+	if err := fs.Parse(ordered); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+
+	dataDir := resolveClientDataDir(dbPath)
+	if rem := strings.TrimSpace(*removeFlag); rem != "" {
+		removed, err := config.RemoveRemoteProfile(dataDir, rem)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "remove profile failed: %v\n", err)
+			return 1
+		}
+		if *jsonFlag {
+			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"removed": removed, "profile": domain.NormalizeAccount(rem)})
+			return 0
+		}
+		if !removed {
+			fmt.Printf("Profile %q not found.\n", domain.NormalizeAccount(rem))
+			return 0
+		}
+		fmt.Printf("Removed saved profile @%s.\n", domain.NormalizeAccount(rem))
+		return 0
+	}
+
+	pos := fs.Args()
+	if len(pos) == 0 {
+		cwd, _ := os.Getwd()
+		active, hasActive := config.ResolveRemoteTarget(dataDir, cwd)
+		bindings := config.LoadRemoteBindings(dataDir)
+		names := make([]string, 0, len(bindings.Profiles))
+		for k := range bindings.Profiles {
+			names = append(names, k)
+		}
+		sort.Strings(names)
+
+		if *jsonFlag {
+			profs := make([]map[string]any, 0, len(names))
+			for _, name := range names {
+				p := bindings.Profiles[name]
+				profs = append(profs, map[string]any{
+					"profile": name,
+					"account": p.Account,
+					"role":    p.Role,
+					"url":     p.URL,
+					"active":  hasActive && domain.NormalizeAccount(active.Account) == name && config.NormalizeRemoteURL(active.URL) == config.NormalizeRemoteURL(p.URL),
+				})
+			}
+			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
+				"active_account": active.Account,
+				"active_url":     active.URL,
+				"connected":      hasActive,
+				"profiles":       profs,
+			})
+			return 0
+		}
+		if len(names) == 0 {
+			if hasActive {
+				fmt.Printf("Active: @%s -> %s (no named profiles saved yet; re-run `memorize connect` to save)\n", active.Account, active.URL)
+			} else {
+				fmt.Println("No saved account profiles. Run `memorize connect --url <url> --token <token>` first.")
+			}
+			return 0
+		}
+		for _, name := range names {
+			p := bindings.Profiles[name]
+			mark := " "
+			if hasActive && domain.NormalizeAccount(active.Account) == name && config.NormalizeRemoteURL(active.URL) == config.NormalizeRemoteURL(p.URL) {
+				mark = "*"
+			}
+			role := p.Role
+			if role == "" {
+				role = "member"
+			}
+			fmt.Printf("%s @%-16s (%s) -> %s\n", mark, name, role, p.URL)
+		}
+		return 0
+	}
+
+	targetName := domain.NormalizeAccount(pos[0])
+	target, ok := config.LookupRemoteProfile(dataDir, targetName)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "saved profile %q not found (run `memorize switch` to list profiles or `memorize connect` to add a token)\n", targetName)
+		return 1
+	}
+	if !*skipVerify {
+		st, err := thttp.QueryDaemonStatusWithAuth(target.URL, target.Token)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to verify profile @%s (%s): %v\n", targetName, target.URL, err)
+			return 1
+		}
+		if st != nil {
+			if st.Account != "" {
+				target.Account = st.Account
+			}
+			if st.Role != "" {
+				target.Role = st.Role
+			}
+		}
+	}
+
+	var scopeDesc string
+	if strings.TrimSpace(*repoFlag) != "" {
+		repoRoot := resolveBindingRepoRoot(*repoFlag)
+		if err := config.SaveRemoteBinding(dataDir, repoRoot, false, target); err != nil {
+			fmt.Fprintf(os.Stderr, "switch failed: %v\n", err)
+			return 1
+		}
+		scopeDesc = repoRoot
+	} else {
+		if err := config.SaveRemoteBinding(dataDir, "", true, target); err != nil {
+			fmt.Fprintf(os.Stderr, "switch failed: %v\n", err)
+			return 1
+		}
+		scopeDesc = "global default"
+		if !*globalFlag {
+			// Also update matching per-repo binding for the current workspace on the same server so the switch takes effect immediately.
+			if repoRoot := resolveBindingRepoRoot(""); repoRoot != "" {
+				cur := config.LoadRemoteBindings(dataDir)
+				if existing, hasRepo := cur.Repos[repoRoot]; hasRepo && config.NormalizeRemoteURL(existing.URL) == config.NormalizeRemoteURL(target.URL) {
+					_ = config.SaveRemoteBinding(dataDir, repoRoot, false, target)
+					scopeDesc = "global default + " + repoRoot
+				}
+			}
+		}
+	}
+
+	if *jsonFlag {
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
+			"switched": true,
+			"account":  target.Account,
+			"role":     target.Role,
+			"url":      target.URL,
+			"scope":    scopeDesc,
+		})
+		return 0
+	}
+	fmt.Printf("Switched active account to @%s (%s) -> %s [%s]\n", target.Account, target.Role, target.URL, scopeDesc)
 	return 0
 }

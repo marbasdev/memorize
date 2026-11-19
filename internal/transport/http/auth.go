@@ -64,6 +64,35 @@ func ClearSessionCookie(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func SetAccountsCookie(w http.ResponseWriter, r *http.Request, value string, maxAgeSec int) {
+	if strings.TrimSpace(value) == "" {
+		ClearAccountsCookie(w, r)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     domain.AccountsCookieName,
+		Value:    value,
+		Path:     "/",
+		MaxAge:   maxAgeSec,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   IsSecureRequest(r),
+	})
+}
+
+func ClearAccountsCookie(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     domain.AccountsCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0),
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   IsSecureRequest(r),
+	})
+}
+
 func AuthenticateHTTPRequest(db *sql.DB, r *http.Request) (domain.AuthPrincipal, bool) {
 	if db == nil || r == nil {
 		return domain.AuthPrincipal{}, false
