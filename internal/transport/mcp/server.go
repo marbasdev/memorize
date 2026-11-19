@@ -56,7 +56,7 @@ type Deps struct {
 func NewServer(deps Deps) *server.MCPServer {
 	ver := deps.Version
 	if ver == "" {
-		ver = "1.1.0"
+		ver = "1.2.0"
 	}
 	if deps.Memory != nil && deps.RulePack == nil {
 		deps.RulePack = rulepack.New(deps.Memory)

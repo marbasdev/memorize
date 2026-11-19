@@ -53,7 +53,7 @@ Comparing item by item against static instruction files, vector RAG, and append-
 | **Compaction Recovery** | Long-chat summarization drops early rules | **Auto-detects compaction & checkpoints** to restore core rules, progress & relevant rules |
 | **Cross-Agent Portability** | Tool-specific rule files fragment across clients and break on switch | **Mix or switch across AI agents & models** (Claude Code · Antigravity · Cursor · MCP) while **keeping one shared set of live rules & decisions** |
 | **Orchestration & Multi-Agent** | Re-pasting rules per worker & parallel drift | **Per-worker delta injection** · **shell & turn-end guardrails on smaller workers** · **live rule sync** |
-| **Daemon & Isolation** | Per-call cold starts & tangled notes/tasks | **Single WAL daemon** (`127.0.0.1:18095`) · **memories, progress history, audit & 3 scopes** |
+| **Daemon & Isolation** | Per-call cold starts & tangled notes/tasks | **Single WAL daemon or shared Team Server** · **memories, progress history, audit & isolated scopes** |
 
 *(Internal table schemas, MCP tool specs, and decision endpoints are documented in [Architecture Reference](./ARCHITECTURE.md).)*
 
@@ -157,7 +157,7 @@ Preview the main **Memories** tab below and click any other tab to expand its UI
 
 </details>
 
-*(Shared repository rules stored in `.memorize/TEAM_RULES.md` are managed in the **Team Rules** tab — see [Team Collaboration Guide](./TEAM.md).)*
+*(Shared repository rules in `.memorize/TEAM_RULES.md` and optional shared **Team Server** collaboration—with per-user isolation, thin-client remote connections, and shared KV prefix caching—are documented in the [Team Collaboration Guide](./TEAM.md).)*
 
 ### Memory Organization & Lifecycle
 

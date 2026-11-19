@@ -6,44 +6,43 @@
 
 ```mermaid
 flowchart LR
-    A["Stdio Bridge / Streamable HTTP (/mcp) / Hook"] --> B["Unified Local Daemon (127.0.0.1:18095)"]
+    A["Stdio Bridge / Streamable HTTP (/mcp) / Hook"] --> B["Unified Local Daemon (127.0.0.1:18095) or Team Server (memorize serve)"]
     B --> C["Write Gatekeeper (noise drop / 1:N overwrite)"]
-    B --> D["Parallel Full-Scope Eval (System 1 & Gen Companion)"]
+    B --> D["Parallel Full-Scope Eval (System 1 & Gen Companion · Prefix KV Cache)"]
     D --> E["Session Delta & [REVOKED] Filter"]
     D --> F["Hybrid Guardrail (PreToolUse + Stop Auto-Fix + pre-commit)"]
 ```
 
 | Component | Responsibility | State / Interface |
 | :--- | :--- | :--- |
-| **Unified Daemon** | Auto-spawns on first MCP/hook call; owns SQLite (`WAL`), local `llama-server` (`:18088`), Web Console, and port fallback | `/mcp`, `/api/daemon/*`, SSE `/api/events`, `ports.json`, `daemon.json` |
+| **Unified Daemon & Team Server** | Local daemon auto-spawns on first MCP/hook call; `memorize serve` exposes authenticated multi-user mode (`0.0.0.0:18095`) with concurrent SQLite `WAL` read pooling (`MaxOpenConns=4`, `_txlock=immediate`), graceful `Shutdown`, and SSE domain push | `/mcp`, `/api/daemon/*`, SSE `/api/events`, `ports.json`, `daemon.json`, `remotes.json` |
+| **Auth & 4-Tier Scope Isolation** | SHA-256 Bearer tokens (`mem_*`), HMAC-SHA256 `HttpOnly` session cookies (`internal_secrets`), per-IP `/login` rate limiting, trusted proxy header guard, and `TEAM > project:* > global[per-account] > personal` isolation & prefix sort | `users`, `internal_secrets`, `user_repo_sync`, `ClientHookContext` |
 | **Write Gatekeeper** | Filters chatter (`transient`), atomically retires superseded rules (`1:N`), and emits replacement/`[REVOKED]` notices | `memories` (`core rule` / `pinned`, lineage `superseded_by`) |
-| **Session Delta & Recovery** | Skips already-delivered facts (`0` eval on repeat turns), evaluates unsent rules in parallel (`KV`-cached static prefix), and auto-restores after compaction | `session_sent`, `session_compacts` (`PostCompact`, `CHECKPOINT`) |
+| **Session Delta & Bounded Caches** | Skips already-delivered facts (`0` eval on repeat turns), evaluates unsent rules in parallel (`TEAM > project:* > global > personal` KV prefix order), bounds in-memory session/rulepack caches (`256` entries / `6h` idle), periodically sweeps transient tables, and auto-restores after compaction | `session_sent`, `session_updates`, `session_compacts`, `turn_state` |
 | **System 1 & Routing** | Routes judgment tasks (`relevance`, `mutation`, `verify`, `calibrate`) to 0-output-token engines and synthesis (`consolidate`, `progress`, `taxonomy`) to companion gen models with `429`/`503` fallback | 7 `EvalTask` routes, `eval_telemetry` metrics |
-| **Isolated Stores & Team Pack** | Separates activity history (Auto-TTL) and guardrail audits from rules; parses `.memorize/TEAM_RULES.md` into an in-memory cache without a SQLite rule-body mirror | `project_progress`, `guardrail_logs`, `team_rule_*` states |
+| **Isolated Stores & Team Pack** | Separates activity history (Auto-TTL) and guardrail audits from rules; parses `.memorize/TEAM_RULES.md` into an account/scope-isolated in-memory cache without a SQLite rule-body mirror | `project_progress`, `guardrail_logs`, `team_rule_*` states |
 
 ### Hybrid Guardrail Flow (`PreToolUse` + `Stop` + `git pre-commit`)
 1. **Exempt & Pre-Mutate Gate (`PreToolUse`)**: Read-only tools and safe read-only commands pass with `0` inference calls; if the current prompt introduced an uncommitted rule change, mutations pause immediately (`[MEMORIZE PRE-MUTATE GATE]`) until memory is updated.
 2. **Immediate Shell Block (`PreToolUse`)**: Irreversible shell commands and explicit plan checks verify upfront against active local and team rules before execution.
 3. **Turn Baseline Capture (`PreToolUse`)**: Interactive file edits pass without per-edit inference stalls after the pre-mutate gate, snapshotting each file's pre-turn disk baseline once into `turn_pending_edits`.
-4. **Turn-End Auto-Fix (`Stop`) & Commit Gate**: On normal turn completion, cumulative per-file turn diffs are verified once per scope; violations re-enter the agent loop for self-correction (guarding against re-entry loops and cancellations), backed by `memorize -hook git-precommit` on staged commits.
+4. **Turn-End Auto-Fix (`Stop`) & Commit Gate**: On normal turn completion, cumulative per-file turn diffs (chunked within engine input token budgets) are verified once per scope; violations re-enter the agent loop for self-correction (guarding against re-entry loops and cancellations), backed by `memorize -hook git-precommit` on staged commits.
 
 ---
 
 ## 2. Package Layering
 
 **Strict Acyclic DAG**: `domain -> infra -> inference -> modules -> transport -> app <- cmd/memorize`
-*(Lower layers never import higher layers; `cmd` injects `RuntimeHooks` into `transport/cli` so `transport/*` never imports `app/*`; production `git` execution stays confined to `internal/infra/git`.)*
+*(Lower layers never import higher layers; `cmd` injects `RuntimeHooks` into `transport/cli` so `transport/*` never imports `app/*`; `infra/sqlite` has zero `infra/git` coupling; production `git` execution stays confined to `internal/infra/git`; `transport/*` holds zero raw SQL queries.)*
 
 | Layer | Packages | Role & Boundary |
 | :--- | :--- | :--- |
-| **1. Domain** | `internal/domain` | Stdlib-only core models & validation (`Fact`, `Scope`, `Progress`, `Evaluator`, `RulePack`, `Sync`, secret redaction) |
-| **2. Infra** | `internal/infra/{config,sqlite,git,ssh,eventbus}` | Paths/`ports.json` store, SQLite `WAL` & migrations, Git root/commit inspection + isolated `worktree` `push`, hardened SSH pipe *(dormant)*, SSE domain broadcaster |
+| **1. Domain** | `internal/domain` | Stdlib-only core models & validation (`Fact`, `Scope`, `AuthPrincipal`, `FactPriorityRank`, `Progress`, `Evaluator`, `RulePack`, secret redaction) |
+| **2. Infra** | `internal/infra/{config,sqlite,git,eventbus}` | Paths/`ports.json`/`remotes.json` store, SQLite `WAL` pool/migrations/auth/transient sweeps, Git root/commit inspection + isolated `worktree` `push`, SSE domain broadcaster with clean `Close()` |
 | **3. Inference** | `internal/inference/{router,providers,discovery,localmodel}` | Per-task router & `429`/`503` cooldown fallback, declarative provider adapters (`GGUF`, `Gemini`/`Decisions`, `Jev`/`Flide`, OpenAI-compatible), preset probing, local `llama-server` lifecycle (`macOS`/`Linux`) |
-| **4. Modules** | `internal/modules/{memory,progress,rulepack,guardrail}` | Memory CRUD/deltas/consolidation *(+ gated `sync_*`)*, `project_progress` & TTL, `.memorize/TEAM_RULES.md` isolated `push` + CAS & conflict pause gate (`ErrBranchProtected` without PR fallback), Hybrid `PreToolUse`+`Stop`+`pre-commit` guardrails & onboarding |
-| **5. Transport** | `internal/transport/{cli,mcp,http,dashboard}` | Flags/daemon/port CLI *(+ gated `sync` CLI)*, 6 MCP tools/resource/prompt + `ScopeResolver`, HTTP mux & loopback/CSRF guards *(+ gated `/api/daemon/sync`)*, 6-tab HTMX SSR Web Console *(Sync UI hidden/gated)* |
-| **6. App & CLI** | `cmd/memorize`, `internal/app/localdaemon` | Minimal entrypoint wiring, unified daemon lifecycle, port fallback & versioned binary handover |
-
-- **Cross-Device Sync Status (`v1.1`)**: Transaction-log sync, conflict isolation, and SSH pipe packages are staged in-tree and strictly gated off (`IsMemorySyncEnabled() == false`, zero `memory_tx_log` writes) pending log compaction and snapshot bootstrap in a later release.
+| **4. Modules** | `internal/modules/{memory,progress,rulepack,guardrail}` | Memory CRUD/deltas/consolidation/bounded caches, `project_progress` & TTL, `.memorize/TEAM_RULES.md` isolated `push` + CAS & conflict pause gate (`ErrBranchProtected` without PR fallback), Hybrid `PreToolUse`+`Stop`+`pre-commit` guardrails & onboarding |
+| **5. Transport** | `internal/transport/{cli,mcp,http,dashboard}` | CLI (`daemon`, `serve`, `user`, `connect`, `disconnect`), 6 MCP tools/resource/prompt + `ScopeResolver`, HTTP mux/auth/proxy/CSRF guards + thin-client bridge, 6-tab HTMX SSR Web Console (including `/login`, **Accounts**, and **Remote Servers**) |
+| **6. App & CLI** | `cmd/memorize`, `internal/app/localdaemon` | Minimal entrypoint wiring, unified local daemon & authenticated team server lifecycle, graceful shutdown, port fallback & versioned binary handover |
 
 ---
 
@@ -51,7 +50,7 @@ flowchart LR
 
 | Kind | Name | Purpose |
 | :--- | :--- | :--- |
-| **Tool** | `query_project_memory` | Evaluate active rules (`project:<repo>`, `global`, `personal` + `[TEAM]` mirror) with session delta |
+| **Tool** | `query_project_memory` | Evaluate active rules (`TEAM` → `project:<repo>` → `global` → `personal`) with session delta |
 | **Tool** | `commit_memory` | Single/batch rule evaluation (`INSERT`, `1:N` overwrite, drop) + optional `synced_commit` update |
 | **Tool** | `verify_plan_against_memory` | Pre-execution compliance check against active local and team rules |
 | **Tool** | `manage_memory` | `update`, `forget`, `undo`, `consolidate` (`<= 180` chars), `purge`, `skip_onboarding`, `reset_onboarding` |
@@ -67,6 +66,7 @@ flowchart LR
 | :--- | :--- | :--- |
 | `MEMORY_DATA_DIR` / `MEMORY_DB_PATH` | `~/.memorize` · `memories.db` | Shared data root (`%USERPROFILE%\.memorize` on Windows) and SQLite `WAL` path (`0600`) |
 | `MEMORY_MODELS_DIR` | `~/.memorize/models` | Local GGUF models & `llama-server` directory (`macOS`/`Linux`) |
+| `MEMORY_REMOTE_URL` / `MEMORY_REMOTE_TOKEN` | *(empty)* | Explicit thin-client override targeting a Team Server URL and Bearer token (overrides `remotes.json`) |
 | `MEMORY_PROVIDER` | `gguf` *(Unix)* / `local` *(Windows)* | Active engine: `gguf`, `local`, `jev` / `flide`, or `gemini` |
 | `GEMINI_API_KEY` / `GEMINI_MODEL` | *(empty)* / `gemini-3.5-flash-lite` | Gemini key & model (`gemini-decision-1` uses `/v1beta/decisions`) |
 | `JEV_API_URL` / `JEV_MODEL` | `http://127.0.0.1:8000` / `jev-latest` | System 1 API endpoint/model (`TYPESAFE_API_KEY` for cloud) |

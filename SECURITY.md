@@ -11,13 +11,14 @@ Security updates are applied to the latest release tag on `main`:
 
 ## Threat Model & Built-in Mitigations
 
-`memorize` is designed to run locally on a developer workstation:
+`memorize` runs locally on a developer workstation by default, and also supports an authenticated multi-user Team Server Mode (`memorize serve`):
 
-- **Loopback Binding & CSRF Protection**: The unified daemon binds to `127.0.0.1` by default and validates `Host`, `Origin`, and `Sec-Fetch-Site` on mutating endpoints (`/ui/*` requires `HX-Request`; `/api/daemon/*` validates local JSON POST).
-- **SQLite Storage**: Local state is stored in SQLite (`WAL` mode) with `0600` file permissions and `0700` data/model directories.
-- **Credential Storage & Redaction**: API keys may be provided via environment variables or stored in local SQLite config (never echoed raw in API responses or SSR HTML, strictly host-matched on dispatch, and secret-redacted in `guardrail_logs`).
-- **Path & Download Safety**: Managed GGUF operations validate safe `.gguf` filenames, reject path traversal, restrict remote model downloads to `https://` (or loopback `http://127.0.0.1|localhost`), and verify `SHA256SUMS` during release binary bootstrapping.
-- **Git Worktree & SSH Sync Isolation**: Declarative `.memorize/TEAM_RULES.md` mutations commit and push only from clean temporary `git worktree` directories with `GIT_TERMINAL_PROMPT=0` so active workspace files never leak. Dormant cross-device SSH transport enforces non-interactive `BatchMode=yes`, `--` option termination, and flag/shell-metacharacter rejection (`ParseSyncTarget` / `ValidateRemoteBin`), and remains disabled by default in `v1.1`.
+- **Loopback Binding, Origin & CSRF Protection**: The local daemon binds to `127.0.0.1` by default and validates `Host`, `Origin`, and `Sec-Fetch-Site` on mutating endpoints (`/ui/*` requires `HX-Request`; `/api/daemon/*` validates JSON POST). In Team Server Mode, `X-Forwarded-Host`, `X-Forwarded-Proto`, and `X-Forwarded-For` are honored only from trusted loopback or private-network reverse proxies.
+- **Team Server Authentication & Rate Limiting**: Access tokens (`mem_*`) are stored strictly as SHA-256 hashes (shown once on creation/rotation). Browser sessions use HMAC-SHA256 signed `HttpOnly` cookies backed by a dedicated `internal_secrets` SQLite table, and `/login` enforces per-IP brute-force lockout (`429 Too Many Requests`).
+- **Role-Based Access & Scope Isolation**: Team Server Mode enforces `admin` vs `member` authorization across engine/threshold/retention/user administration, isolates `personal` and `global` scopes per authenticated account, blocks moving shared `project:*` rules into private scopes, and never probes the server host filesystem for client Git repositories.
+- **SQLite Storage**: State is stored in SQLite (`WAL` mode) with `0600` file permissions and `0700` data/model directories.
+- **Credential Storage & Redaction**: API keys may be provided via environment variables or stored in SQLite config (never echoed raw in API responses or SSR HTML, strictly host-matched via `u.Hostname()` on dispatch, and secret-redacted in `guardrail_logs`).
+- **Path, Download & Worktree Safety**: Managed GGUF operations validate safe `.gguf` filenames, reject path traversal, restrict remote model downloads to `https://` (or loopback `http://127.0.0.1|localhost`), verify `SHA256SUMS` during release binary bootstrapping, and isolate `.memorize/TEAM_RULES.md` commits inside temporary `git worktree` directories with `GIT_TERMINAL_PROMPT=0`.
 
 ## Reporting a Vulnerability
 
