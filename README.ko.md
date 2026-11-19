@@ -212,17 +212,22 @@ git pull && CGO_ENABLED=0 go build -trimpath -o bin/memorize ./cmd/memorize
 ./plugins/memorize/scripts/run-memorize.sh daemon restart
 ```
 
-### SQLite 백업 및 복원
+### 백업 · 복원 · 포터블 이관
 
 ```bash
-# 안전 백업 (WAL 체크포인트 포함)
+# SQLite 전체 안전 백업 (WAL 체크포인트 포함)
 sqlite3 ~/.memorize/memories.db ".backup './memories-backup.db'"
 
-# 안전 복원 (데몬 정지 및 기존 WAL/SHM 파일 정리 후 교체)
+# SQLite 전체 안전 복원 (데몬 정지 및 기존 WAL/SHM 파일 정리 후 교체)
 ~/.memorize/bin/memorize daemon stop
 mkdir -p ~/.memorize && rm -f ~/.memorize/memories.db-wal ~/.memorize/memories.db-shm
 cp ./memories-backup.db ~/.memorize/memories.db
 ~/.memorize/bin/memorize daemon start
+
+# 스코프별 포터블 JSON 내보내기 · AI 병합 가져오기 · 서버 업로드 (웹 콘솔 기억 관리 탭에서도 지원)
+~/.memorize/bin/memorize export --scope global -o global.json
+~/.memorize/bin/memorize import global.json --mode merge --dry-run
+~/.memorize/bin/memorize push --scope global --mode exact
 ```
 
 ### 삭제
@@ -244,6 +249,6 @@ rm -rf ~/.memorize                            # MEMORY_DATA_DIR 변경 시 해�
 ## 로드맵 · 의견 남기기 · 문서
 
 - **로드맵**
-  - 기기간 동기화는 보류되었으며 팀 모드가 추가되었습니다.
+  - 자동 P2P·클라우드 기기 간 동기화는 보류되었으며, **공유 팀 서버 모드**(`serve` · `connect` · 멀티 계정 `switch`)와 **포터블 번들 이관**(`push` · `export` · `import`)이 추가되었습니다 — [팀 협업 가이드](./TEAM.ko.md) 참고.
 - **의견 및 피드백**: 외부 코드 PR(컨트리뷰션)은 받지 않지만, 사용 중 의견·버그·취약점 제보는 [GitHub Issues](https://github.com/marbasdev/memorize/issues)에 남겨주시면 확인되는 대로 즉시 조치하겠습니다. _(취약점의 세부 익스플로잇 내용은 공개 이슈에 적지 마세요 — [보안 정책](./SECURITY.md))_
 - **문서**: [팀 협업 가이드](./TEAM.ko.md) · [아키텍처 & 환경변수](./ARCHITECTURE.ko.md) · [피드백 및 기여 정책](./CONTRIBUTING.md) · [보안 정책](./SECURITY.md) · [MIT License](./LICENSE)

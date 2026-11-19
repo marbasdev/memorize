@@ -212,17 +212,22 @@ git pull && CGO_ENABLED=0 go build -trimpath -o bin/memorize ./cmd/memorize
 ./plugins/memorize/scripts/run-memorize.sh daemon restart
 ```
 
-### Backup & Restore SQLite State
+### Backup, Restore & Portable Transfer
 
 ```bash
-# Consistent hot backup (includes WAL checkpoint)
+# Consistent SQLite hot backup (includes WAL checkpoint)
 sqlite3 ~/.memorize/memories.db ".backup './memories-backup.db'"
 
-# Restore safely (stop daemon and clear stale WAL/SHM sidecars first)
+# Restore full SQLite DB safely (stop daemon and clear stale WAL/SHM sidecars first)
 ~/.memorize/bin/memorize daemon stop
 mkdir -p ~/.memorize && rm -f ~/.memorize/memories.db-wal ~/.memorize/memories.db-shm
 cp ./memories-backup.db ~/.memorize/memories.db
 ~/.memorize/bin/memorize daemon start
+
+# Scoped portable JSON export, AI smart merge import, or local-to-server push (also in Web Console -> Memories)
+~/.memorize/bin/memorize export --scope global -o global.json
+~/.memorize/bin/memorize import global.json --mode merge --dry-run
+~/.memorize/bin/memorize push --scope global --mode exact
 ```
 
 ### Uninstall
@@ -244,6 +249,6 @@ rm -rf ~/.memorize                            # Or $MEMORY_DATA_DIR if overridde
 ## Roadmap, Feedback, & Docs
 
 - **Roadmap**
-  - Cross-device sync is on hold; **Shared Team Server Mode** has been added.
+  - Automatic P2P/cloud cross-device sync is on hold; **Shared Team Server Mode** (`serve` / `connect` / multi-account `switch`) and **portable bundle migration** (`push` / `export` / `import`) are supported — see [Team Collaboration Guide](./TEAM.md).
 - **Feedback & Issues**: External code pull requests are not accepted at this time, but suggestions, bug reports, and questions are welcome via [GitHub Issues](https://github.com/marbasdev/memorize/issues)—any issue or report is reviewed and addressed immediately once seen *(do not post vulnerability exploit details publicly; see [SECURITY.md](./SECURITY.md))*.
 - **Docs & License**: [Team Collaboration](./TEAM.md) · [Architecture & Env Reference](./ARCHITECTURE.md) · [Feedback Policy](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [MIT License](./LICENSE)

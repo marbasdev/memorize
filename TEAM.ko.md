@@ -49,17 +49,52 @@ CLI 또는 로컬 웹 콘솔 상단의 **`Remote Servers`** 버튼으로 연결�
 
 ```bash
 # 전체 저장소에 기본 팀 서버 연결
-memorize connect --url https://memorize.company.com --token mem_...
+memorize connect --global --url https://memorize.company.com --token mem_...
 
 # 특정 저장소만 팀 서버에 연결 (나머지 프로젝트는 로컬 데몬 유지)
 memorize connect --url https://memorize.company.com --token mem_... --repo .
 
 # 연결 해제
-memorize disconnect          # 또는: memorize disconnect --repo .
+memorize disconnect --global # 또는: memorize disconnect --repo .
 ```
 
 - **호스트 파일시스템 비접근**: 팀원의 Git diff, 저장소 루트, `.memorize/TEAM_RULES.md` 스냅샷은 클라이언트 측에서 수집해 요청에 실어 보내며, 팀 서버는 호스트 파일시스템을 탐색하지 않습니다.
 - **일반 MCP 클라이언트 직접 연결**: 훅 없는 클라이언트는 `https://<host>/mcp`에 `Authorization: Bearer <token>` 헤더로 직접 연결할 수 있습니다 (**Accounts** 모달에서 JSON 설정 자동 생성).
+- **1인 다기기 · 호스트 겸용 운영**: 개인 작업용 메인 PC에서 `memorize serve`를 띄우고 본인도 `http://127.0.0.1:18095`로 연결하면, 다른 기기에서도 같은 계정 토큰으로 `global` · `project:*` · `personal` 기억을 그대로 공유할 수 있습니다.
+
+### 토큰 기반 멀티 계정 스위칭 (CLI · 웹 콘솔)
+
+여러 계정의 유효한 토큰을 보유한 경우(예: 개인 계정 ↔ 업무 계정) 계정별 프라이버시 격리를 유지한 채 IDE 재시작 없이 즉시 계정을 전환할 수 있습니다:
+
+```bash
+memorize switch                # remotes.json에 저장된 계정 프로필 목록 확인
+memorize switch alice          # 활성 계정 즉시 전환 (IDE 재시작 불필요)
+memorize switch alice --repo . # 현재 저장소만 특정 계정으로 전환
+memorize switch --remove bob   # 저장된 프로필 삭제
+```
+
+- **CLI 프로필 캐시**: `memorize connect` 실행 시 검증된 프로필이 `~/.memorize/remotes.json`(`0600`)에 자동 저장됩니다. MCP `stdio` 브리지와 훅이 호출마다 `remotes.json`을 다시 읽으므로 다음 턴부터 즉시 반영됩니다.
+- **웹 콘솔 계정 스위처**: 상단 바의 **`@account · role ▾`** 배지를 클릭하면 **계정 전환** 모달이 열립니다. 토큰으로 계정을 추가하고 1클릭으로 전환하거나 개별 계정을 제거·전체 로그아웃할 수 있습니다. 스위처 목록은 평문 토큰을 브라우저 JS에 저장하지 않고 HMAC-SHA256 서명된 `HttpOnly` 쿠키(`memorize_accounts`, 최대 10개)로 관리하며, 전환 시마다 DB의 `active=1` 및 `token_hint`를 실시간 재검증합니다.
+
+### 로컬 → 서버 이관 & 포터블 번들 (`push` · `export` · `import`)
+
+SQLite 파일을 직접 덮어쓰지 않고 기존 로컬 일반모드 기억을 팀 서버로 이관하거나, 스코프별 포터블 JSON 번들(`memorize.bundle.v1`)로 내보내고 지능형 병합할 수 있습니다:
+
+```bash
+# 로컬 DB 기억을 연결된 팀 서버로 업로드 (--scope 또는 --all 명시 필수)
+memorize push --scope global --dry-run                 # 먼저 결과 미리보기
+memorize push --scope global                           # 기본 exact(1:1 그대로 이관)
+memorize push --scope project:app --mode merge         # AI 의미 중복 제거/덮어쓰기 병합
+memorize push --all --to alice                         # 저장된 프로필로 전체 스코프 업로드
+
+# 포터블 JSON 번들 내보내기 · 가져오기 (로컬 DB 또는 연결된 팀 서버 대상)
+memorize export --scope global -o global-rules.json
+memorize import global-rules.json --mode merge --dry-run
+memorize import global-rules.json --mode exact --scope project:app
+```
+
+- **웹 콘솔 (`기억 관리` 탭)**: **`필터 내보내기`** · **`전체 내보내기`**로 포터블 JSON을 내려받고, **`가져오기 / 병합...`** 모달에서 파일 업로드 또는 JSON 붙여넣기 후 **`미리보기`**(`dry_run`)로 변경 내역을 확인한 뒤 적용할 수 있습니다. **`AI 스마트 병합`**(20건 청크 단위 의미 중복·충돌 평가)과 **`원본 그대로(Exact)`**(카테고리·서브카테고리·태그·고정·확신도 1:1 보존) 두 모드를 지원합니다.
+- **안전 격리**: 내보내기 시 내부 ID·계정 메타데이터는 제거되며 서버 모드 가시성 규칙을 준수합니다. 가져오기 시 스코프 수정 권한(`CanModifyScope`)과 보안 가드 검증을 거칩니다.
 
 ### 4계층 규칙 우선순위 및 계정별 격리 (팀 서버 모드)
 

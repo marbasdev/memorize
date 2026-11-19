@@ -49,17 +49,52 @@ Teammates connect via CLI **or** the local Web Console (**`Remote Servers`** but
 
 ```bash
 # Global default remote server (all repositories)
-memorize connect --url https://memorize.company.com --token mem_...
+memorize connect --global --url https://memorize.company.com --token mem_...
 
 # Or bind a single repository only (other repos stay on your local daemon)
 memorize connect --url https://memorize.company.com --token mem_... --repo .
 
 # Disconnect later
-memorize disconnect          # or: memorize disconnect --repo .
+memorize disconnect --global # or: memorize disconnect --repo .
 ```
 
 - **Zero Host Filesystem Exposure**: Thin clients resolve local Git diffs, repository roots, and `.memorize/TEAM_RULES.md` snapshots locally and forward them per request; the team server never reads its own host filesystem for client repos.
 - **Direct MCP Clients**: Clients without hooks can connect directly to `https://<host>/mcp` with `Authorization: Bearer <token>` (snippet generated in the **Accounts** modal).
+- **Single-User Multi-Device & Host-as-Client**: One user can also run `memorize serve` on a primary workstation (connecting locally to `http://127.0.0.1:18095`) and connect secondary machines with the same account token to share `global`, `project:*`, and `personal` memories across devices.
+
+### Multi-Account Switching (CLI & Web Console)
+
+Anyone holding valid access tokens for multiple accounts (for example personal vs. work profiles) can switch active identities without breaking per-account privacy isolation or restarting IDEs:
+
+```bash
+memorize switch                # List saved account profiles from remotes.json
+memorize switch alice          # Switch active account immediately (no IDE restart)
+memorize switch alice --repo . # Override active account for the current repo only
+memorize switch --remove bob   # Remove a saved profile from remotes.json
+```
+
+- **CLI Profiles**: Every `memorize connect` caches the verified profile in `~/.memorize/remotes.json` (`0600`). Because MCP `stdio` bridges and lifecycle hooks re-read `remotes.json` on each call, switching takes effect on the next turn.
+- **Web Console Switcher**: Click the top-bar **`@account · role ▾`** badge to open the **Switch Account** modal—add another account by token, switch in 1 click, remove an individual account, or sign out of all accounts at once. Stored accounts are kept in an HMAC-SHA256 signed `HttpOnly` cookie (`memorize_accounts`, up to 10 accounts, no plaintext tokens in browser JS) and re-verified against SQLite (`active=1` + `token_hint`) on every switch.
+
+### Local-to-Server Migration & Portable Bundles (`push` · `export` · `import`)
+
+Move existing local Solo memories into a Team Server or exchange scoped JSON bundles (`memorize.bundle.v1`) safely without touching SQLite files directly:
+
+```bash
+# Push local DB memories to the connected Team Server (--scope or --all required)
+memorize push --scope global --dry-run                 # Preview first
+memorize push --scope global                           # Default exact 1:1 migration
+memorize push --scope project:app --mode merge         # AI semantic dedup/overwrite merge
+memorize push --all --to alice                         # Push all scopes to a saved profile
+
+# Export & import portable JSON bundles (local DB or connected Team Server)
+memorize export --scope global -o global-rules.json
+memorize import global-rules.json --mode merge --dry-run
+memorize import global-rules.json --mode exact --scope project:app
+```
+
+- **Web Console (`Memories` tab)**: Use **`Export Filtered`** / **`Export All`** to download a portable bundle, and **`Import / Merge...`** to upload or paste JSON with **`Preview`** (`dry_run`) before applying in **`AI Smart Merge`** (20-item chunked semantic dedup/overwrite) or **`Exact`** mode (1:1 faithful preservation of category, sub-category, tags, pinned flag, and confidence).
+- **Safe Isolation**: Exports strip internal IDs and account metadata and honor Server Mode visibility; imports enforce scope RBAC (`CanModifyScope`) and security guards before writing.
 
 ### 4-Tier Rule Priority & Isolation (Server Mode)
 
