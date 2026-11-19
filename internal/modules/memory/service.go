@@ -325,7 +325,12 @@ func (s *Service) LoadActiveFacts(ctx context.Context, scopeA, scopeB, category 
 		return nil, err
 	}
 	defer rows.Close()
-	return scanFactRows(rows)
+	facts, err := scanFactRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	domain.SortFactsByPrefixTier(facts)
+	return facts, nil
 }
 
 func scanFactRows(rows *sql.Rows) ([]domain.Fact, error) {
@@ -360,10 +365,10 @@ func (s *Service) loadQueryFacts(ctx context.Context, scopeA, scopeB, category s
 			return nil, err
 		}
 		if len(extra) > 0 {
-			// Team Rule Pack facts always take precedence ahead of DB memories.
 			facts = append(extra, facts...)
 		}
 	}
+	domain.SortFactsByPrefixTier(facts)
 	return facts, nil
 }
 

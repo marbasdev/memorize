@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 
 	"memorize/internal/domain"
@@ -11,11 +12,16 @@ import (
 )
 
 type remoteViolEval struct {
-	matchRuleContent string
+	matchRuleContent  string
+	ruleMu            sync.Mutex
+	lastVerifiedRules []domain.Fact
 	stubEval
 }
 
 func (e *remoteViolEval) VerifyPlan(_ context.Context, plan string, rules []domain.Fact) ([]domain.PlanViolation, error) {
+	e.ruleMu.Lock()
+	e.lastVerifiedRules = append([]domain.Fact(nil), rules...)
+	e.ruleMu.Unlock()
 	var out []domain.PlanViolation
 	for _, r := range rules {
 		if strings.Contains(r.Content, "PERSONAL_ONLY_TOKEN") && strings.Contains(plan, "PERSONAL_ONLY_TOKEN") {
@@ -389,5 +395,40 @@ func TestRemoteServerTeamRuleDocsPerAccountIsolation(t *testing.T) {
 	otherLogs, _ := stPrio.gr.QueryGuardrailLogsPage(ctxAdmin, domain.GuardrailLogQuery{State: "all", PageSize: 20})
 	if privLogs.TotalCount != 1 || !privLogs.Records[0].IsPrivate || otherLogs.TotalCount != 0 {
 		t.Fatalf("expected Alice global violation logged IsPrivate=true and hidden from admin: alice=%+v admin=%+v", privLogs, otherLogs)
+	}
+
+	// KV prefix stability across teammates: even when Alice commits her private global rule (#earlier ID)
+	// BEFORE a shared project:* rule (#later ID), VerifyPlan emits [TEAM, shared project:*, private global]
+	// so Alice and Bob share the exact same [TEAM + shared project:*] prompt/KV cache prefix.
+	evalKV := &remoteViolEval{
+		stubEval: stubEval{dec: domain.MutationDecision{Action: "INSERT", Category: "architecture", IsPermanent: 0.95, Confidence: 0.95}},
+	}
+	stKV := newTestStack(t, "", evalKV)
+	rpKV := rulepack.New(stKV.mem)
+	stKV.gr.AttachRulePack(rpKV)
+	if _, err := stKV.mem.CommitMemoryFull(ctxAlice, "Alice older-ID private global rule", "architecture", "", "", "global"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stKV.mem.CommitMemoryFull(ctxAlice, "Shared newer-ID project rule", "architecture", "", "", "project:teamapp"); err != nil {
+		t.Fatal(err)
+	}
+	if err := rpKV.IngestTeamRuleDoc(ctxAlice, "project:teamapp", teamDoc); err != nil {
+		t.Fatal(err)
+	}
+	if err := rpKV.IngestTeamRuleDoc(ctxBob, "project:teamapp", teamDoc); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stKV.gr.VerifyPlan(ctxAlice, "safe code", "project:teamapp"); err != nil {
+		t.Fatal(err)
+	}
+	aliceRulesPassed := append([]domain.Fact(nil), evalKV.lastVerifiedRules...)
+	if _, err := stKV.gr.VerifyPlan(ctxBob, "safe code", "project:teamapp"); err != nil {
+		t.Fatal(err)
+	}
+	bobRulesPassed := append([]domain.Fact(nil), evalKV.lastVerifiedRules...)
+	if len(aliceRulesPassed) != 3 || len(bobRulesPassed) != 2 ||
+		!aliceRulesPassed[0].IsTeam() || aliceRulesPassed[1].Scope != "project:teamapp" || aliceRulesPassed[2].Scope != "global" ||
+		aliceRulesPassed[0].ID != bobRulesPassed[0].ID || aliceRulesPassed[1].ID != bobRulesPassed[1].ID {
+		t.Fatalf("expected shared [TEAM, project:*] KV prefix before private global tail:\nalice=%+v\nbob=%+v", aliceRulesPassed, bobRulesPassed)
 	}
 }

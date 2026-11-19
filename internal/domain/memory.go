@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"sort"
 	"strings"
 	"time"
 )
@@ -280,4 +281,31 @@ func NormalizeRetentionDays(days int) int {
 		return 3650
 	}
 	return days
+}
+
+// FactPriorityRank assigns scope-tier ordering for shared prompt/KV prefix caching across teammates:
+// Team Rule Pack (0) -> shared project:* (1) -> user global (2) -> user personal (3).
+func FactPriorityRank(f Fact) int {
+	if f.IsTeam() {
+		return 0
+	}
+	sc := NormalizeScope(f.Scope)
+	switch {
+	case strings.HasPrefix(sc, "project:"):
+		return 1
+	case sc == "global":
+		return 2
+	default:
+		return 3
+	}
+}
+
+// SortFactsByPrefixTier stably orders facts by FactPriorityRank while preserving relative ID order inside each tier.
+func SortFactsByPrefixTier(facts []Fact) {
+	if len(facts) < 2 {
+		return
+	}
+	sort.SliceStable(facts, func(i, j int) bool {
+		return FactPriorityRank(facts[i]) < FactPriorityRank(facts[j])
+	})
 }

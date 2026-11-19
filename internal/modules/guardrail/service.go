@@ -139,11 +139,12 @@ func (s *Service) loadEnforceableFacts(ctx context.Context, scA, scB string) ([]
 			return nil, rerr
 		}
 		if len(extra) > 0 {
-			// Enforce Team Rule Pack rules ahead of DB project/global/personal rules.
 			loaded = append(extra, loaded...)
 		}
 	}
-	return filterEnforceableRules(loaded), nil
+	rules := filterEnforceableRules(loaded)
+	domain.SortFactsByPrefixTier(rules)
+	return rules, nil
 }
 
 func hasPrivateViolation(ctx context.Context, violations []domain.PlanViolation) bool {
