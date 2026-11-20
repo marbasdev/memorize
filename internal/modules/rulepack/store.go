@@ -319,6 +319,9 @@ func (s *Service) ensureLoaded(ctx context.Context, sc string) *cachedRulePack {
 		diskBaselineHash: diskBaselineHash,
 	}
 	s.setCache(ctx, sc, entry)
+	if s.mem != nil && len(entry.rules) > 0 {
+		s.mem.RegisterTeamRulesTaxonomy(ctx, sc, entry.rules)
+	}
 	return entry
 }
 
@@ -343,10 +346,14 @@ func (s *Service) IngestTeamRuleDoc(ctx context.Context, rawScope, rawMarkdown s
 	if err != nil {
 		return err
 	}
+	rules := cloneTeamRules(doc.Rules, hash)
 	s.setCache(ctx, sc, &cachedRulePack{
-		rules: cloneTeamRules(doc.Rules, hash),
+		rules: rules,
 		hash:  hash,
 	})
+	if s.mem != nil && len(rules) > 0 {
+		s.mem.RegisterTeamRulesTaxonomy(ctx, sc, rules)
+	}
 	return nil
 }
 
@@ -425,8 +432,13 @@ func (s *Service) applyMirrorTx(ctx context.Context, sc string, doc *Document, h
 		diskBaselineHash: strings.TrimSpace(diskBaselineHash),
 	})
 
-	if s.mem != nil && len(invalidatedIDs) > 0 {
-		s.mem.InvalidateSessionIDs(ctx, invalidatedIDs...)
+	if s.mem != nil {
+		if len(nextRules) > 0 {
+			s.mem.RegisterTeamRulesTaxonomy(ctx, sc, nextRules)
+		}
+		if len(invalidatedIDs) > 0 {
+			s.mem.InvalidateSessionIDs(ctx, invalidatedIDs...)
+		}
 	}
 	config.RestrictDBPermissions(s.dbPath)
 	return changedKeys, nil

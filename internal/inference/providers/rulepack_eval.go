@@ -24,8 +24,9 @@ Source Hint: category=%q sub_category=%q
 
 Convert the Candidate Rule below into ONE clean, self-contained single-line Team Rule entry for Markdown documentation:
 1. CRITICAL: Write "title" in the EXACT SAME LANGUAGE as the Candidate Rule (e.g., Korean input -> Korean output; English input -> English output). Never translate.
-2. "category": canonical category slug (reuse preset/source category when fitting); "sub_category": concise lowercase slug or "".
-3. "title": ONE concise, standalone summary sentence (<= 180 chars) integrating any essential scope or reason naturally — NO separate Why/How/Where prefixes, NO [invariant]/[rule] prefixes, NO newlines.
+2. "category": concise lowercase domain slug. Reuse an existing Preset Taxonomy or Existing Rule Outline category (or Source Hint) when applicable; if none fits, introduce a concise new category slug.
+3. "sub_category": concise lowercase sub-category slug. Reuse an existing sub-category under that category from Preset Taxonomy or Existing Rule Outline (or Source Hint) when applicable, or introduce a concise new sub-category slug when a clear sub-topic exists ("" only if genuinely broad).
+4. "title": ONE concise, standalone summary sentence (<= 180 chars) integrating any essential scope or reason naturally — NO separate Why/How/Where prefixes, NO [invariant]/[rule] prefixes, NO newlines.
 `, scope, presets, sourceCat, sourceSub)
 
 	sb.WriteString("\nExisting Rule Outline (current document order):\n")

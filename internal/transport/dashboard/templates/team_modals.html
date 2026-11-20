@@ -36,11 +36,28 @@
         </div>
         <div class="field-col">
           <label>{{t .Lang "lbl_category"}}</label>
-          <input name="category" class="input" x-model="catVal" required>
+          <div class="combo-box" x-data='comboBox({{jsonAttr .Categories}}, {{jsonAttr .Proposal.Category}}, false)'>
+            <input name="category" class="input" autocomplete="off" x-model="val" @input="catVal = val" @click="open = true" @click.outside="open = false" placeholder="{{t .Lang "ph_new_cat"}}" aria-label="Category">
+            <button type="button" class="combo-btn" @click.stop="open = !open" tabindex="-1">▾</button>
+            <div class="combo-menu" :class="{ 'open': open }">
+              <template x-for="item in items" :key="item">
+                <div class="combo-item" :class="{ 'active': item.toLowerCase() === val.trim().toLowerCase() }" @click="pick(item); catVal = item;"><span x-text="item"></span></div>
+              </template>
+            </div>
+          </div>
         </div>
         <div class="field-col">
           <label>{{t .Lang "lbl_subcategory"}}</label>
-          <input name="sub_category" class="input" x-model="subVal">
+          <div class="combo-box" x-data="{ open: false }" @click.outside="open = false">
+            <input name="sub_category" class="input" autocomplete="off" x-model="subVal" @click="open = true" placeholder="{{t .Lang "ph_new_subcat"}}" aria-label="Sub-Category">
+            <button type="button" class="combo-btn" @click.stop="open = !open" tabindex="-1">▾</button>
+            <div class="combo-menu" :class="{ 'open': open }">
+              <div class="combo-item" x-show="subVal.trim().length > 0" @click="subVal = ''; open = false;" style="color:var(--muted);font-style:italic;">— Clear</div>
+              <template x-for="item in subOptionsFor(subMap, catVal)" :key="item">
+                <div class="combo-item" :class="{ 'active': item.toLowerCase() === subVal.trim().toLowerCase() }" @click="subVal = item; open = false;"><span x-text="item"></span></div>
+              </template>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -99,11 +116,28 @@
       <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0.6rem;">
         <div class="field-col">
           <label>{{t .Lang "lbl_category"}}</label>
-          <input name="category" class="input" x-model="catVal" required>
+          <div class="combo-box" x-data='comboBox({{jsonAttr .Categories}}, {{jsonAttr .Rule.Category}}, false)'>
+            <input name="category" class="input" autocomplete="off" x-model="val" @input="catVal = val" @click="open = true" @click.outside="open = false" placeholder="{{t .Lang "ph_new_cat"}}" aria-label="Category">
+            <button type="button" class="combo-btn" @click.stop="open = !open" tabindex="-1">▾</button>
+            <div class="combo-menu" :class="{ 'open': open }">
+              <template x-for="item in items" :key="item">
+                <div class="combo-item" :class="{ 'active': item.toLowerCase() === val.trim().toLowerCase() }" @click="pick(item); catVal = item;"><span x-text="item"></span></div>
+              </template>
+            </div>
+          </div>
         </div>
         <div class="field-col">
           <label>{{t .Lang "lbl_subcategory"}}</label>
-          <input name="sub_category" class="input" x-model="subVal">
+          <div class="combo-box" x-data="{ open: false }" @click.outside="open = false">
+            <input name="sub_category" class="input" autocomplete="off" x-model="subVal" @click="open = true" placeholder="{{t .Lang "ph_new_subcat"}}" aria-label="Sub-Category">
+            <button type="button" class="combo-btn" @click.stop="open = !open" tabindex="-1">▾</button>
+            <div class="combo-menu" :class="{ 'open': open }">
+              <div class="combo-item" x-show="subVal.trim().length > 0" @click="subVal = ''; open = false;" style="color:var(--muted);font-style:italic;">— Clear</div>
+              <template x-for="item in subOptionsFor(subMap, catVal)" :key="item">
+                <div class="combo-item" :class="{ 'active': item.toLowerCase() === subVal.trim().toLowerCase() }" @click="subVal = item; open = false;"><span x-text="item"></span></div>
+              </template>
+            </div>
+          </div>
         </div>
       </div>
 

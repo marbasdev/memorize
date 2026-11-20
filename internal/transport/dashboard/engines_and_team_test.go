@@ -629,6 +629,9 @@ func TestDashboardTeamRulesHTMXWorkflowAndLineBudget(t *testing.T) {
 	if code != http.StatusOK || !strings.Contains(promHTML, `name="retire_local"`) || !strings.Contains(promHTML, raceTitle) {
 		t.Fatalf("GET /ui/modal/team-promote failed (%d):\n%s", code, promHTML)
 	}
+	if !strings.Contains(promHTML, "comboBox(") || !strings.Contains(promHTML, "security") {
+		t.Fatalf("team promote modal must render combo-box with preset categories:\n%s", promHTML)
+	}
 	if strings.Contains(promHTML, `name="rule_key"`) || strings.Contains(promHTML, `name="added_by"`) || strings.Contains(promHTML, `name="pr_fallback"`) || strings.Contains(promHTML, "[invariant]") {
 		t.Fatalf("team promote modal must not expose rule_key, manual added_by input, pr_fallback, or [invariant] tier:\n%s", promHTML)
 	}
@@ -787,16 +790,29 @@ func TestDashboardTeamRulesHTMXWorkflowAndLineBudget(t *testing.T) {
 	}
 
 	code, editHTML := doHX(t, http.MethodGet, ts.URL+"/ui/modal/team-edit?team_scope="+url.QueryEscape(projScope)+"&rule_key="+url.QueryEscape(raceKey), nil)
-	if code != http.StatusOK || !strings.Contains(editHTML, raceTitle) || !strings.Contains(editHTML, "/ui/team/update") || strings.Contains(editHTML, `name="added_by"`) || strings.Contains(editHTML, `name="pr_fallback"`) {
+	if code != http.StatusOK || !strings.Contains(editHTML, raceTitle) || !strings.Contains(editHTML, "/ui/team/update") || !strings.Contains(editHTML, "comboBox(") || strings.Contains(editHTML, `name="added_by"`) || strings.Contains(editHTML, `name="pr_fallback"`) {
 		t.Fatalf("GET /ui/modal/team-edit failed (%d):\n%s", code, editHTML)
+	}
+	var taxBefore map[string][]string
+	_ = json.Unmarshal([]byte(deps.Memory.EffectiveTaxonomyJSON(ctx)), &taxBefore)
+	if !strings.Contains(strings.Join(taxBefore["testing"], ","), "go") {
+		t.Fatalf("expected team rule sub_category testing/go in EffectiveTaxonomyJSON, got %v", taxBefore["testing"])
 	}
 
 	const updatedRaceTitle = "Always run go test -race -count=1 before merge"
+	ev.draftFn = func(_ string, raw, _, _ string, _ []domain.RuleOutlineEntry) domain.RulePlacementProposal {
+		return domain.RulePlacementProposal{
+			RuleKey:     domain.ComputeRuleKey("testing", raw),
+			Category:    "testing",
+			SubCategory: "race-ci",
+			Title:       raw,
+		}
+	}
 	updReq, err := http.NewRequest(http.MethodPost, ts.URL+"/ui/team/update", strings.NewReader(url.Values{
 		"team_scope":   {projScope},
 		"target_key":   {raceKey},
-		"category":     {"testing"},
-		"sub_category": {"go"},
+		"category":     {""},
+		"sub_category": {""},
 		"title":        {updatedRaceTitle},
 	}.Encode()))
 	if err != nil {
@@ -819,6 +835,9 @@ func TestDashboardTeamRulesHTMXWorkflowAndLineBudget(t *testing.T) {
 	updTrig := updResp.Header.Get("HX-Trigger")
 	if updResp.StatusCode != http.StatusOK || !strings.Contains(updHTML, updatedRaceTitle) || !strings.Contains(updTrig, "praxisCloseModal") {
 		t.Fatalf("POST /ui/team/update failed status=%d HX-Trigger=%q:\n%s", updResp.StatusCode, updTrig, updHTML)
+	}
+	if taxJSON := deps.Memory.EffectiveTaxonomyJSON(ctx); !strings.Contains(taxJSON, `"race-ci"`) {
+		t.Fatalf("expected auto-classified team rule sub_category race-ci registered in EffectiveTaxonomyJSON, got %s", taxJSON)
 	}
 
 	runGitForUITest(t, devBDir, "pull", "origin", "main")

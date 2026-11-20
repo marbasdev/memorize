@@ -130,6 +130,35 @@ func (s *Service) RegisterTaxonomyAppendOnly(ctx context.Context, rawScope, rawC
 	})
 }
 
+func (s *Service) RegisterTeamRulesTaxonomy(ctx context.Context, rawScope string, rules []domain.TeamRule) {
+	if s == nil || s.db == nil || len(rules) == 0 {
+		return
+	}
+	cfg := s.GetConfigMap(ctx)
+	tax := parsePresetTaxonomyMap(cfg[config.CfgPresetCategories])
+	changed := false
+	for _, r := range rules {
+		cat, sub := domain.SplitCategoryAndSub(rawScope, r.Category, r.SubCategory)
+		if !isValidTaxonomySlug(cat) || cat == "general" {
+			continue
+		}
+		if tax[cat] == nil {
+			tax[cat] = make(map[string]bool)
+			changed = true
+		}
+		if sub != "" && isValidTaxonomySlug(sub) && !tax[cat][sub] {
+			tax[cat][sub] = true
+			changed = true
+		}
+	}
+	if !changed {
+		return
+	}
+	_ = s.SaveConfig(ctx, map[string]string{
+		config.CfgPresetCategories: encodePresetTaxonomyMap(tax),
+	})
+}
+
 func (s *Service) SuggestTaxonomyRebalance(ctx context.Context, rawScope, categoryFilter string) ([]domain.TaxonomyRebalanceItem, string, error) {
 	targetScope := domain.NormalizeScope(rawScope)
 	facts, err := s.LoadActiveFacts(ctx, targetScope, targetScope, strings.TrimSpace(categoryFilter))

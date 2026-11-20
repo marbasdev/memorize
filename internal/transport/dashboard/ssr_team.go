@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"praxis/internal/domain"
+	"praxis/internal/infra/config"
 	"praxis/internal/modules/rulepack"
 )
 
@@ -113,6 +114,33 @@ func resolveTeamScope(ctx context.Context, d Deps, q url.Values, projScopes []st
 	return ""
 }
 
+func resolveTeamTaxonomyOptions(ctx context.Context, d Deps, sc string) ([]string, map[string][]string) {
+	var facets domain.DashboardFacets
+	var presetJSON string
+	if d.Memory != nil {
+		facets, _ = d.Memory.GetDashboardFacets(ctx)
+		presetJSON = d.Memory.GetConfigMap(ctx)[config.CfgPresetCategories]
+	}
+	if d.RulePack != nil && strings.HasPrefix(sc, "project:") {
+		if rules, err := d.RulePack.ListTeamRules(ctx, sc); err == nil && len(rules) > 0 {
+			if facets.SubCategories == nil {
+				facets.SubCategories = make(map[string][]string)
+			}
+			for _, r := range rules {
+				c := strings.TrimSpace(r.Category)
+				if c != "" {
+					facets.Categories = append(facets.Categories, c)
+					if sub := strings.TrimSpace(r.SubCategory); sub != "" {
+						cKey := strings.ToLower(c)
+						facets.SubCategories[cKey] = append(facets.SubCategories[cKey], sub)
+					}
+				}
+			}
+		}
+	}
+	return mergeCategoriesAndSubs(presetJSON, facets)
+}
+
 func buildTeamView(ctx context.Context, d Deps, lang string, q url.Values) ssrTeamData {
 	projScopes := collectProjectScopes(ctx, d)
 	selected := resolveTeamScope(ctx, d, q, projScopes)
@@ -123,12 +151,7 @@ func buildTeamView(ctx context.Context, d Deps, lang string, q url.Values) ssrTe
 		ProjectScopes: projScopes,
 		SelectedScope: selected,
 	}
-	if d.Memory != nil {
-		if facets, err := d.Memory.GetDashboardFacets(ctx); err == nil {
-			view.Categories = facets.Categories
-			view.AllSubCategories = facets.SubCategories
-		}
-	}
+	view.Categories, view.AllSubCategories = resolveTeamTaxonomyOptions(ctx, d, selected)
 	if d.RulePack == nil || selected == "" {
 		return view
 	}
@@ -277,7 +300,7 @@ func registerSSRTeamRoutes(mux *http.ServeMux, d Deps) {
 			return
 		}
 		outline, _, _ := d.RulePack.DocOutline(ctx, sc, "")
-		facets, _ := d.Memory.GetDashboardFacets(ctx)
+		cats, allSubMap := resolveTeamTaxonomyOptions(ctx, d, sc)
 		writeHTMLTemplate(w, "modal_team_publish", ssrTeamPublishModalData{
 			Lang:             lang,
 			Scope:            sc,
@@ -285,8 +308,8 @@ func registerSSRTeamRoutes(mux *http.ServeMux, d Deps) {
 			Proposal:         prop,
 			Outline:          outline,
 			Author:           prop.AddedBy,
-			Categories:       facets.Categories,
-			AllSubCategories: facets.SubCategories,
+			Categories:       cats,
+			AllSubCategories: allSubMap,
 		})
 	}))
 
@@ -311,7 +334,7 @@ func registerSSRTeamRoutes(mux *http.ServeMux, d Deps) {
 			targetScope = srcFact.Scope
 		}
 		outline, _, _ := d.RulePack.DocOutline(ctx, targetScope, "")
-		facets, _ := d.Memory.GetDashboardFacets(ctx)
+		cats, allSubMap := resolveTeamTaxonomyOptions(ctx, d, targetScope)
 		writeHTMLTemplate(w, "modal_team_publish", ssrTeamPublishModalData{
 			Lang:             lang,
 			Scope:            targetScope,
@@ -322,8 +345,8 @@ func registerSSRTeamRoutes(mux *http.ServeMux, d Deps) {
 			Outline:          outline,
 			Author:           prop.AddedBy,
 			RetireLocal:      true,
-			Categories:       facets.Categories,
-			AllSubCategories: facets.SubCategories,
+			Categories:       cats,
+			AllSubCategories: allSubMap,
 		})
 	}))
 
@@ -331,6 +354,7 @@ func registerSSRTeamRoutes(mux *http.ServeMux, d Deps) {
 		if rejectServerTeamGit(d, w, r) {
 			return
 		}
+		ctx := r.Context()
 		localID := parsePositiveInt64(r.FormValue("local_memory_id"))
 		retireLocal := r.FormValue("retire_local") == "1" || r.FormValue("retire_local") == "true"
 
@@ -338,17 +362,28 @@ func registerSSRTeamRoutes(mux *http.ServeMux, d Deps) {
 		if addedAt == "" {
 			addedAt = time.Now().Format("2006-01-02")
 		}
+		cat := strings.TrimSpace(r.FormValue("category"))
+		sub := strings.TrimSpace(r.FormValue("sub_category"))
+		title := strings.TrimSpace(r.FormValue("title"))
+		if cat == "" && title != "" {
+			if drafted, derr := d.RulePack.DraftProposalFromText(ctx, sc, "", title, "", sub); derr == nil {
+				cat = drafted.Category
+				if sub == "" {
+					sub = drafted.SubCategory
+				}
+			}
+		}
 		prop := domain.RulePlacementProposal{
-			Category:    strings.TrimSpace(r.FormValue("category")),
-			SubCategory: strings.TrimSpace(r.FormValue("sub_category")),
+			Category:    cat,
+			SubCategory: sub,
 			Pinned:      true,
-			Title:       strings.TrimSpace(r.FormValue("title")),
+			Title:       title,
 			AddedBy:     domain.NormalizeGitHandle(r.FormValue("added_by")),
 			AddedAt:     addedAt,
 			AfterKey:    strings.TrimSpace(r.FormValue("after_key")),
 		}
 
-		res, err := d.RulePack.PublishWithDefaults(r.Context(), rulepack.PublishInput{
+		res, err := d.RulePack.PublishWithDefaults(ctx, rulepack.PublishInput{
 			Scope:         sc,
 			Proposal:      prop,
 			LocalMemoryID: localID,
@@ -388,13 +423,13 @@ func registerSSRTeamRoutes(mux *http.ServeMux, d Deps) {
 			http.Error(w, "team rule not found", http.StatusNotFound)
 			return
 		}
-		facets, _ := d.Memory.GetDashboardFacets(ctx)
+		cats, allSubMap := resolveTeamTaxonomyOptions(ctx, d, sc)
 		writeHTMLTemplate(w, "modal_team_edit", ssrTeamEditModalData{
 			Lang:             lang,
 			Scope:            sc,
 			Rule:             target,
-			Categories:       facets.Categories,
-			AllSubCategories: facets.SubCategories,
+			Categories:       cats,
+			AllSubCategories: allSubMap,
 		})
 	}))
 
@@ -402,14 +437,26 @@ func registerSSRTeamRoutes(mux *http.ServeMux, d Deps) {
 		if rejectServerTeamGit(d, w, r) {
 			return
 		}
+		ctx := r.Context()
 		targetKey := strings.TrimSpace(r.FormValue("target_key"))
-		res, err := d.RulePack.UpdateWithDefaults(r.Context(), rulepack.UpdateInput{
+		cat := strings.TrimSpace(r.FormValue("category"))
+		sub := strings.TrimSpace(r.FormValue("sub_category"))
+		title := strings.TrimSpace(r.FormValue("title"))
+		if cat == "" && title != "" {
+			if drafted, derr := d.RulePack.DraftProposalFromText(ctx, sc, "", title, "", sub); derr == nil {
+				cat = drafted.Category
+				if sub == "" {
+					sub = drafted.SubCategory
+				}
+			}
+		}
+		res, err := d.RulePack.UpdateWithDefaults(ctx, rulepack.UpdateInput{
 			Scope:     sc,
 			TargetKey: targetKey,
 			Updated: domain.TeamRule{
-				Category:    strings.TrimSpace(r.FormValue("category")),
-				SubCategory: strings.TrimSpace(r.FormValue("sub_category")),
-				Title:       strings.TrimSpace(r.FormValue("title")),
+				Category:    cat,
+				SubCategory: sub,
+				Title:       title,
 				AddedBy:     domain.NormalizeGitHandle(r.FormValue("added_by")),
 			},
 		})
