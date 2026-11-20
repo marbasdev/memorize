@@ -82,13 +82,13 @@ When you open an existing Git repository with `0` stored rules, `praxis` offers 
 
 ## Web Console (`http://127.0.0.1:18095`)
 
-<details open>
+- **Non-Destructive Taxonomy & Lineage**: Re-tag uncategorized or overlapping subcategories on the 2D Treemap via **`AI Organize`** without touching memory text, or merge duplicates via **`Consolidate`** while preserving `Replaces` lineage.
+- **Core Rules & Reversible Lifecycle**: Promote non-negotiable invariants to **`Core Rules`** for guaranteed injection, and retire entries safely through `Forget` → `Undo` → `Purge Retired`.
+
+<details>
 <summary><strong>Memories</strong> — Semantic KPIs · 2D Treemap · Core Rules · AI Consolidation</summary>
 
 ![Web Console Memories Tab Simulation](./assets/tab-memories.svg)
-
-- **Non-Destructive Taxonomy & Lineage**: Re-tag uncategorized or overlapping subcategories on the 2D Treemap via **`AI Cleanup`** without touching rule text, or merge duplicate rules via **`Consolidate`** while preserving `Replaces` lineage.
-- **Core Rules & Reversible Lifecycle**: Promote non-negotiable invariants to **`Core Rules`** for guaranteed injection, and retire rules safely through `Forget` → `Undo` → `Purge`.
 
 </details>
 
@@ -100,9 +100,9 @@ When you open an existing Git repository with `0` stored rules, `praxis` offers 
 </details>
 
 <details>
-<summary><strong>Progress</strong> — Read-Only Work · Memory · Git Activity Timeline · Auto-TTL</summary>
+<summary><strong>Activity</strong> — Read-Only Work · Memory · Git Activity Timeline · Auto-TTL</summary>
 
-![Web Console Progress Activity Board Simulation](./assets/tab-progress.svg)
+![Web Console Activity Board Simulation](./assets/tab-progress.svg)
 
 </details>
 

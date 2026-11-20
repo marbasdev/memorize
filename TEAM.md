@@ -6,12 +6,12 @@ Use either collaboration mode on its own or combine both:
 
 | Mode | Best For | Infrastructure Needed |
 | :--- | :--- | :--- |
-| **1. Git Rule Pack (`.praxis/TEAM_RULES.md`)** | Sharing team invariants alongside repo code with zero server ops | None (each developer runs a local daemon) |
+| **1. Git Team Rules (`.praxis/TEAM_RULES.md`)** | Sharing team invariants alongside repo code with zero server ops | None (each developer runs a local daemon) |
 | **2. Shared Team Server (`praxis serve` + `connect`)** | Sharing a central inference engine & live project memory across a team — or **syncing your own rules across multiple machines** | 1 server binary · zero local DB/models on client machines |
 
 ---
 
-## 1. Git-Backed Team Rule Pack (`.praxis/TEAM_RULES.md`)
+## 1. Git-Backed Team Rules (`.praxis/TEAM_RULES.md`)
 
 Changes to `.praxis/TEAM_RULES.md` are automatically detected on turns and hooks, taking top priority across rule injection and guardrails (`PreToolUse` · `Stop` · `git pre-commit`).
 
@@ -65,7 +65,7 @@ Team standards and project context are shared while personal conventions stay is
 
 | Priority | Scope | Visibility & Ownership |
 | :--- | :--- | :--- |
-| **1 (Highest)** | **Team Rule Pack** (`.praxis/TEAM_RULES.md`) | Shared team standard (local overrides disabled in server mode) |
+| **1 (Highest)** | **Team Rules** (`.praxis/TEAM_RULES.md`) | Shared team standard (local overrides disabled in server mode) |
 | **2** | **`project:<repo>`** | Shared project rules & activity feed (matched automatically via `origin` remote) |
 | **3** | **`global`** | **Per-account isolated** — each user's cross-project coding rules |
 | **4** | **`personal`** | **Per-account isolated** — non-coding personal notes (optional overlay) |

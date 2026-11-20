@@ -30,7 +30,7 @@ _외부 DB나 Python · Node 런타임 없이 **단일 로컬 Go 실행 파일**
 | **설치 · 인프라** | Python/Node 런타임, 외부 벡터·그래프 DB 설치 필요 | **외부 의존성 `0`개 단일 바이너리** · 첫 호출 시 상주 데몬 & 웹 콘솔 자동 기동 |
 
 ### 프로젝트 간 혼선을 막는 4계층 자동 격리
-`.git` 루트를 자동 인식해 저장소마다 `project:<저장소>` 규칙을 분리하므로 여러 프로젝트를 오가도 규칙이 섞이지 않습니다. 조회·검증 시에는 **`팀 룰팩(.praxis/TEAM_RULES.md)` → `project:<저장소>` → `공통 개발 규칙(global)` → `개인 메모(personal, 선택 포함)`** 순으로 일관되게 적용됩니다.
+`.git` 루트를 자동 인식해 저장소마다 `project:<저장소>` 규칙을 분리하므로 여러 프로젝트를 오가도 규칙이 섞이지 않습니다. 조회·검증 시에는 **`팀 규칙(.praxis/TEAM_RULES.md)` → `project:<저장소>` → `공통 개발 규칙(global)` → `개인 메모(personal, 선택 포함)`** 순으로 일관되게 적용됩니다.
 
 ---
 
@@ -82,27 +82,27 @@ _외부 DB나 Python · Node 런타임 없이 **단일 로컬 Go 실행 파일**
 
 ## 웹 콘솔 (`http://127.0.0.1:18095`)
 
-<details open>
-<summary><strong>기억 관리</strong> — 시맨틱 KPI · 2D 트리맵 분포 · 핵심 고정 · AI 중복 규칙 병합</summary>
+- **본문 훼손 없는 분류 & 계보 유지 병합**: 2D 트리맵에서 미분류·중복 서브카테고리를 확인해 태그만 **`AI 정리`**하거나, 흩어진 유사 기억을 **`기억 병합`**으로 합치면서 기존 규칙과의 대체 계보(`Replaces`)를 그대로 보존합니다.
+- **핵심 고정 & 복구 가능한 수명주기**: 상시 주입할 불변식은 **`핵심 고정 규칙`**으로 승격하고, 내린 항목도 `비활성화(Forget)` → `되돌리기(Undo)` → `폐기 정리` 단계로 안전하게 관리합니다.
 
-![웹 콘솔 기억 관리 탭 시뮬레이션](./assets/tab-memories.ko.svg)
+<details>
+<summary><strong>기억</strong> — 시맨틱 KPI · 2D 트리맵 분포 · 핵심 고정 · AI 중복 병합</summary>
 
-- **본문 훼손 없는 분류 & 계보 유지 병합**: 2D 트리맵에서 미분류·중복 서브카테고리를 확인해 태그만 **`AI 분류 정리`**하거나, 여러 세션에 흩어진 유사 규칙을 **`기억 병합`**으로 합치면서 기존 규칙과의 대체 계보(`Replaces`)를 그대로 보존합니다.
-- **핵심 고정 & 복구 가능한 수명주기**: 반드시 지켜야 할 불변식은 **`핵심 고정 규칙`**으로 승격해 상시 주입하고, 내린 규칙도 `비활성화(Forget)` → `되돌리기(Undo)` → `폐기 정리` 단계로 안전하게 관리합니다.
+![웹 콘솔 기억 탭 시뮬레이션](./assets/tab-memories.ko.svg)
 
 </details>
 
 <details>
-<summary><strong>팀 룰팩</strong> — <code>.praxis/TEAM_RULES.md</code> 격리 worktree 커밋 · 카테고리 자동완성 · 원격 동기화</summary>
+<summary><strong>팀 규칙</strong> — <code>.praxis/TEAM_RULES.md</code> 격리 worktree 커밋 · 카테고리 자동완성 · 원격 동기화</summary>
 
-![웹 콘솔 팀 룰팩 탭 시뮬레이션](./assets/tab-team.ko.svg)
+![웹 콘솔 팀 규칙 탭 시뮬레이션](./assets/tab-team.ko.svg)
 
 </details>
 
 <details>
-<summary><strong>진행 현황</strong> — 작업 · 기억 · Git 통합 읽기 전용 타임라인 · 자동 보관 TTL</summary>
+<summary><strong>활동 기록</strong> — 작업 · 기억 · Git 통합 읽기 전용 타임라인 · 자동 보관 TTL</summary>
 
-![웹 콘솔 진행 현황 활동 보드 시뮬레이션](./assets/tab-progress.ko.svg)
+![웹 콘솔 활동 기록 보드 시뮬레이션](./assets/tab-progress.ko.svg)
 
 </details>
 

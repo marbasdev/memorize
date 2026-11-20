@@ -53,14 +53,14 @@
   <text x="243.0" y="28" text-anchor="middle" class="sans t-sec" font-size="10.5" font-weight="600">Memories</text>
   <rect class="pill-idle" x="288" y="12" width="86" height="24" rx="5" />
   <text x="331.0" y="28" text-anchor="middle" class="sans t-sec" font-size="10.5" font-weight="600">Team Rules</text>
-  <rect class="pill-idle" x="380" y="12" width="76" height="24" rx="5" />
-  <text x="418.0" y="28" text-anchor="middle" class="sans t-sec" font-size="10.5" font-weight="600">Progress</text>
-  <rect class="pill-idle" x="462" y="12" width="82" height="24" rx="5" />
-  <text x="503.0" y="28" text-anchor="middle" class="sans t-sec" font-size="10.5" font-weight="600">Guardrails</text>
-  <rect class="pill-act" x="550" y="12" width="72" height="24" rx="5" />
-  <text x="586.0" y="28" text-anchor="middle" class="sans t-acc" font-size="10.5" font-weight="700">Engines</text>
-  <rect class="pill-idle" x="628" y="12" width="122" height="24" rx="5" />
-  <text x="689.0" y="28" text-anchor="middle" class="sans t-sec" font-size="10.5" font-weight="600">Calibration &amp; Test</text>
+  <rect class="pill-idle" x="380" y="12" width="72" height="24" rx="5" />
+  <text x="416.0" y="28" text-anchor="middle" class="sans t-sec" font-size="10.5" font-weight="600">Activity</text>
+  <rect class="pill-idle" x="458" y="12" width="82" height="24" rx="5" />
+  <text x="499.0" y="28" text-anchor="middle" class="sans t-sec" font-size="10.5" font-weight="600">Guardrails</text>
+  <rect class="pill-act" x="546" y="12" width="72" height="24" rx="5" />
+  <text x="582.0" y="28" text-anchor="middle" class="sans t-acc" font-size="10.5" font-weight="700">Engines</text>
+  <rect class="pill-idle" x="624" y="12" width="122" height="24" rx="5" />
+  <text x="685.0" y="28" text-anchor="middle" class="sans t-sec" font-size="10.5" font-weight="600">Calibration &amp; Test</text>
 
   <!-- Step Indicator -->
   <rect class="b-mut" x="844" y="12" width="140" height="24" rx="5" />
