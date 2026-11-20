@@ -98,6 +98,19 @@ func QueryDaemonStatusWithAuth(addrOrURL, bearerToken string) (*DaemonStatus, er
 	return &st, nil
 }
 
+func ProbeDaemonHealthz(addrOrURL string) bool {
+	req, err := http.NewRequest(http.MethodGet, buildEndpointURL(addrOrURL, "/healthz"), nil)
+	if err != nil {
+		return false
+	}
+	resp, err := daemonProbeHTTP.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
 func ProbeLiveDaemonState(explicitAddr, dbPath string) (*DaemonStatus, string, bool, bool) {
 	seen := make(map[string]bool)
 	var candidates []string

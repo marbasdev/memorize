@@ -10,7 +10,7 @@ import (
 	thttp "memorize/internal/transport/http"
 )
 
-func runDaemonControlCLI(action string, posArgs []string, addr, dbPath, modelsDir string, hooks RuntimeHooks) int {
+func runDaemonControlCLI(action string, posArgs []string, addr, dbPath, modelsDir, version string, hooks RuntimeHooks) int {
 	act := strings.ToLower(strings.TrimSpace(action))
 	switch act {
 	case "port":
@@ -117,8 +117,11 @@ func runDaemonControlCLI(action string, posArgs []string, addr, dbPath, modelsDi
 		fmt.Println(strings.Join(lines, "\n"))
 		return 0
 
+	case "doctor":
+		return runDoctorCLI(portCLIArgs(posArgs), dbPath, modelsDir, version, hooks)
+
 	default:
-		fmt.Fprintf(os.Stderr, "unknown daemon command %q (expected: status, start, stop, restart, logs, port)\n", action)
+		fmt.Fprintf(os.Stderr, "unknown daemon command %q (expected: status, start, stop, restart, logs, port, doctor)\n", action)
 		return 2
 	}
 }

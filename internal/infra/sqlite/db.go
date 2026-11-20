@@ -335,3 +335,20 @@ func WithTx(ctx context.Context, db *sql.DB, fn func(tx *sql.Tx) error) error {
 	}
 	return tx.Commit()
 }
+
+type StorageInspection struct {
+	JournalMode string `json:"journal_mode"`
+	BusyTimeout int    `json:"busy_timeout"`
+	TableCount  int    `json:"table_count"`
+}
+
+func InspectStorage(ctx context.Context, db *sql.DB) (StorageInspection, error) {
+	var ins StorageInspection
+	if db == nil {
+		return ins, sql.ErrConnDone
+	}
+	_ = db.QueryRowContext(ctx, "PRAGMA journal_mode;").Scan(&ins.JournalMode)
+	_ = db.QueryRowContext(ctx, "PRAGMA busy_timeout;").Scan(&ins.BusyTimeout)
+	_ = db.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';").Scan(&ins.TableCount)
+	return ins, nil
+}

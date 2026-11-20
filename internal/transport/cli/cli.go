@@ -98,7 +98,7 @@ func parseDaemonCtlAction(explicit string, args []string) string {
 			return args[1]
 		}
 		return "status"
-	case "status", "start", "stop", "restart", "reload", "logs", "port":
+	case "status", "start", "stop", "restart", "reload", "logs", "port", "doctor":
 		return first
 	default:
 		return ""
@@ -169,6 +169,8 @@ func executeArgs(args []string, version string, hooks RuntimeHooks) int {
 			return runExportCLI(args[1:], dbPath)
 		case "import":
 			return runImportCLI(args[1:], dbPath, modelsDir, hooks)
+		case "doctor":
+			return runDoctorCLI(args[1:], dbPath, modelsDir, version, hooks)
 		}
 	}
 
@@ -216,7 +218,7 @@ func executeArgs(args []string, version string, hooks RuntimeHooks) int {
 	}
 
 	if ctlAction := parseDaemonCtlAction(*daemonCtl, posArgs); ctlAction != "" {
-		return runDaemonControlCLI(ctlAction, posArgs, explicitAddr, dbPath, modelsDir, hooks)
+		return runDaemonControlCLI(ctlAction, posArgs, explicitAddr, dbPath, modelsDir, version, hooks)
 	}
 
 	if m := strings.TrimSpace(*hookMode); m != "" {

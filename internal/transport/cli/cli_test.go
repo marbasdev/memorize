@@ -846,3 +846,53 @@ func TestCLISwitchPushExportAndImportEndToEnd(t *testing.T) {
 		t.Fatalf("expected alice to receive imported global rule under her own account, got %+v", alicePage.Records)
 	}
 }
+
+func TestDoctorCLIReportAndJSON(t *testing.T) {
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "memories.db")
+	t.Setenv("MEMORY_DB_PATH", dbPath)
+	t.Setenv("MEMORY_MODELS_DIR", filepath.Join(tmp, "models"))
+	t.Setenv("MEMORY_DISABLE_BG_DASHBOARD", "1")
+
+	// 1. Test doctor with --json flag
+	var report DoctorReport
+	code, out := captureStdout(t, func() int {
+		return executeArgs([]string{"doctor", "--json"}, "1.2.0-test", RuntimeHooks{})
+	})
+	if code != 0 {
+		t.Fatalf("expected doctor --json exit 0, got %d. Output: %s", code, out)
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("unmarshal doctor --json output failed: %v\nOutput: %s", err, out)
+	}
+	if report.Version != "1.2.0-test" {
+		t.Errorf("expected version 1.2.0-test, got %q", report.Version)
+	}
+	if len(report.Checks) == 0 {
+		t.Errorf("expected doctor checks to be non-empty")
+	}
+
+	categories := make(map[string]bool)
+	for _, c := range report.Checks {
+		categories[c.Category] = true
+	}
+	for _, wantCat := range []string{"binary", "daemon", "storage", "git_scope", "inference", "remotes"} {
+		if !categories[wantCat] {
+			t.Errorf("expected category %q in doctor report checks, got %v", wantCat, categories)
+		}
+	}
+
+	// 2. Test daemon doctor human-readable output
+	codeDaemon, outDaemon := captureStdout(t, func() int {
+		return executeArgs([]string{"daemon", "doctor"}, "1.2.0-test", RuntimeHooks{})
+	})
+	if codeDaemon != 0 {
+		t.Fatalf("expected daemon doctor exit 0, got %d. Output: %s", codeDaemon, outDaemon)
+	}
+	if !strings.Contains(outDaemon, "[memorize doctor]") {
+		t.Errorf("expected daemon doctor output to contain header, got: %s", outDaemon)
+	}
+	if !strings.Contains(outDaemon, "v1.2.0-test") {
+		t.Errorf("expected daemon doctor output to contain version, got: %s", outDaemon)
+	}
+}

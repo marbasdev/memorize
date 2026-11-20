@@ -1,6 +1,6 @@
 # memorize
 
-[English (README.md)](./README.md) · [팀 협업 가이드](./TEAM.ko.md) · [아키텍처 레퍼런스](./ARCHITECTURE.ko.md)
+[English (README.md)](./README.md) · [팀 협업 가이드](./TEAM.ko.md) · [아키텍처 레퍼런스](./ARCHITECTURE.ko.md) · [AI 자율 설정 가이드](./guides/AI_SETUP.ko.md)
 
 **AI 코딩 에이전트용 상태 메모리 플러그인 — 규칙이 바뀌면 옛 지시는 즉시 폐기하고, 언제나 최신 결정만 강제합니다.**
 
@@ -74,6 +74,12 @@ _(세부 DB 구조, MCP 도구 명세, 내부 엔드포인트는 [아키텍처 �
 </td></tr></tbody>
 </table>
 
+> [!TIP]
+> **AI 에이전트 1줄 자동 설정**: 에이전트 채팅(Claude Code, Antigravity, Cursor 등)에 아래 문구를 붙여넣으면 설치부터 `memorize doctor` 진단 및 온보딩까지 자율 진행합니다:
+> ```text
+> guides/AI_SETUP.ko.md 가이드를 따라 이 프로젝트에 memorize를 설치 및 설정해 줘. memorize doctor로 상태를 점검하고, 추론 엔진 상태를 확인한 뒤 초기 프로젝트 온보딩을 진행해 줘.
+> ```
+
 ### 1. 설치
 
 **Claude Code** _(macOS · Linux 플러그인 런처)_
@@ -97,6 +103,11 @@ CGO_ENABLED=0 go build -trimpath -o bin/memorize ./cmd/memorize
 ```
 
 빌드 후 클라이언트 MCP 설정에 `./plugins/memorize/scripts/run-memorize.sh`(`macOS`/`Linux` 플러그인 `stdio`), `bin/memorize` / `memorize.exe`(단독 `stdio`, Windows는 `memorize.exe -hook <event>` 지원), 또는 `http://127.0.0.1:18095/mcp`를 등록하세요.
+
+설치 및 데몬 동작 상태는 언제든 내장 자가 진단 도구로 점검할 수 있습니다:
+```bash
+memorize doctor
+```
 
 ### 2. 추론 엔진 연결 (필수)
 

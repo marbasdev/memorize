@@ -1,6 +1,6 @@
 # memorize
 
-[한국어 (README.ko.md)](./README.ko.md) · [Team Guide](./TEAM.md) · [Architecture Reference](./ARCHITECTURE.md)
+[한국어 (README.ko.md)](./README.ko.md) · [Team Guide](./TEAM.md) · [Architecture Reference](./ARCHITECTURE.md) · [AI Setup Guide](./guides/AI_SETUP.md)
 
 **Stateful memory plugin for AI coding agents — retire stale instructions immediately and enforce only your latest rules.**
 
@@ -74,6 +74,12 @@ Comparing item by item against static instruction files, vector RAG, and append-
 </td></tr></tbody>
 </table>
 
+> [!TIP]
+> **AI-First One-Line Setup**: Paste this into your agent chat (Claude Code, Antigravity, Cursor) to install, run `memorize doctor`, and onboard automatically:
+> ```text
+> Please set up and configure memorize for this project following guides/AI_SETUP.md. Run memorize doctor to verify health, confirm the inference engine, and guide me through initial onboarding.
+> ```
+
 ### 1. Install
 
 **Claude Code** *(macOS · Linux plugin launcher)*
@@ -97,6 +103,11 @@ CGO_ENABLED=0 go build -trimpath -o bin/memorize ./cmd/memorize
 ```
 
 Register `./plugins/memorize/scripts/run-memorize.sh` (`macOS`/`Linux` plugin `stdio`), `bin/memorize` / `memorize.exe` (standalone `stdio`, plus `memorize.exe -hook <event>` on Windows), or `http://127.0.0.1:18095/mcp` in your client config.
+
+Verify installation and daemon readiness anytime with the built-in self-diagnosis tool:
+```bash
+memorize doctor
+```
 
 ### 2. Connect an Inference Engine (Required)
 
