@@ -116,8 +116,8 @@ func TestTurnPreMutateCodeGateAndSameTurnRuleEnforcement(t *testing.T) {
 	}
 	badCmd := fmt.Sprintf(`{"conversationId":"conv-gate-1","workspacePaths":[%q],"toolCall":{"name":"run_command","args":{"CommandLine":"go run ./cmd/fetch --no-timeout"}}}`, repo)
 	cmdDenyOut, cmdDenyCode, _ := st.gr.ExecuteHook(ctx, "antigravity-pretool", []byte(badCmd), "")
-	if cmdDenyCode != 0 || !strings.Contains(cmdDenyOut, `"decision":"deny"`) || !strings.Contains(cmdDenyOut, "[PRAXIS GUARDRAIL BLOCKED]") || !strings.Contains(cmdDenyOut, "3초 타임아웃") {
-		t.Fatalf("expected same-turn Guardrail to block violating run_command immediately, got code=%d out=%s", cmdDenyCode, cmdDenyOut)
+	if cmdDenyCode != 0 || !strings.Contains(cmdDenyOut, `"decision":"deny"`) || !strings.Contains(cmdDenyOut, "[PRAXIS GUARDRAIL BLOCKED]") || !strings.Contains(cmdDenyOut, "3초 타임아웃") || !strings.Contains(cmdDenyOut, "never self-revoke without consent") {
+		t.Fatalf("expected same-turn Guardrail to block violating run_command immediately with consent guidance, got code=%d out=%s", cmdDenyCode, cmdDenyOut)
 	}
 
 	editAllowOut, editAllowCode, _ := st.gr.ExecuteHook(ctx, "antigravity-pretool", []byte(violatingEdit), "")
@@ -129,7 +129,7 @@ func TestTurnPreMutateCodeGateAndSameTurnRuleEnforcement(t *testing.T) {
 	}
 	stopPayload := fmt.Sprintf(`{"conversationId":"conv-gate-1","workspacePaths":[%q],"terminationReason":"NO_TOOL_CALL","continuationActive":false}`, repo)
 	stopFixOut, stopFixCode, _ := st.gr.ExecuteHook(ctx, "antigravity-stop", []byte(stopPayload), "")
-	if stopFixCode != 0 || !strings.Contains(stopFixOut, `"decision":"continue"`) || !strings.Contains(stopFixOut, "[PRAXIS GUARDRAIL — FIX BEFORE FINISHING]") || !strings.Contains(stopFixOut, "3초 타임아웃") {
+	if stopFixCode != 0 || !strings.Contains(stopFixOut, `"decision":"continue"`) || !strings.Contains(stopFixOut, "[PRAXIS GUARDRAIL — FIX BEFORE FINISHING]") || !strings.Contains(stopFixOut, "3초 타임아웃") || !strings.Contains(stopFixOut, "ask the user to revise that #ID") {
 		t.Fatalf("expected Stop hook to force continuation fix on violating edit against newly committed rule #1, got code=%d out=%s", stopFixCode, stopFixOut)
 	}
 

@@ -450,9 +450,9 @@ func TestSingleBinaryInstallersAndEmbeddedMCPResource(t *testing.T) {
 	if !strings.Contains(initLine, memory.PlaybookURI) {
 		t.Fatalf("expected serverInstructions in initialize response to reference %s, got: %s", memory.PlaybookURI, initLine)
 	}
-	for _, wantToken := range []string{"project_progress", "record"} {
+	for _, wantToken := range []string{"project_progress", "record", "Never self-revoke rules silently"} {
 		if !strings.Contains(initLine, wantToken) {
-			t.Fatalf("expected serverInstructions in initialize response to describe %q progress activity recording, got: %s", wantToken, initLine)
+			t.Fatalf("expected serverInstructions in initialize response to describe %q, got: %s", wantToken, initLine)
 		}
 	}
 
@@ -468,7 +468,7 @@ func TestSingleBinaryInstallersAndEmbeddedMCPResource(t *testing.T) {
 	if err := json.Unmarshal([]byte(resLine), &resPayload); err != nil {
 		t.Fatalf("unmarshal resources/read: %v (%s)", err, resLine)
 	}
-	if len(resPayload.Result.Contents) != 1 || !strings.Contains(resPayload.Result.Contents[0].Text, "Golden Filter") {
+	if len(resPayload.Result.Contents) != 1 || !strings.Contains(resPayload.Result.Contents[0].Text, "Golden Filter") || !strings.Contains(resPayload.Result.Contents[0].Text, "Evolve Stale Rules Explicitly") {
 		t.Fatalf("unexpected embedded MCP resource contents: %+v", resPayload)
 	}
 

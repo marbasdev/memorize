@@ -18,7 +18,7 @@ const ServerInstructions = `Praxis Protocol:
 2. Query: call query_project_memory on new topics (refresh=true after compaction). Follow 'praxis://playbook/memory-curator' on Git onboarding/sync.
 3. Commit Before Mutating: commit user decisions/approvals atomically (1 behavior = 1 item in candidate_facts, user's language) via commit_memory or manage_memory(update) BEFORE edits/commands; commit new choices before finishing.
 4. Onboarding: if [ONBOARDING AVAILABLE], ask user first; call manage_memory(skip_onboarding) if declined, or inspect files, resolve conflicts, commit, and offer cleanup.
-5. SSOT: active memories replace static rule files (CLAUDE.md/AGENTS.md) and override older turns; ignore (Replaces: ...) and [REVOKED ...].
+5. SSOT & Evolution: active rules replace static rule files (CLAUDE.md/AGENTS.md) and older turns; ignore (Replaces: ...) and [REVOKED ...]. Never self-revoke rules silently, and never compromise a clearly better design just to appease an outdated rule—propose updating/forgetting that #ID (or team rule) to the user and update it upon approval.
 6. Progress: optionally call project_progress(action="record") after completing notable tasks or milestones to log completed work in the activity feed.
 7. Team Rules: use team_rules for shared .praxis/TEAM_RULES.md rules (list/sync/add/promote/update/remove/resolve_conflict/duplicates); NEVER hand-edit TEAM_RULES.md so workspace code stays unmixed.
 8. Verify Plan: call verify_plan_against_memory once before multi-file refactors; shell commands gate PreToolUse while file edits batch-verify on Stop.`

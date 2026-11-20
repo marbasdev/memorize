@@ -29,6 +29,9 @@ Generic memory MCPs only let an agent **recall** past notes when it remembers to
 | **Cross-Agent Continuity** | Rules fragment across tools (`CLAUDE.md`, `.cursorrules`, separate MCPs) | **Switch freely between Claude Code, Antigravity & Cursor** on one shared live DB |
 | **Install & Footprint** | Requires Python/Node runtimes or external vector/graph databases | **Single static binary (`0` external deps)** · auto-spawns background daemon & Web Console |
 
+### 4-Tier Automatic Scope Isolation
+`praxis` detects each `.git` root to isolate `project:<repo>` rules automatically so switching repositories never mixes context, evaluating scopes in deterministic priority order: **`Team Rules (.praxis/TEAM_RULES.md)` → `project:<repo>` → `global` → `personal (optional overlay)`**.
+
 ---
 
 ## Quick Start
@@ -84,6 +87,9 @@ When you open an existing Git repository with `0` stored rules, `praxis` offers 
 
 ![Web Console Memories Tab Simulation](./assets/tab-memories.svg)
 
+- **Non-Destructive Taxonomy & Lineage**: Re-tag uncategorized or overlapping subcategories on the 2D Treemap via **`AI Cleanup`** without touching rule text, or merge duplicate rules via **`Consolidate`** while preserving `Replaces` lineage.
+- **Core Rules & Reversible Lifecycle**: Promote non-negotiable invariants to **`Core Rules`** for guaranteed injection, and retire rules safely through `Forget` → `Undo` → `Purge`.
+
 </details>
 
 <details>
@@ -120,10 +126,6 @@ When you open an existing Git repository with `0` stored rules, `praxis` offers 
 ![Web Console Calibration & Test Tab Simulation](./assets/tab-calibrate.svg)
 
 </details>
-
-- **Non-Destructive Taxonomy & Lineage**: Re-tag uncategorized or overlapping subcategories on the 2D Treemap via **`AI Cleanup`** without touching rule text, or merge duplicate rules via **`Consolidate`** while preserving `Replaces` lineage.
-- **Core Rules & Reversible Lifecycle**: Promote non-negotiable invariants to **`Core Rules`** for guaranteed injection, and retire rules safely through `Forget` → `Undo` → `Purge`.
-- **Automatic Per-Repo Isolation**: Scopes rules automatically to each `.git` root (`project:<repo>`), keeping team standards (`.praxis/TEAM_RULES.md`), cross-project `global` rules, and `personal` notes cleanly separated.
 
 ---
 

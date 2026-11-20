@@ -142,6 +142,7 @@ func (s *Service) runGuardrailHook(ctx context.Context, ev NormalizedHookEvent, 
 		fmt.Fprintf(&sb, "- [%s / %s %s] %s (violation prob: %.0f%%)\n",
 			v.Scope, v.Category, formatViolationRef(v.Fact), v.Content, v.Probability*100)
 	}
+	sb.WriteString("Adjust the action to comply, or—if superseding this rule is genuinely better—ask the user for explicit approval before updating/forgetting the rule (never self-revoke without consent).")
 	return codec.FormatDenyPreTool(strings.TrimSpace(sb.String()))
 }
 

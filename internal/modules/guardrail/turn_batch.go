@@ -492,7 +492,7 @@ func formatStopBlockingMessage(allBlocking []domain.PlanViolation, failClosedSco
 		if len(partialDetails) > 0 {
 			fmt.Fprintf(&sb, "Partial budget note: %s\n", strings.Join(partialDetails, "; "))
 		}
-		sb.WriteString("Fix the violating edits directly in those files (or update an intentionally superseded rule via manage_memory/commit_memory) before ending your response.")
+		sb.WriteString("Fix the violating edits directly in those files before ending your response (only update/forget a rule if the user already approved superseding it; otherwise revert/comply now and ask the user to revise that #ID).")
 	} else if len(partialDetails) > 0 {
 		fmt.Fprintf(&sb, "[PRAXIS GUARDRAIL — FIX BEFORE FINISHING] Stop batch verification exceeded hook time budget under fail-closed policy: %s", strings.Join(partialDetails, "; "))
 	} else {
