@@ -1,138 +1,87 @@
 # praxis
 
-[English (README.md)](./README.md) · [팀 협업 가이드](./TEAM.ko.md) · [아키텍처 레퍼런스](./ARCHITECTURE.ko.md) · [AI 자율 설정 가이드](./guides/AI_SETUP.ko.md)
+[English (README.md)](./README.md) · [팀 협업 & 다기기 가이드](./TEAM.ko.md) · [아키텍처 레퍼런스](./ARCHITECTURE.ko.md) · [AI 자율 설정 가이드](./guides/AI_SETUP.ko.md)
 
-**AI 코딩 에이전트용 상태 메모리 & 실행 하네스 — 규칙이 바뀌면 옛 지시는 즉시 폐기하고, 언제나 최신 결정만 강제합니다.**
+**AI 코딩 에이전트용 상태 메모리 & 실행 하네스 — 기억하는 데서 멈추지 않고, 최신 규칙을 코드와 쉘 실행에 직접 관철합니다.**
 
-_단일 로컬 바이너리로 **Claude Code · Antigravity** 및 **범용 MCP 클라이언트**와 **웹 콘솔**을 함께 제공합니다._
+_외부 DB나 Python · Node 설치 없는 **단일 로컬 Go 바이너리**로 **Claude Code · Antigravity · 범용 MCP 클라이언트**와 **웹 콘솔**을 함께 제공합니다._
 
-### 기존 채팅 메모리는 왜 자꾸 꼬일까요?
+---
 
-- **대화창 컨텍스트**: 대화가 길어져 요약·압축되면 초반에 합의한 규칙부터 밀려나 사라집니다.
-- **정적 규칙 파일 (`CLAUDE.md` 등)**: 매 턴 전체를 다시 읽혀 토큰과 컨텍스트 창을 소모하고, 채팅에서 바꾼 새 결정과 충돌해 옛 규칙으로 되돌아갑니다.
-- **기존 벡터 RAG**: 유사해 보이는 몇 조각(`TOP-K`)만 뽑아 오다 보니 표현이 다른 필수 제약을 놓치거나 폐기된 옛 규칙을 함께 불러옵니다.
+## 왜 일반 메모리 MCP · `CLAUDE.md` 대신 `praxis`인가요?
 
-### `praxis`는 컨텍스트 관리를 자동으로 처리합니다
+시중의 메모리 MCP들은 과거 대화를 저장해 나중에 **“참고(Recall)”**하게 해 줄 뿐, 에이전트가 도구를 안 부르면 작동하지 않고 참고한 규칙을 어겨도 막지 못합니다. 정적 `CLAUDE.md` 파일 역시 매 턴 토큰만 소모할 뿐 대화 중 바뀐 새 결정과 충돌합니다.
 
-사람이 매번 규칙 파일을 수동 편집하거나 `"이거 기억해"`라고 명령하지 않아도, 라이프사이클 훅이 채팅 흐름을 감싸 최신 컨텍스트를 유지합니다:
+`praxis`는 라이프사이클 훅으로 에이전트 실행 흐름을 감싸 **수동 조작 없이 최신 결정만 유지하고, 규칙 위반을 실행 단계에서 직접 차단·교정**합니다:
 
-1. **자동 정제 · 덮어쓰기**: 채팅 중 규칙 변경이 감지됐는데 저장 없이 코드부터 고치려 하면 **수정 직전에 멈춰 세워** 먼저 옛 규칙을 덮어쓰고 최신 결정만 남깁니다.
-2. **최소 컨텍스트 자동 주입**: 매 턴 필요한 규칙 중 아직 세션에 전달되지 않은 것만 선별 주입해, 대화가 길어져도 컨텍스트 창이 무거워지지 않습니다.
-3. **이원화 가드레일 (쉘 사전 차단 + 턴 종료 일괄 수정)**: 되돌릴 수 없는 쉘 명령은 실행 직전에 즉시 차단하고, 파일 편집은 막힘없이 진행한 뒤 턴 종료 시점에 변경 diff 전체를 한 번에 대조해 위반 시 에이전트가 스스로 수정하도록 유도합니다 _(커밋 시 `git pre-commit` 최종 점검 포함)_.
+| 기준 | `CLAUDE.md` · 일반 메모리 MCP | `praxis` |
+| :--- | :--- | :--- |
+| **사용성 (수동 개입 `0`)** | `"기억해"` 명령·도구 호출에 의존하거나 규칙 파일을 직접 수정 | **평소처럼 대화만 하면 자동 반영** · 코드 수정 전 새 결정 선반영 강제 |
+| **규칙 충돌 · 압축 복구** | 옛 메모와 새 지시가 뒤섞이고 `/compact` 요약 시 초반 합의 유실 | **바뀐 결정이 옛 규칙을 즉시 덮어써 폐기** · `/compact` 후 핵심 규칙 자동 복원 |
+| **토큰 · 속도 효율** | 매 턴 전체 파일 재주입(토큰 낭비) 또는 도구 왕복 지연·검색 누락 | **이번 턴에 새로 필요한 규칙만 주입(반복 턴 추론 `0`회)** · 편집 중 흐름 끊김 없음 |
+| **실행 강제 · 자체 수정** | 참고만 할 뿐 규칙을 어기고 수정·커밋해도 제지 불가 | **위험 쉘 명령 사전 차단** + **턴 종료 시 위반 코드 자동 수정** + `git pre-commit` 방어 |
+| **이종 에이전트 연속성** | 툴마다 규칙 파일·기억이 따로 놀아 에이전트를 바꾸면 맥락 단절 | **Claude Code · Antigravity · Cursor를 번갈아 써도** 하나의 DB로 동일한 최신 규칙 공유 |
+| **설치 · 런타임** | Python/Node 런타임, 외부 벡터·그래프 DB 설치 및 콜드스타트 | **외부 의존성 `0`개 단일 실행 파일** · 자동 기동 상주 데몬 + 내장 웹 콘솔 |
 
-| 연동 방식                          | 지원 클라이언트                                                  | 동작 범위                                                                                                |
-| :--------------------------------- | :--------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------- |
-| **에이전트 플러그인** _(MCP + 훅)_ | **Claude Code** · **Antigravity**                                | 턴별 미전달 규칙 자동 주입, 수정 전 규칙 정제 게이트, 쉘 사전 차단 및 턴 종료 일괄 수정 · Git pre-commit |
-| **범용 MCP 서버**                  | **Cursor** · **Windsurf** · **Claude Desktop** 등 MCP 클라이언트 | `stdio` 또는 Streamable HTTP(`/mcp`)로 연결해 동일한 웹 콘솔·System 1 평가·MCP 도구 프로토콜 사용        |
+| 연동 방식 | 지원 클라이언트 | 동작 범위 |
+| :--- | :--- | :--- |
+| **에이전트 플러그인** _(MCP + 훅)_ | **Claude Code** · **Antigravity** | 턴별 미전달 규칙 자동 주입 · 수정 전 규칙 정제 · 쉘 사전 차단 · 턴 종료 자체 수정 · `pre-commit` |
+| **범용 MCP 서버** | **Cursor** · **Windsurf** · **Claude Desktop** 등 | `stdio` 또는 Streamable HTTP(`/mcp`)로 연결해 동일한 DB · 웹 콘솔 · 평가 엔진 · MCP 도구 사용 |
 
 ![기존 방식과 praxis 실전 타임라인 비교](./assets/overview.ko.svg)
 
 ---
 
-## 왜 `praxis`인가요?
-
-> [!IMPORTANT]
-> **단순 참고용 메모(Recall)만으로는 코딩 에이전트의 옛 규칙 회귀와 규칙 이탈을 막기 어렵습니다.**
-
-대부분의 AI 에이전트 메모리 도구가 과거 대화·작업 이력을 요약해 나중에 **“참고하게 해주는(Recall)”** 데 머무르는 반면, `praxis`는 다음 세 가지를 **외부 벡터·그래프 DB나 Node/Python 런타임 없는 단일 로컬 Go 바이너리**에 하나로 결합했습니다:
-
-- **규칙의 최신 상태 보장**: 요약 누적이 아니라 **`1:N` 원자적 덮어쓰기 + `[REVOKED]` 폐기 통지**로 옛 규칙 회귀 차단
-- **행동 강제 · 자동 수정**: 단순 권고(`CLAUDE.md` · `MEMORY.md` · 일반 RAG)에 그치지 않고 **쉘 실행 전 차단, 턴 종료 일괄 자체 수정, `git pre-commit` 게이트**까지 연계
-- **토큰·캐시·컴팩트 최적화**: **세션 델타 주입**(반복 턴 추론 `0`회 · 고정 Prefix KV 캐시) + **`0`-토큰 `System 1` 평가** + **`/compact`·체크포인트 이후 자동 복구**
-
-### 기존 방식과의 구조 비교
-
-정적 규칙 파일·벡터 RAG·요약 누적형 메모리와 항목별로 비교하면 동작 구조의 차이가 분명히 드러납니다:
-
-| 기준                               | 기존 방식 (`CLAUDE.md` · 벡터 RAG · 요약 누적형)               | `praxis`                                                                                                                                    |
-| :--------------------------------- | :------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------- |
-| **상태 일관성**                    | 옛 규칙과 새 결정이 혼재해 구버전 회귀                         | **원자적 `1:N` 덮어쓰기 · 철회 통지**로 최신 결정만 유지                                                                                      |
-| **전수 평가 · 캐시**               | 매 턴 전체 재주입 또는 `TOP-K` 누락                            | **반복 턴 추론 `0`회** · 미전달 **100% 병렬 평가** · **고정 Prefix KV 캐시**                                                                  |
-| **직관(`System 1`)**               | 범용 LLM의 생성형 추론 지연·토큰 비용                          | 경량 결정 엔진의 **출력 토큰 `0`개** 단일 패스 판정                                                                                           |
-| **가드레일 · 자동 수정**           | 긴 대화 후반에 규칙을 잊고 수정·커밋                           | **쉘 사전 차단** · **턴 종료 diff 일괄 검증 및 자동 수정** · **`pre-commit` 게이트**                                                          |
-| **컴팩트 후 자동 복구**            | `/compact` · 대화 요약 시 초반 규칙 유실                       | **압축 요약 · 체크포인트 자동 감지**로 고정 규칙·작업 현황·연관 결정 즉시 복원                                                                |
-| **이종 AI 에이전트 호환**          | 툴(`CLAUDE.md` 등)마다 규칙이 달라 에이전트를 바꾸면 맥락 단절 | **서로 다른 AI 에이전트·모델을 함께·번갈아 써도** (Claude Code · Antigravity · Cursor 등) **하나의 공유 DB로 동일한 최신 규칙이 그대로 적용** |
-| **오케스트레이션 · 멀티 에이전트** | 서브에이전트마다 규칙 재복사 · 병렬 세션 불일치                | **세션별 델타 자동 전달** · **경량 워커도 쉘·턴 종료 일괄 검증** · **변경·철회 즉시 전파**                                                    |
-| **상주 데몬 · 저장소 격리**        | 매번 콜드스타트 & 로그·진행·규칙 뒤섞임                        | **단일 WAL 데몬 · 공유 팀 서버** · **기억·진행 이력·감사 및 스코프 격리**                                                                     |
-
-_(세부 DB 구조, MCP 도구 명세, 내부 엔드포인트는 [아키텍처 레퍼런스](./ARCHITECTURE.ko.md)에 정리되어 있습니다.)_
-
----
-
 ## 빠른 시작
 
-<table>
-<thead><tr><th align="left">개발자의 한마디 (TL;DR)</th></tr></thead>
-<tbody><tr><td>
-<ol>
-<li><strong>설치</strong>하고</li>
-<li><strong>대시보드</strong>에서 <strong>빠른 추론 모델</strong>을 고른 다음</li>
-<li><strong>에이전트 코딩</strong>을 즐기시면 됩니다.</li>
-<li>가끔 <strong>대시보드</strong>를 보며 <strong>바이브</strong>를 느껴보세요.</li>
-</ol>
-<p><em>(기존 프로젝트라면 채팅에서 <strong>온보딩</strong>을 요청하세요.)</em></p>
-</td></tr></tbody>
-</table>
-
 > [!TIP]
-> **AI 에이전트 1줄 자동 설정**: 에이전트 채팅(Claude Code, Antigravity, Cursor 등)에 아래 문구를 붙여넣으면 설치부터 `praxis doctor` 진단 및 온보딩까지 자율 진행합니다:
+> **AI 에이전트 1줄 자동 설정**: 에이전트 채팅창에 아래 문구를 붙여넣으면 설치부터 `praxis doctor` 상태 점검, 초기 프로젝트 온보딩까지 스스로 진행합니다.
 > ```text
 > guides/AI_SETUP.ko.md 가이드를 따라 이 프로젝트에 praxis를 설치 및 설정해 줘. praxis doctor로 상태를 점검하고, 추론 엔진 상태를 확인한 뒤 초기 프로젝트 온보딩을 진행해 줘.
 > ```
 
-### 1. 설치
+### 1. 설치 및 진단
 
-**Claude Code** _(macOS · Linux 플러그인 런처)_
-
+**Claude Code** _(macOS · Linux)_
 ```bash
 /plugin marketplace add https://github.com/marbasdev/praxis.git
 /plugin install praxis@praxis-marketplace
 ```
 
-**Antigravity (`agy`)** _(macOS · Linux 플러그인 런처)_
-
+**Antigravity (`agy`)** _(macOS · Linux)_
 ```bash
 git clone https://github.com/marbasdev/praxis.git && cd praxis
 agy plugin install ./plugins/praxis
 ```
 
-**단독 바이너리 · Windows · 기타 MCP 클라이언트** (Cursor · Windsurf · Claude Desktop)
-
+**단독 바이너리 · Windows · 기타 MCP 클라이언트** _(Cursor · Windsurf · Claude Desktop)_
 ```bash
 CGO_ENABLED=0 go build -trimpath -o bin/praxis ./cmd/praxis
 ```
-
-빌드 후 클라이언트 MCP 설정에 `./plugins/praxis/scripts/run-praxis.sh`(`macOS`/`Linux` 플러그인 `stdio`), `bin/praxis` / `praxis.exe`(단독 `stdio`, Windows는 `praxis.exe -hook <event>` 지원), 또는 `http://127.0.0.1:18095/mcp`를 등록하세요.
-
-설치 및 데몬 동작 상태는 언제든 내장 자가 진단 도구로 점검할 수 있습니다:
+클라이언트 MCP 설정에 `./plugins/praxis/scripts/run-praxis.sh`(macOS/Linux 자동 동기화 래퍼), `bin/praxis`(`praxis.exe`), 또는 `http://127.0.0.1:18095/mcp`를 등록하세요. 설치 후 아래 명령으로 전체 상태를 즉시 점검할 수 있습니다:
 ```bash
 praxis doctor
 ```
 
-### 2. 추론 엔진 연결 (필수)
+### 2. 추론 엔진 연결 _(필수)_
 
 > [!WARNING]
-> **추론 엔진 설정 전에는 핵심 기능이 동작하지 않습니다.**
-> 기억 저장, 의미 기반 검색, 실행 전 규칙 차단은 추론 엔진이 연결되어야 실행됩니다.
+> 기억 정제·관련도 선별·실행 전 규칙 차단은 **추론 엔진이 연결되어야 동작**합니다.
 
-클라이언트에서 첫 MCP 또는 훅이 실행되면 백그라운드 데몬과 웹 콘솔(**`http://127.0.0.1:18095`**)이 자동 기동됩니다. 웹 콘솔의 **추론 엔진** 탭에서 환경에 맞게 연결하세요:
+첫 MCP·훅 실행 시 자동 기동되는 웹 콘솔(**`http://127.0.0.1:18095`**)의 **추론 엔진** 탭에서 환경에 맞는 엔진을 선택하세요:
+- **macOS · Linux**: **로컬 GGUF** 권장 모델 1클릭 다운로드 _(API 키 불필요, 또는 `Gemini` · `System 1` · `로컬 URL`)_
+- **Windows**: **로컬 URL**(`Ollama` · `LM Studio` · `vLLM`), `Gemini API 키`, 또는 `System 1` 연결 _(내장 GGUF 미지원)_
+- **팀 서버 · 다기기 연결 _(선택)_**: 사내 팀 서버나 개인 메인 서버에 `praxis connect`로 연결하면 로컬 모델 없이 바로 사용 가능합니다 — [팀 협업 가이드](./TEAM.ko.md)
 
-- **macOS · Linux**: **로컬 GGUF** 권장 모델 1클릭 다운로드 _(또는 `Gemini` · `System 1` · `로컬 URL`)_
-- **Windows**: 내장 GGUF 미지원 → **로컬 URL**(`Ollama` · `LM Studio` · `vLLM`), `System 1`, 또는 `Gemini API 키` 연결
-- **팀 원격 연결 _(선택)_**: 사내 팀 서버에 연결(`praxis connect` 또는 웹 콘솔 **`Remote Servers`**)하면 로컬 DB나 추론 엔진 설정 없이 바로 사용할 수 있습니다 — [팀 협업 가이드](./TEAM.ko.md) 참고
+### 3. 기존 프로젝트 온보딩 _(첫 연결 시 1회)_
 
-### 3. 기존 프로젝트 온보딩 _(기존 코드베이스 첫 연결)_
-
-이미 개발이 진행된 **기존 Git 프로젝트**에서도 처음부터 규칙을 일일이 적어 넣을 필요 없이 온보딩을 지원합니다. 추론 엔진이 연결된 상태에서 기억이 `0`개인 `project:<저장소>`로 첫 대화를 열면(**Claude Code** · **Antigravity** 훅 환경) **초기 규칙 온보딩을 자동으로 제안**합니다:
-
-- **핵심 파일 점검 · 상충 패턴 우선 정리**: 온보딩을 수락하면 에이전트가 저장소 핵심 파일·매니페스트를 직접 살펴보고, **기존 코드에 서로 어긋나는 옛 패턴과 새 패턴이 공존할 때 먼저 어떤 기준을 따를지 물어본 뒤** 확정된 규칙만 저장하고 위반 파일 정비까지 이어갑니다.
-- **건너뛰기 · 재실행 & Git 기준점 동기화**: 원치 않으면 건너뛰고(`skip_onboarding`) 나중에 다시 켜서(`reset_onboarding`) 실행할 수 있으며, `PRAXIS_GIT_SYNC=1`을 켜면 오래된 과거 이력은 건너뛰고 `HEAD` 기준점 이후 커밋 변경분만 점진 동기화할 수 있습니다. _(훅 없는 일반 MCP 클라이언트는 채팅에서 온보딩이나 `praxis://playbook/memory-curator` 실행을 요청하면 됩니다.)_
+기존 Git 저장소에서 기억이 `0`개인 상태로 첫 대화를 시작하면 자동으로 초기 규칙 온보딩을 제안합니다:
+- 핵심 파일·매니페스트를 분석하며, **코드 내 옛 패턴과 새 패턴이 충돌하면 어떤 기준을 따를지 먼저 확인한 뒤** 확정된 규칙만 저장합니다.
+- 원치 않으면 건너뛰고(`skip_onboarding`) 언제든 다시 실행(`reset_onboarding`)할 수 있습니다. _(훅 없는 MCP 클라이언트는 채팅에서 온보딩을 요청하세요.)_
 
 ---
 
-## 웹 콘솔 (기본 `http://127.0.0.1:18095`)
-
-대표 화면인 **기억 관리** 탭 외 나머지 탭도 클릭해 동작 화면을 확인할 수 있습니다.
+## 웹 콘솔 (`http://127.0.0.1:18095`)
 
 <details open>
 <summary><strong>기억 관리</strong> — 스코프 KPI · 2D 트리맵 분포 · 인라인 수정/고정 · AI 중복 병합</summary>
@@ -156,7 +105,7 @@ praxis doctor
 </details>
 
 <details>
-<summary><strong>추론 엔진</strong> — 상단 접이식 텔레메트리 · 미설정 경고 배너 · 로컬 GGUF 1클릭 다운로드 · 기능별 라우팅</summary>
+<summary><strong>추론 엔진</strong> — 지연 시간 텔레메트리 · 로컬 GGUF 1클릭 다운로드 · 태스크별 라우팅</summary>
 
 ![웹 콘솔 추론 엔진 탭 동작 시뮬레이션](./assets/tab-engines.ko.svg)
 
@@ -169,97 +118,58 @@ praxis doctor
 
 </details>
 
-_(저장소 팀 공통 규칙(`.praxis/TEAM_RULES.md`)과 계정별 격리·원격 씬 클라이언트 연결·공유 KV 프리픽스 캐시를 지원하는 **공유 팀 서버 모드**는 [팀 협업 가이드](./TEAM.ko.md)에 정리되어 있습니다.)_
-
-### 기억 관리 · 정리
-
-대화가 쌓이면서 기억이 늘어나더라도 웹 콘솔의 **기억 관리** 탭에서 원문과 이력을 훼손하지 않고 구조를 깔끔하게 유지할 수 있습니다:
-
-- **2D 트리맵 분포 & 안전 재분류**: **카테고리 · 서브카테고리 기억 분포** 카드에서 `미분류` 항목과 서로 다른 카테고리에 겹친 `중복 서브카테고리`를 한눈에 확인합니다. `카테고리 설정...`으로 분류 프리셋·자동완성을 맞추고, **`AI 분류 정리...`**를 실행하면 **기억 본문은 한 글자도 바꾸지 않은 채** 카테고리와 서브카테고리 태그만 안전하게 재배치합니다.
-- **AI 중복 통합 · 수동 병합 (`기억 병합...`)**: 여러 세션에 흩어진 유사 기억은 **AI 병합 추천**으로 자동 그룹핑하거나 **수동 선택**으로 직접 묶어 단일 규칙으로 통합할 수 있으며, 통합 후에도 기존 규칙과의 `Replaces` 대체 계보가 유지됩니다.
-- **핵심 고정 규칙 · 복구 가능한 생명주기**: 중요 규칙은 인라인 편집에서 **`핵심 고정 규칙`**으로 승격해 관련도 평가와 무관하게 항상 주입하고, 불필요해진 기억은 `비활성화 (Forget)` → `되돌리기 (Undo)` → `폐기 정리` 순서로 안전하게 정리합니다. _(폐기 정리 후에도 활성 기억의 `Replaces` 이력은 보존됩니다.)_
-- **Git 저장소 기준 프로젝트별 기억 분리**: **Git 저장소(`.git`) 사용을 전제로 저장소 루트를 자동 인식**해 `project:<저장소>` 단위로 규칙과 진행 현황을 분리 저장하므로, 여러 프로젝트를 오가도 규칙이 섞이지 않습니다. 전 프로젝트 공통 개발 규칙(`global`)과 비개발 개인 메모(`personal`)는 별도 분리되며(**팀 서버 모드**에서는 둘 다 계정별로 격리), 상단의 **`개인 기억 포함`** 체크박스로 프로젝트 조회 시 개인 메모를 선택적으로 함께 볼 수 있습니다.
+- **안전한 분류 · 중복 병합**: **2D 트리맵**에서 미분류·중복 서브카테고리를 확인해 본문 변형 없이 태그만 **`AI 분류 정리`**하거나, 흩어진 유사 기억을 **`AI 병합 추천`**으로 단일 규칙에 통합합니다 _(기존 규칙과의 `Replaces` 대체 계보 유지)_.
+- **핵심 고정 & 복구 가능한 정리**: 항상 주입할 불변 규칙은 **`핵심 고정 규칙`**으로 지정하고, 불필요한 기억은 `비활성화(Forget)` → `되돌리기(Undo)` → `폐기 정리` 순으로 안전하게 관리합니다.
+- **Git 저장소별 자동 격리**: `.git` 루트 기준으로 `project:<저장소>`를 자동 분리하며, 전 프로젝트 공통 개발 규칙(`global`)·개인 메모(`personal`)·팀 표준(`.praxis/TEAM_RULES.md`)을 섞이지 않게 계층화합니다.
 
 ---
 
-## 동작 범위 및 현실적 한계
+## 유지보수 · 백업 · 삭제
 
-- **Git 저장소 사용 전제 (프로젝트 식별 · Git 연동)**: 프로젝트 단위 자동 구분(`project:<저장소>`), Git 변경 동기화, `pre-commit` 가드레일은 **Git 저장소(`.git`) 루트 인식**을 기준으로 동작합니다. `.git`이 없는 일반 폴더에서는 현재 작업 디렉토리명(`cwd`) 기준으로만 임시 구분되므로, 하위 폴더 이동 시에도 일관되게 프로젝트를 분리하려면 Git 저장소 안에서 사용하는 것을 권장합니다.
-- **이미 출력된 과거 채팅은 지울 수 없음**: 옛 규칙 폐기 알림, 쉘 실행 전 차단, 턴 종료 일괄 수정으로 새 실수는 막지만, 대화창 위쪽에 이미 적힌 과거 답변 문장 자체를 소급 수정하지는 않습니다.
-- **훅 없는 MCP 클라이언트의 요약 후 수동 재조회**: **Claude Code**(`PostCompact` · `SessionStart`)와 **Antigravity**(체크포인트 감지)는 컴팩트 이후 자동으로 규칙을 복구하지만, 훅이 없는 **Cursor · Windsurf** 등 일반 MCP 클라이언트에서 대화가 요약되었다면 `query_project_memory(refresh=true)`를 한 번 호출해야 합니다.
-- **에이전트별 자동화 범위**: **Claude Code** · **Antigravity**는 훅으로 매 턴 규칙 주입, 쉘 사전 차단, 턴 종료 일괄 자체 수정을 자동 강제하고, 그 외 MCP 클라이언트는 에이전트가 필요할 때 메모리 도구를 호출해 사용합니다.
-
----
-
-## 데몬 제어 · 저장 경로 · 유지보수
-
-### 공통 데이터 디렉토리 (`~/.praxis`)
-
-어떤 클라이언트(**Claude Code**, **Antigravity**, 일반 **MCP 클라이언트**)에서 설치·연동하더라도 실행 바이너리, DB, 로컬 모델, 데몬 상태 파일은 호스트 설정 폴더(`~/.claude`, `~/.gemini`, `~/.cursor`)와 분리된 중립 기본 경로 **`~/.praxis`**(Windows: `%USERPROFILE%\.praxis`)에 통합 저장됩니다. 경로를 바꾸려면 `PRAXIS_DATA_DIR`(또는 `PRAXIS_DB_PATH`) 환경변수를 설정하세요.
-
-### 백그라운드 데몬 · 포트 변경
-
-데몬/웹 콘솔(기본 `18095`)과 내장 로컬 GGUF 서버(기본 `18088`) 포트는 CLI나 웹 콘솔 상단 배지(`praxis :18095`)에서 바꿀 수 있으며, 지정한 포트가 사용 중이면 빈 루프백 포트로 **자동 폴백**하고 훅·열린 MCP `stdio` 브리지가 새 포트를 자동 추적합니다.
+모든 런타임 데이터(바이너리, `memories.db`, 로컬 모델)는 클라이언트와 무관하게 **`~/.praxis`**(Windows: `%USERPROFILE%\.praxis`, `PRAXIS_DATA_DIR`로 변경 가능) 한곳에 저장됩니다.
 
 ```bash
-~/.praxis/bin/praxis daemon status                 # status | start | stop | restart | logs (소스 빌드 시 ./bin/praxis)
-~/.praxis/bin/praxis daemon port                   # 현재 설정·활성 포트 확인
-~/.praxis/bin/praxis daemon port 19095 19088       # 데몬 · GGUF 포트 변경 (또는 --daemon N --gguf N)
-~/.praxis/bin/praxis daemon port reset             # 기본 포트(18095 / 18088) 복원
-~/.praxis/bin/praxis serve --addr 0.0.0.0:18095    # 공유 팀 서버 실행 (계정·연결 명령은 TEAM.ko.md 참고)
+# 데몬 상태 점검 및 제어 (포트 충돌 시 빈 포트로 자동 폴백)
+~/.praxis/bin/praxis doctor
+~/.praxis/bin/praxis daemon status    # start | stop | restart | logs | port
 ```
 
-### 업데이트 (`memories.db` 자동 유지 · 마이그레이션)
-
+### 업데이트 (`memories.db` 자동 보존)
 ```bash
-# Claude Code
-/plugin update
-
-# Antigravity
-git pull && agy plugin install ./plugins/praxis
-
-# 소스 직접 빌드 사용 시
-git pull && CGO_ENABLED=0 go build -trimpath -o bin/praxis ./cmd/praxis
-./plugins/praxis/scripts/run-praxis.sh daemon restart
+/plugin update                                                        # Claude Code
+git pull && agy plugin install ./plugins/praxis                       # Antigravity
+git pull && CGO_ENABLED=0 go build -trimpath -o bin/praxis ./cmd/praxis && ./plugins/praxis/scripts/run-praxis.sh daemon restart
 ```
 
-### 백업 · 복원 · 포터블 이관
-
+### 백업 · 복원
 ```bash
-# SQLite 전체 안전 백업 (WAL 체크포인트 포함)
+# 안전 백업 (SQLite 온라인 백업 또는 포터블 JSON 번들 내보내기)
 sqlite3 ~/.praxis/memories.db ".backup './memories-backup.db'"
+~/.praxis/bin/praxis export --scope global -o global.json
 
-# SQLite 전체 안전 복원 (데몬 정지 및 기존 WAL/SHM 파일 정리 후 교체)
+# DB 전체 복원
 ~/.praxis/bin/praxis daemon stop
-mkdir -p ~/.praxis && rm -f ~/.praxis/memories.db-wal ~/.praxis/memories.db-shm
+rm -f ~/.praxis/memories.db-wal ~/.praxis/memories.db-shm
 cp ./memories-backup.db ~/.praxis/memories.db
 ~/.praxis/bin/praxis daemon start
-
-# 스코프별 포터블 JSON 내보내기 · AI 병합 가져오기 · 서버 업로드 (웹 콘솔 기억 관리 탭에서도 지원)
-~/.praxis/bin/praxis export --scope global -o global.json
-~/.praxis/bin/praxis import global.json --mode merge --dry-run
-~/.praxis/bin/praxis push --scope global --mode exact
 ```
 
 ### 삭제
-
 ```bash
-# 1. 클라이언트 플러그인 · MCP · Git 훅 연동만 제거 (memories.db 보존)
-/plugin uninstall praxis                    # Claude Code
-agy plugin uninstall praxis                 # Antigravity
-# 일반 MCP 클라이언트 (Cursor · Windsurf · Claude Desktop): MCP 설정 파일에서 "praxis" 항목 제거
-# Git 훅을 설치한 저장소(`praxis -install git-hook`): rm -f .git/hooks/pre-commit
+# 1. 클라이언트 연동만 해제 (데이터 보존)
+/plugin uninstall praxis      # Claude Code
+agy plugin uninstall praxis   # Antigravity
+# 기타 MCP 클라이언트는 설정 파일에서 "praxis" 제거 (Git 훅 설치 시 rm -f .git/hooks/pre-commit)
 
-# 2. 데몬 정지 후 공통 바이너리·모델·로컬 데이터 완전 삭제
-~/.praxis/bin/praxis daemon stop
-rm -rf ~/.praxis                            # PRAXIS_DATA_DIR 변경 시 해당 경로 (Windows: Remove-Item -Recurse "$env:USERPROFILE\.praxis")
+# 2. 데몬 정지 및 로컬 데이터 완전 삭제
+~/.praxis/bin/praxis daemon stop && rm -rf ~/.praxis
 ```
+
+> **참고**: 프로젝트 자동 식별과 `pre-commit` 가드레일은 **Git 저장소(`.git`)** 기준이며, 훅이 없는 일반 MCP 클라이언트에서 대화가 요약된 뒤에는 `query_project_memory(refresh=true)`를 1회 호출하면 규칙이 다시 복구됩니다.
 
 ---
 
-## 로드맵 · 의견 남기기 · 문서
+## 문서 · 피드백
 
-- **로드맵**
-  - 자동 P2P·클라우드 기기 간 동기화는 보류되었으며, **공유 팀 서버 모드**(`serve` · `connect` · 멀티 계정 `switch`)와 **포터블 번들 이관**(`push` · `export` · `import`)이 추가되었습니다 — [팀 협업 가이드](./TEAM.ko.md) 참고.
-- **의견 및 피드백**: 외부 코드 PR(컨트리뷰션)은 받지 않지만, 사용 중 의견·버그·취약점 제보는 [GitHub Issues](https://github.com/marbasdev/praxis/issues)에 남겨주시면 확인되는 대로 즉시 조치하겠습니다. _(취약점의 세부 익스플로잇 내용은 공개 이슈에 적지 마세요 — [보안 정책](./SECURITY.md))_
-- **문서**: [팀 협업 가이드](./TEAM.ko.md) · [아키텍처 & 환경변수](./ARCHITECTURE.ko.md) · [피드백 및 기여 정책](./CONTRIBUTING.md) · [보안 정책](./SECURITY.md) · [MIT License](./LICENSE)
+- **문서**: [팀 협업 & 다기기 가이드](./TEAM.ko.md) · [아키텍처 & 환경변수 레퍼런스](./ARCHITECTURE.ko.md) · [AI 자율 설정 가이드](./guides/AI_SETUP.ko.md) · [기여 정책](./CONTRIBUTING.md) · [보안 정책](./SECURITY.md) · [MIT License](./LICENSE)
+- **피드백**: 외부 코드 PR은 받지 않지만, 사용 중 의견·버그·취약점 제보는 [GitHub Issues](https://github.com/marbasdev/praxis/issues)에 남겨주시면 즉시 확인해 반영합니다.

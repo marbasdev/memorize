@@ -41,7 +41,7 @@ flowchart LR
 | **2. Infra** | `internal/infra/{config,sqlite,git,eventbus}` | 경로/`ports.json`/`remotes.json`(`profiles` 캐시), SQLite `WAL` 풀·인덱스·마이그레이션·인증·스위처 쿠키·임시 테이블 스윕, Git 루트/커밋 조회 + 격리 `worktree` `push`, 종료 `Close()` 지원 SSE 브로드캐스터 |
 | **3. Inference** | `internal/inference/{router,providers,discovery,localmodel}` | 태스크 라우터·`429`/`503` 폴백 체인, 선언형 프로바이더(`GGUF`, `Gemini`/`Decisions`, `Jev`/`Flide`, OpenAI 호환), 카탈로그/프로빙, 로컬 `llama-server` 수명주기(`macOS`/`Linux`) |
 | **4. Modules** | `internal/modules/{memory,progress,rulepack,guardrail}` | 기억 CRUD/델타/병합/포터블 `ExportBundle`·`ImportBundle`/상한 캐시, `project_progress`·TTL, `.praxis/TEAM_RULES.md` 격리 `push`+CAS·충돌 멈춤 게이트(보호 브랜치 PR 폴백 없이 `ErrBranchProtected`), 이원화 가드레일·온보딩 |
-| **5. Transport** | `internal/transport/{cli,mcp,http,dashboard}` | CLI(`daemon`, `serve`, `user`, `connect`, `disconnect`, `switch`, `push`, `export`, `import`), MCP 6종 도구·리소스·프롬프트 + `ScopeResolver`, 공용 HTTP/`/healthz`/인증/프록시/CSRF 가드 + 씬 클라이언트 브리지, 6탭 HTMX SSR 웹 콘솔(`/login` · **계정 전환** · **Accounts** · **Remote Servers** · **Export / Import** 포함) |
+| **5. Transport** | `internal/transport/{cli,mcp,http,dashboard}` | CLI(`doctor [--json]`, `daemon [status\|start\|stop\|restart\|logs\|port]`, `serve`, `user`, `connect`, `disconnect`, `switch`, `push`, `export`, `import`, `-install git-hook`), MCP 6종 도구·리소스·프롬프트 + `ScopeResolver`, 공용 HTTP/`/healthz`/인증/프록시/CSRF 가드 + 씬 클라이언트 브리지, 6탭 HTMX SSR 웹 콘솔(`/login` · **계정 전환** · **Accounts** · **Remote Servers** · **Export / Import** 포함) |
 | **6. App & CLI** | `cmd/praxis`, `internal/app/localdaemon` | 진입점 조립, 단일 로컬 데몬·인증 팀 서버 수명주기, `SIGINT`/`SIGTERM` Graceful Shutdown, 포트 폴백·버전 무중단 바이너리 핸드오버 및 `TestArchitectureBoundaries` DAG/AST 가드 |
 
 ---

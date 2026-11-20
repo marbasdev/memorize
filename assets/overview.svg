@@ -1,20 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 385" width="100%" height="100%" role="img" aria-label="Old way vs praxis real-world timeline comparison">
   <defs>
     <style>
-      .s-outer { fill: #0b0e13; stroke: #243041; stroke-width: 1.5; }
-      .s-top { fill: #121720; stroke: #243041; stroke-width: 1; }
-      .s-panel { fill: #11161f; stroke: #243041; stroke-width: 1; }
-      .s-card { fill: #161d28; stroke: #283548; stroke-width: 1; }
-      .s-term { fill: #0d121a; stroke: #283548; stroke-width: 1; }
+      .s-outer { fill: #090b0e; stroke: #222934; stroke-width: 1.5; }
+      .s-top { fill: #101318; stroke: #222934; stroke-width: 1; }
+      .s-panel { fill: #101318; stroke: #222934; stroke-width: 1; }
+      .s-card { fill: #141820; stroke: #283140; stroke-width: 1; }
+      .s-term { fill: #0b0e13; stroke: #283140; stroke-width: 1; }
       .s-err { fill: rgba(239, 68, 68, 0.13); stroke: rgba(239, 68, 68, 0.48); stroke-width: 1; }
       .s-ok { fill: rgba(16, 185, 129, 0.12); stroke: rgba(16, 185, 129, 0.48); stroke-width: 1; }
-      .s-info { fill: rgba(56, 189, 248, 0.12); stroke: rgba(56, 189, 248, 0.45); stroke-width: 1; }
+      .s-info { fill: rgba(45, 212, 191, 0.12); stroke: rgba(45, 212, 191, 0.36); stroke-width: 1; }
       .s-sans { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
       .s-mono { font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; }
-      .c-pri { fill: #f1f5f9; }
-      .c-sec { fill: #94a3b8; }
-      .c-mut { fill: #64748b; }
-      .c-acc { fill: #38bdf8; }
+      .c-pri { fill: #eef2f6; }
+      .c-sec { fill: #8b95a5; }
+      .c-mut { fill: #606b7b; }
+      .c-acc { fill: #2dd4bf; }
       .c-ok { fill: #34d399; }
       .c-err { fill: #f87171; }
       .c-warn { fill: #fbbf24; }
@@ -23,8 +23,8 @@
 
   <rect class="s-outer" x="1" y="1" width="998" height="383" rx="12" />
   <rect class="s-top" x="1" y="1" width="998" height="44" rx="12" />
-  <rect x="1" y="32" width="998" height="13" fill="#121720" />
-  <line x1="1" y1="45" x2="999" y2="45" stroke="#243041" stroke-width="1" />
+  <rect x="1" y="32" width="998" height="13" fill="#101318" />
+  <line x1="1" y1="45" x2="999" y2="45" stroke="#222934" stroke-width="1" />
 
   <rect class="s-info" x="18" y="11" width="234" height="24" rx="5" />
   <text x="135" y="27" text-anchor="middle" class="s-sans c-acc" font-size="11.5" font-weight="700">Real-World Session (Before vs After)</text>
@@ -32,7 +32,7 @@
 
   <!-- LEFT: WITHOUT PRAXIS -->
   <rect class="s-panel" x="18" y="58" width="466" height="311" rx="8" />
-  <text x="34" y="82" class="s-sans c-pri" font-size="12.5" font-weight="700">Old Way (CLAUDE.md · RAG · Plain Chat)</text>
+  <text x="34" y="82" class="s-sans c-pri" font-size="12.5" font-weight="700">Without praxis (CLAUDE.md · Memory MCPs)</text>
   <rect class="s-err" x="386" y="66" width="84" height="22" rx="4" />
   <text x="428" y="81" text-anchor="middle" class="s-sans c-err" font-size="10.2" font-weight="700">RULE DRIFT</text>
 
@@ -40,7 +40,7 @@
   <rect class="s-card" x="34" y="98" width="434" height="58" rx="6" />
   <text x="46" y="116" class="s-mono c-sec" font-size="10.5">10:05 · Turn 3  User</text>
   <text x="46" y="133" class="s-sans c-pri" font-size="11.5">“Switch API auth from JWT to session cookies from now on”</text>
-  <text x="46" y="149" class="s-sans c-mut" font-size="10">↳ Static CLAUDE.md still carries the old “Use JWT” instruction</text>
+  <text x="46" y="149" class="s-sans c-mut" font-size="10">↳ Static CLAUDE.md &amp; past memories still keep “Use JWT”</text>
 
   <!-- Step 2 Left -->
   <rect class="s-card" x="34" y="164" width="434" height="52" rx="6" />
@@ -60,7 +60,7 @@
   <text x="251" y="343" text-anchor="middle" class="s-sans c-sec" font-size="10.3">Manual rollback + thousands of wasted instruction tokens per turn</text>
 
   <!-- VS Badge -->
-  <circle cx="500" cy="214" r="14" fill="#161d28" stroke="#334155" stroke-width="1.3" />
+  <circle cx="500" cy="214" r="14" fill="#141820" stroke="#323d4f" stroke-width="1.3" />
   <text x="500" y="218" text-anchor="middle" class="s-mono c-acc" font-size="10" font-weight="700">VS</text>
 
   <!-- RIGHT: WITH PRAXIS -->
@@ -91,5 +91,5 @@
   <!-- Result Right -->
   <rect class="s-ok" x="532" y="306" width="434" height="48" rx="6" />
   <text x="749" y="326" text-anchor="middle" class="s-sans c-ok" font-size="11.5" font-weight="700">Result: Auto-fixed cleanly (+ PreToolUse blocks bad shell runs)</text>
-  <text x="749" y="343" text-anchor="middle" class="s-sans c-sec" font-size="10.3">0 repeat-turn evals · KV-cached prefix · 0-token System 1</text>
+  <text x="749" y="343" text-anchor="middle" class="s-sans c-sec" font-size="10.3">Delta-only injection (0 repeat evals) · zero manual rule chore</text>
 </svg>
