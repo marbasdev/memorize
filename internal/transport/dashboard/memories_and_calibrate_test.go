@@ -909,6 +909,7 @@ func TestTelemetryDashboardGuardrailAndReset(t *testing.T) {
 		`id="telemetryTaskChart"`,
 		`id="telemetryEngineChart"`,
 		`id="telemetrySparkChart"`,
+		`class="tel-spark-tip"`,
 		"24h:",
 		"avg ",
 		"p95 ",

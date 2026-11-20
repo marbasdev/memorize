@@ -572,7 +572,7 @@
   .tel-box {
     background: var(--bg); border: 1px solid var(--border);
     border-radius: var(--radius-sm); padding: 0.68rem 0.78rem;
-    display: flex; flex-direction: column; gap: 0.52rem;
+    display: flex; flex-direction: column; gap: 0.52rem; min-width: 0;
   }
   .tel-box-head {
     display: flex; justify-content: space-between; align-items: center;
@@ -607,24 +607,39 @@
   }
 
   .tel-spark-grid {
-    display: flex; align-items: flex-end; gap: 4px; height: 96px;
-    padding-top: 0.35rem; overflow-x: auto;
+    display: flex; align-items: flex-end; gap: 3px;
+    padding-top: 0.2rem; min-width: 0;
   }
   .tel-spark-col {
-    flex: 1 1 0; min-width: 14px; display: flex; flex-direction: column;
-    align-items: center; gap: 0.16rem; height: 100%; justify-content: flex-end;
+    position: relative; flex: 1 1 0; min-width: 0; max-width: 32px;
+    display: flex; flex-direction: column; align-items: center;
+    cursor: default; outline: none;
   }
-  .tel-spark-val { font-family: var(--mono); font-size: 0.61rem; color: var(--muted); white-space: nowrap; line-height: 1; }
+  .tel-spark-tip {
+    display: none; position: absolute; bottom: calc(100% + 5px); left: 50%; transform: translateX(-50%);
+    z-index: 20; padding: 0.18rem 0.42rem; border-radius: 4px;
+    background: var(--elevated); color: var(--text); border: 1px solid var(--border-strong);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    font-family: var(--mono); font-size: 0.66rem; font-weight: 600; white-space: nowrap; line-height: 1.2;
+    pointer-events: none;
+  }
+  .tel-spark-col:last-child .tel-spark-tip,
+  .tel-spark-col:nth-last-child(2) .tel-spark-tip { left: auto; right: 0; transform: none; }
+  .tel-spark-col:first-child .tel-spark-tip,
+  .tel-spark-col:nth-child(2) .tel-spark-tip { left: 0; transform: none; }
+  .tel-spark-col:hover .tel-spark-tip,
+  .tel-spark-col:focus-visible .tel-spark-tip { display: block; }
   .tel-spark-track {
-    width: 100%; height: 64px; display: flex; align-items: flex-end;
+    width: 100%; height: 58px; display: flex; align-items: flex-end;
     justify-content: center; background: var(--surface-2);
-    border-radius: 3px; overflow: hidden;
+    border-radius: 3px; overflow: hidden; transition: box-shadow 0.14s ease;
   }
+  .tel-spark-col:hover .tel-spark-track,
+  .tel-spark-col:focus-visible .tel-spark-track { box-shadow: inset 0 0 0 1px var(--accent-ring); }
   .tel-spark-bar { width: 100%; border-radius: 3px 3px 0 0; min-height: 4px; transition: height 0.2s ease; }
   .tel-spark-bar.st-ok { background: linear-gradient(180deg, var(--ok), var(--accent)); }
   .tel-spark-bar.st-timeout { background: var(--warn); }
   .tel-spark-bar.st-error { background: var(--danger); }
-  .tel-spark-lbl { font-family: var(--mono); font-size: 0.6rem; color: var(--muted); line-height: 1; }
 
   @media (max-width: 1040px) {
     .topbar { flex-wrap: wrap; }

@@ -88,7 +88,7 @@
         </div>
       </div>
 
-      <div style="display:flex;flex-direction:column;gap:0.75rem;">
+      <div style="display:flex;flex-direction:column;gap:0.75rem;min-width:0;">
         <div class="tel-box" id="telemetryEngineChart">
           <div class="tel-box-head">
             <strong>{{t .Lang "tel_by_engine_title"}}</strong>
@@ -126,12 +126,11 @@
           </div>
           <div class="tel-spark-grid">
             {{range .TelemetryViz.SparkBars}}
-              <div class="tel-spark-col" title="{{.TaskLabel}} · {{.Engine}} · {{fmtLatency .ElapsedMs}} · {{.ItemCount}} items · {{.Status}} ({{.Stamp}})">
-                <div class="tel-spark-val">{{fmtLatency .ElapsedMs}}</div>
+              <div class="tel-spark-col" tabindex="0" title="{{.TaskLabel}} · {{.Engine}} · {{fmtLatency .ElapsedMs}} · {{.ItemCount}} items · {{.Status}} ({{.Stamp}})">
+                <span class="tel-spark-tip">{{.ShortTask}} · {{fmtLatency .ElapsedMs}}</span>
                 <div class="tel-spark-track">
                   <div class="tel-spark-bar st-{{.Status}}" style="height:{{.HeightPx}}px;"></div>
                 </div>
-                <div class="tel-spark-lbl">{{.ShortTask}}</div>
               </div>
             {{end}}
           </div>
