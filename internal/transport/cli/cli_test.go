@@ -29,6 +29,7 @@ import (
 	"praxis/internal/modules/progress"
 	"praxis/internal/transport/dashboard"
 	thttp "praxis/internal/transport/http"
+	tmcp "praxis/internal/transport/mcp"
 )
 
 func TestHookTimeoutParsingAndBudgets(t *testing.T) {
@@ -850,6 +851,8 @@ func TestCLISwitchPushExportAndImportEndToEnd(t *testing.T) {
 func TestDoctorCLIReportAndJSON(t *testing.T) {
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "memories.db")
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("PRAXIS_DB_PATH", dbPath)
 	t.Setenv("PRAXIS_MODELS_DIR", filepath.Join(tmp, "models"))
 	t.Setenv("PRAXIS_DISABLE_BG_DASHBOARD", "1")
@@ -857,7 +860,7 @@ func TestDoctorCLIReportAndJSON(t *testing.T) {
 	// 1. Test doctor with --json flag
 	var report DoctorReport
 	code, out := captureStdout(t, func() int {
-		return executeArgs([]string{"doctor", "--json"}, "1.2.0-test", RuntimeHooks{})
+		return executeArgs([]string{"doctor", "--json"}, "1.3.0-test", RuntimeHooks{})
 	})
 	if code != 0 {
 		t.Fatalf("expected doctor --json exit 0, got %d. Output: %s", code, out)
@@ -865,8 +868,8 @@ func TestDoctorCLIReportAndJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("unmarshal doctor --json output failed: %v\nOutput: %s", err, out)
 	}
-	if report.Version != "1.2.0-test" {
-		t.Errorf("expected version 1.2.0-test, got %q", report.Version)
+	if report.Version != "1.3.0-test" {
+		t.Errorf("expected version 1.3.0-test, got %q", report.Version)
 	}
 	if len(report.Checks) == 0 {
 		t.Errorf("expected doctor checks to be non-empty")
@@ -884,7 +887,7 @@ func TestDoctorCLIReportAndJSON(t *testing.T) {
 
 	// 2. Test daemon doctor human-readable output
 	codeDaemon, outDaemon := captureStdout(t, func() int {
-		return executeArgs([]string{"daemon", "doctor"}, "1.2.0-test", RuntimeHooks{})
+		return executeArgs([]string{"daemon", "doctor"}, "1.3.0-test", RuntimeHooks{})
 	})
 	if codeDaemon != 0 {
 		t.Fatalf("expected daemon doctor exit 0, got %d. Output: %s", codeDaemon, outDaemon)
@@ -892,12 +895,38 @@ func TestDoctorCLIReportAndJSON(t *testing.T) {
 	if !strings.Contains(outDaemon, "[praxis doctor]") {
 		t.Errorf("expected daemon doctor output to contain header, got: %s", outDaemon)
 	}
-	if !strings.Contains(outDaemon, "v1.2.0-test") {
+	if !strings.Contains(outDaemon, "v1.3.0-test") {
 		t.Errorf("expected daemon doctor output to contain version, got: %s", outDaemon)
 	}
 	if codeDaemonJSON, outDaemonJSON := captureStdout(t, func() int {
-		return executeArgs([]string{"daemon", "doctor", "--json"}, "1.2.0-test", RuntimeHooks{})
-	}); codeDaemonJSON != 0 || !strings.Contains(outDaemonJSON, `"version":"1.2.0-test"`) {
+		return executeArgs([]string{"daemon", "doctor", "--json"}, "1.3.0-test", RuntimeHooks{})
+	}); codeDaemonJSON != 0 || !strings.Contains(outDaemonJSON, `"version":"1.3.0-test"`) {
 		t.Fatalf("expected daemon doctor --json to forward --json flag, code=%d out=%s", codeDaemonJSON, outDaemonJSON)
+	}
+
+	// 3. Test plugin SKILL.md & MCP instructions sync detection
+	pluginDir := filepath.Join(tmp, ".gemini", "config", "plugins", "praxis")
+	skillDir := filepath.Join(pluginDir, "skills", "memory-curator")
+	mcpCacheDir := filepath.Join(tmp, ".gemini", "antigravity", "mcp", "praxis_mcp")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(mcpCacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(`{"version":"1.3.0-test"}`), 0o644)
+	_ = os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("stale skill"), 0o644)
+	_ = os.WriteFile(filepath.Join(mcpCacheDir, "instructions.md"), []byte("stale mcp"), 0o644)
+
+	driftCheck := checkDoctorBinary("1.3.0-test")
+	if driftCheck.Status != "warn" || !strings.Contains(driftCheck.Detail, "SKILL.md out of date") || !strings.Contains(driftCheck.Detail, "host MCP cache out of date") {
+		t.Fatalf("expected warn on stale SKILL.md & MCP cache, got: %+v", driftCheck)
+	}
+
+	_ = os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(memory.PlaybookSkillMD), 0o644)
+	_ = os.WriteFile(filepath.Join(mcpCacheDir, "instructions.md"), []byte(tmcp.ServerInstructions), 0o644)
+	syncCheck := checkDoctorBinary("1.3.0-test")
+	if syncCheck.Status != "ok" || !strings.Contains(syncCheck.Detail, "in-sync") {
+		t.Fatalf("expected ok once SKILL.md & MCP cache match, got: %+v", syncCheck)
 	}
 }

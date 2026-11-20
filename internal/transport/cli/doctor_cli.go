@@ -18,6 +18,7 @@ import (
 	"praxis/internal/infra/sqlite"
 	"praxis/internal/modules/memory"
 	thttp "praxis/internal/transport/http"
+	tmcp "praxis/internal/transport/mcp"
 )
 
 type DoctorCheck struct {
@@ -53,7 +54,7 @@ func runDoctorCLI(args []string, dbPath, modelsDir, version string, hooks Runtim
 
 	checks := []DoctorCheck{
 		checkDoctorBinary(effVer),
-		checkDoctorDaemon(dbPath),
+		checkDoctorDaemon(dbPath, effVer),
 		checkDoctorStorage(ctx, dbPath),
 		checkDoctorGitScope(ctx),
 		checkDoctorInference(ctx, dbPath, modelsDir),
@@ -113,28 +114,41 @@ func checkDoctorBinary(version string) DoctorCheck {
 
 	homeDir, _ := os.UserHomeDir()
 	if homeDir != "" {
-		pluginPath := filepath.Join(homeDir, ".gemini", "config", "plugins", "praxis", "plugin.json")
+		pluginDir := filepath.Join(homeDir, ".gemini", "config", "plugins", "praxis")
+		pluginPath := filepath.Join(pluginDir, "plugin.json")
 		if data, err := os.ReadFile(pluginPath); err == nil {
+			var warnings []string
 			var p struct {
 				Version string `json:"version"`
 			}
+			cleanBinVer := strings.TrimPrefix(version, "v")
 			if json.Unmarshal(data, &p) == nil && p.Version != "" {
 				cleanManifestVer := strings.TrimPrefix(p.Version, "v")
-				cleanBinVer := strings.TrimPrefix(version, "v")
-				if cleanManifestVer == cleanBinVer || cleanBinVer == "dev" {
-					return DoctorCheck{
-						Category: "binary",
-						Status:   "ok",
-						Title:    title,
-						Detail:   fmt.Sprintf("v%s (%s, in-sync with Antigravity plugin)", version, exe),
-					}
+				if cleanBinVer != "dev" && cleanManifestVer != cleanBinVer {
+					warnings = append(warnings, fmt.Sprintf("plugin manifest v%s (run 'agy plugin install ./plugins/praxis')", cleanManifestVer))
 				}
+			}
+			skillPath := filepath.Join(pluginDir, "skills", "memory-curator", "SKILL.md")
+			if skillData, serr := os.ReadFile(skillPath); serr != nil || strings.TrimSpace(string(skillData)) != strings.TrimSpace(memory.PlaybookSkillMD) {
+				warnings = append(warnings, "installed SKILL.md out of date (run 'agy plugin install ./plugins/praxis')")
+			}
+			mcpInstPath := filepath.Join(homeDir, ".gemini", "antigravity", "mcp", "praxis_mcp", "instructions.md")
+			if instData, ierr := os.ReadFile(mcpInstPath); ierr == nil && strings.TrimSpace(string(instData)) != strings.TrimSpace(tmcp.ServerInstructions) {
+				warnings = append(warnings, "host MCP cache out of date (reload IDE / MCP session)")
+			}
+			if len(warnings) > 0 {
 				return DoctorCheck{
 					Category: "binary",
 					Status:   "warn",
 					Title:    title,
-					Detail:   fmt.Sprintf("binary v%s (%s) vs plugin manifest v%s (run 'agy plugin install ./plugins/praxis')", version, exe, p.Version),
+					Detail:   fmt.Sprintf("v%s (%s) — %s", cleanBinVer, exe, strings.Join(warnings, "; ")),
 				}
+			}
+			return DoctorCheck{
+				Category: "binary",
+				Status:   "ok",
+				Title:    title,
+				Detail:   fmt.Sprintf("v%s (%s, in-sync with Antigravity plugin & MCP)", cleanBinVer, exe),
 			}
 		}
 	}
@@ -143,11 +157,11 @@ func checkDoctorBinary(version string) DoctorCheck {
 		Category: "binary",
 		Status:   "ok",
 		Title:    title,
-		Detail:   fmt.Sprintf("v%s (%s)", version, exe),
+		Detail:   fmt.Sprintf("v%s (%s)", strings.TrimPrefix(version, "v"), exe),
 	}
 }
 
-func checkDoctorDaemon(dbPath string) DoctorCheck {
+func checkDoctorDaemon(dbPath, version string) DoctorCheck {
 	title := "Daemon Process"
 	st, targetAddr, ok, authReq := thttp.ProbeLiveDaemonState("", dbPath)
 	if targetAddr == "" {
@@ -172,11 +186,25 @@ func checkDoctorDaemon(dbPath string) DoctorCheck {
 		if st.DaemonFallback {
 			fallback = fmt.Sprintf(" [fallback from :%d]", st.ConfiguredDaemonPort)
 		}
+		dVer := strings.TrimPrefix(strings.TrimSpace(st.Version), "v")
+		binVer := strings.TrimPrefix(strings.TrimSpace(version), "v")
+		if dVer != "" && binVer != "" && binVer != "dev" && dVer != binVer {
+			return DoctorCheck{
+				Category: "daemon",
+				Status:   "warn",
+				Title:    title,
+				Detail:   fmt.Sprintf("running v%s on http://%s%s vs CLI v%s (pid=%d, run 'praxis daemon restart')", dVer, targetAddr, fallback, binVer, st.PID),
+			}
+		}
+		verTag := ""
+		if dVer != "" {
+			verTag = "v" + dVer + ", "
+		}
 		return DoctorCheck{
 			Category: "daemon",
 			Status:   "ok",
 			Title:    title,
-			Detail:   fmt.Sprintf("running on http://%s%s (pid=%d, uptime=%ds, healthz=%s)", targetAddr, fallback, st.PID, st.UptimeSec, healthzStr),
+			Detail:   fmt.Sprintf("running on http://%s%s (%spid=%d, uptime=%ds, healthz=%s)", targetAddr, fallback, verTag, st.PID, st.UptimeSec, healthzStr),
 		}
 	}
 	return DoctorCheck{
