@@ -12,6 +12,11 @@
   <div class="card" style="padding:1.4rem;">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;margin-bottom:0.9rem;">
       <div style="display:flex;align-items:center;gap:0.5rem;">
+        <span class="brand-mark" aria-hidden="true">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3.2 3.2h6.3a3 3 0 0 1 0 6H6.2v3.6"/><circle cx="12.2" cy="12.5" r="1.5" fill="currentColor" stroke="none"/>
+          </svg>
+        </span>
         <h1 style="margin:0;font-size:1.25rem;">praxis</h1>
         <span class="badge b-accent">{{t .Lang "login_server_badge"}}</span>
       </div>
@@ -25,7 +30,7 @@
     </p>
 
     {{if .Error}}
-      <div style="margin-bottom:0.9rem;padding:0.65rem 0.8rem;border-radius:var(--radius-sm);border:1px solid var(--danger);background:rgba(239,68,68,0.12);color:var(--danger);font-size:0.82rem;font-weight:600;" role="alert">
+      <div style="margin-bottom:0.9rem;padding:0.65rem 0.8rem;border-radius:var(--radius-sm);border:1px solid var(--danger);background:var(--danger-bg);color:var(--danger);font-size:0.82rem;font-weight:600;" role="alert">
         {{.Error}}
       </div>
     {{end}}

@@ -13,7 +13,7 @@
     <div style="font-size:0.8rem;color:var(--muted);">{{t .Lang "users_desc"}}</div>
 
     {{if .IssuedToken}}
-      <div class="sub-panel" id="issuedTokenBox" style="border-color:var(--warn);background:rgba(245,158,11,0.08);display:flex;flex-direction:column;gap:0.45rem;">
+      <div class="sub-panel" id="issuedTokenBox" style="border-color:var(--warn);background:var(--warn-bg);display:flex;flex-direction:column;gap:0.45rem;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;">
           <strong style="color:var(--warn);font-size:0.83rem;">{{t .Lang "users_issued_title"}} (@{{.IssuedAccount}} · {{.IssuedRole}})</strong>
           <span class="badge b-warn">{{t .Lang "users_shown_once"}}</span>
@@ -236,7 +236,7 @@
     <div style="font-size:0.8rem;color:var(--muted);">{{t .Lang "accounts_desc"}}</div>
 
     {{if .Error}}
-      <div class="sub-panel" style="border-color:var(--danger);background:rgba(239,68,68,0.1);color:var(--danger);font-size:0.8rem;">{{.Error}}</div>
+      <div class="sub-panel" style="border-color:var(--danger);background:var(--danger-bg);color:var(--danger);font-size:0.8rem;">{{.Error}}</div>
     {{end}}
 
     <div style="display:flex;flex-direction:column;gap:0.45rem;">

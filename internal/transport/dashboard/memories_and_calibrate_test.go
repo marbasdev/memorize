@@ -270,14 +270,14 @@ func TestSessionFilterConsolidationCapAndLanguageDropdown(t *testing.T) {
 	uiBody, _ := io.ReadAll(uiResp.Body)
 	_ = uiResp.Body.Close()
 	htmlStr := string(uiBody)
-	for _, needle := range []string{`id="langSelect"`, `<option value="en" selected>English</option>`, `<option value="ko" >한국어</option>`, `id="filterSession"`, `id="daemonBadge"`} {
+	for _, needle := range []string{`id="langSelect"`, `<option value="en" selected>English</option>`, `<option value="ko" >한국어</option>`, `id="filterSession"`, `id="daemonBadge"`, `class="brand-mark"`, `kpi-active`, `kpi-pinned`, `kpi-tomb`} {
 		if !strings.Contains(htmlStr, needle) {
 			t.Fatalf("expected UI HTML to contain %q", needle)
 		}
 	}
-	for _, forbidden := range []string{`id="btnRestartDaemon"`, `id="btnRefresh"`, `id="btnRefreshProgress"`, `id="btnRefreshCalibrate"`} {
+	for _, forbidden := range []string{`id="btnRestartDaemon"`, `id="btnRefresh"`, `id="btnRefreshProgress"`, `id="btnRefreshCalibrate"`, "📌", "🚫", "⚠️"} {
 		if strings.Contains(htmlStr, forbidden) {
-			t.Fatalf("expected UI header HTML to omit manual button %q", forbidden)
+			t.Fatalf("expected UI header HTML to omit %q", forbidden)
 		}
 	}
 	for _, assetPath := range []string{"/assets/styles.css", "/assets/ui.js"} {
@@ -289,6 +289,9 @@ func TestSessionFilterConsolidationCapAndLanguageDropdown(t *testing.T) {
 		_ = ar.Body.Close()
 		if len(ab) == 0 {
 			t.Fatalf("static asset %s returned empty body", assetPath)
+		}
+		if assetPath == "/assets/styles.css" && (!strings.Contains(string(ab), "--surface-2:") || !strings.Contains(string(ab), "#2dd4bf")) {
+			t.Fatalf("expected styles.css to define --surface-2 and Graphite+Emerald Teal accent (#2dd4bf)")
 		}
 	}
 	tplFiles, err := filepath.Glob("templates/*.html")

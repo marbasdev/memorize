@@ -1,14 +1,14 @@
 {{define "kpi_strip"}}
 <div class="kpi-strip" id="kpiStrip" aria-label="Memory Metrics" {{if .OOB}}hx-swap-oob="true"{{end}}>
-  <div class="kpi-box">
+  <div class="kpi-box kpi-active">
     <span class="kpi-lbl">{{t .Lang "kpi_active"}}</span>
     <span class="kpi-val" id="statActive">{{.Stats.ActiveCount}}</span>
   </div>
-  <div class="kpi-box">
+  <div class="kpi-box kpi-pinned">
     <span class="kpi-lbl">{{t .Lang "kpi_pinned"}}</span>
     <span class="kpi-val" id="statPinned">{{.Stats.PinnedCount}}</span>
   </div>
-  <div class="kpi-box">
+  <div class="kpi-box kpi-tomb">
     <span class="kpi-lbl">{{t .Lang "kpi_tomb"}}</span>
     <span class="kpi-val" id="statTomb">{{.Stats.TombCount}}</span>
   </div>
@@ -31,7 +31,7 @@
       <button type="button" class="pill {{if eq .Query.State "pinned"}}active{{end}}"
         hx-get="/ui/memories" hx-include="#memoryFilterForm" hx-vals='{"state":"pinned","page":"1"}'
         hx-target="#memoriesSection" hx-swap="innerHTML">
-        📌 {{t .Lang "qt_pinned"}} <span class="pill-cnt">{{.Stats.PinnedCount}}</span>
+        <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M5 2.5h6l-1 4.5 2 2v1H4V9l2-2-1-4.5Z"/><path d="M8 10v4"/></svg>{{t .Lang "qt_pinned"}} <span class="pill-cnt">{{.Stats.PinnedCount}}</span>
       </button>
       <button type="button" class="pill {{if eq .Query.State "general"}}active{{end}}"
         hx-get="/ui/memories" hx-include="#memoryFilterForm" hx-vals='{"state":"general","page":"1"}'
@@ -330,7 +330,7 @@
       <strong>{{t .Lang "dist_title"}}</strong>
       <span class="badge b-muted">{{if .Distribution.Scope}}{{.Distribution.Scope}}{{else}}{{t .Lang "all_scopes"}}{{end}} · {{.Distribution.TotalActive}}</span>
       {{if gt .Distribution.TotalPinned 0}}
-        <span class="badge b-warn">📌 {{.Distribution.TotalPinned}}</span>
+        <span class="badge b-warn"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M5 2.5h6l-1 4.5 2 2v1H4V9l2-2-1-4.5Z"/><path d="M8 10v4"/></svg>{{.Distribution.TotalPinned}}</span>
       {{end}}
       {{if gt .Distribution.UncategorizedTotal 0}}
         <span class="badge b-muted" style="border:1px dashed var(--border-strong);">({{t .Lang "dist_uncat"}}) {{.Distribution.UncategorizedTotal}}</span>

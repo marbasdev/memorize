@@ -70,7 +70,7 @@
           badge.textContent = `${prefix}PID ${st.pid} · ${fmtUptime(st.uptime_sec || 0)}`;
           const ggufInfo = st.active_gguf_port ? ` · GGUF :${st.active_gguf_port}` : '';
           badge.title = `http://${st.listen_addr || ''} (v${st.version || ''}${ggufInfo})`;
-          badge.style.display = 'inline-block';
+          badge.style.display = 'inline-flex';
         }
         return st;
       }

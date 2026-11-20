@@ -174,7 +174,7 @@
                   <input type="checkbox" name="group_idx" value="{{$idx}}" checked x-model="checked"
                     @change="enabledCount += ($event.target.checked ? 1 : -1)">
                   <span class="badge b-accent">{{$p.Category}}</span>
-                  {{if $p.Pinned}}<span class="badge b-warn">📌 Pinned</span>{{end}}
+                  {{if $p.Pinned}}<span class="badge b-warn">Pinned</span>{{end}}
                   <span class="tag-chip">{{len $p.Sources}} -&gt; 1</span>
                   {{if $p.Reason}}<span style="font-size:0.75rem;color:var(--muted);font-weight:600;">{{$p.Reason}}</span>{{end}}
                 </label>
@@ -211,7 +211,7 @@
                 <input type="checkbox" name="item_idx" value="{{$idx}}" checked x-model="checked"
                   @change="enabledCount += ($event.target.checked ? 1 : -1)">
                 <code style="color:var(--accent);font-weight:700;">#{{$it.ID}}</code>
-                {{if $it.Pinned}}<span class="badge b-warn">📌</span>{{end}}
+                {{if $it.Pinned}}<span class="badge b-warn">PIN</span>{{end}}
                 <span class="badge b-muted">{{$it.OldCategory}} / {{if $it.OldSubCategory}}{{$it.OldSubCategory}}{{else}}({{t $.Lang "dist_uncat"}}){{end}}</span>
                 <span style="color:var(--muted);font-family:var(--mono);">-&gt;</span>
                 <input name="item_{{$idx}}_cat" class="input" style="width:118px;padding:0.2rem 0.45rem;font-size:0.75rem;font-family:var(--mono);" value="{{$it.NewCategory}}" aria-label="New Category">
@@ -263,7 +263,7 @@
               <input type="checkbox" name="item_idx" value="{{$idx}}" checked x-model="checked"
                 @change="enabledCount += ($event.target.checked ? 1 : -1)">
               <code style="color:var(--accent);font-weight:700;">#{{$it.ID}}</code>
-              {{if $it.Pinned}}<span class="badge b-warn">📌</span>{{end}}
+              {{if $it.Pinned}}<span class="badge b-warn">PIN</span>{{end}}
               <span class="badge b-muted">{{$it.OldCategory}} / {{if $it.OldSubCategory}}{{$it.OldSubCategory}}{{else}}({{t $.Lang "dist_uncat"}}){{end}}</span>
               <span style="color:var(--muted);font-family:var(--mono);">-&gt;</span>
               <input name="item_{{$idx}}_cat" class="input" style="width:118px;padding:0.2rem 0.45rem;font-size:0.75rem;font-family:var(--mono);" value="{{$it.NewCategory}}" aria-label="New Category">
@@ -608,7 +608,7 @@
 
 {{define "import_preview_box"}}
 {{if .Error}}
-  <div class="sub-panel" style="border-color:var(--danger);background:rgba(239,68,68,0.1);color:var(--danger);font-size:0.8rem;">{{.Error}}</div>
+  <div class="sub-panel" style="border-color:var(--danger);background:var(--danger-bg);color:var(--danger);font-size:0.8rem;">{{.Error}}</div>
 {{else if .Preview}}
   <div class="sub-panel" style="display:flex;flex-direction:column;gap:0.55rem;">
     <div style="display:flex;gap:0.45rem;flex-wrap:wrap;align-items:center;font-size:0.78rem;">

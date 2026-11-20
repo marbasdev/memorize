@@ -96,7 +96,7 @@
         <button type="button" class="pill {{if eq .Query.State "blocked"}}active{{end}}"
           hx-get="/ui/guardrail-logs" hx-include="#guardrailFilterForm" hx-vals='{"gr_state":"blocked","gr_page":"1"}'
           hx-target="#guardrailLogsSection" hx-swap="outerHTML">
-          🚫 {{t .Lang "gr_st_blocked"}} <span class="pill-cnt">{{.Page.BlockedCount}}</span>
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M4.2 4.2l7.6 7.6"/></svg>{{t .Lang "gr_st_blocked"}} <span class="pill-cnt">{{.Page.BlockedCount}}</span>
         </button>
         <button type="button" class="pill {{if eq .Query.State "pass"}}active{{end}}"
           hx-get="/ui/guardrail-logs" hx-include="#guardrailFilterForm" hx-vals='{"gr_state":"pass","gr_page":"1"}'
@@ -132,7 +132,7 @@
           <div style="display:flex;justify-content:space-between;align-items:center;gap:0.45rem;flex-wrap:wrap;">
             <div style="display:flex;align-items:center;gap:0.38rem;flex-wrap:wrap;">
               <span class="badge {{guardrailBadge .Verdict}}">
-                {{if .Blocked}}🚫 {{else if eq .Verdict "partial"}}⚠️ {{else}}✓ {{end}}{{guardrailVerdictLabel $.Lang .Verdict}}
+                {{if .Blocked}}× {{else if eq .Verdict "partial"}}! {{else}}✓ {{end}}{{guardrailVerdictLabel $.Lang .Verdict}}
               </span>
               <span class="badge b-accent">{{.Scope}}</span>
               {{if .Account}}<span class="tag-chip">@{{.Account}}</span>{{end}}
