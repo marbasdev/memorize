@@ -1,21 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 428" width="100%" height="100%" role="img" aria-label="Praxis Console Tab 1 Memories Simulation">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 428" width="100%" height="100%" role="img" aria-label="Web Console Memories Tab Simulation">
   <style>
     .outer { fill: #090b0e; stroke: #222934; stroke-width: 1.5; }
     .topbar { fill: #101318; stroke: #222934; stroke-width: 1; }
     .card { fill: #101318; stroke: #222934; stroke-width: 1; }
     .sub { fill: #141820; stroke: #252d3a; stroke-width: 1; }
-    .sub-hi { fill: rgba(45, 212, 191, 0.10); stroke: rgba(45, 212, 191, 0.36); stroke-width: 1.2; }
-    .sub-ok { fill: rgba(16, 185, 129, 0.10); stroke: rgba(16, 185, 129, 0.45); stroke-width: 1.2; }
-    .sub-warn { fill: rgba(245, 158, 11, 0.10); stroke: rgba(245, 158, 11, 0.45); stroke-width: 1.2; }
-    .sub-err { fill: rgba(239, 68, 68, 0.10); stroke: rgba(239, 68, 68, 0.48); stroke-width: 1.2; }
+    .sub-hi { fill: rgba(45, 212, 191, 0.10); stroke: rgba(45, 212, 191, 0.42); stroke-width: 1.2; }
+    .sub-ok { fill: rgba(52, 211, 153, 0.10); stroke: rgba(52, 211, 153, 0.42); stroke-width: 1.2; }
+    .sub-warn { fill: rgba(251, 191, 36, 0.10); stroke: rgba(251, 191, 36, 0.42); stroke-width: 1.2; }
+    .sub-err { fill: rgba(248, 113, 113, 0.10); stroke: rgba(248, 113, 113, 0.45); stroke-width: 1.2; }
+    .nav-shell { fill: #101318; stroke: #222934; stroke-width: 1; }
     .pill-idle { fill: #161b22; stroke: #252d3a; stroke-width: 1; }
-    .pill-act { fill: rgba(45, 212, 191, 0.14); stroke: rgba(45, 212, 191, 0.46); stroke-width: 1.2; }
-    .b-ok { fill: rgba(16, 185, 129, 0.16); stroke: rgba(16, 185, 129, 0.45); stroke-width: 1; }
-    .b-err { fill: rgba(239, 68, 68, 0.16); stroke: rgba(239, 68, 68, 0.45); stroke-width: 1; }
-    .b-warn { fill: rgba(245, 158, 11, 0.16); stroke: rgba(245, 158, 11, 0.45); stroke-width: 1; }
-    .b-info { fill: rgba(45, 212, 191, 0.14); stroke: rgba(45, 212, 191, 0.36); stroke-width: 1; }
-    .b-mut { fill: rgba(100, 116, 139, 0.18); stroke: rgba(100, 116, 139, 0.4); stroke-width: 1; }
-    .sans { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", Roboto, sans-serif; }
+    .pill-act { fill: rgba(45, 212, 191, 0.14); stroke: rgba(45, 212, 191, 0.48); stroke-width: 1.2; }
+    .b-ok { fill: rgba(52, 211, 153, 0.14); stroke: rgba(52, 211, 153, 0.42); stroke-width: 1; }
+    .b-err { fill: rgba(248, 113, 113, 0.14); stroke: rgba(248, 113, 113, 0.42); stroke-width: 1; }
+    .b-warn { fill: rgba(251, 191, 36, 0.14); stroke: rgba(251, 191, 36, 0.42); stroke-width: 1; }
+    .b-info { fill: rgba(45, 212, 191, 0.13); stroke: rgba(45, 212, 191, 0.38); stroke-width: 1; }
+    .b-mut { fill: #161b22; stroke: #283140; stroke-width: 1; }
+    .sans { font-family: "Inter", "Pretendard", -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
     .mono { font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; }
     .t-pri { fill: #eef2f6; }
     .t-sec { fill: #8b95a5; }
@@ -25,8 +26,6 @@
     .t-warn { fill: #fbbf24; }
     .t-err { fill: #f87171; }
     .btn-pri { fill: #0f766e; stroke: #2dd4bf; stroke-width: 1; }
-
-    /* 12s loop across 3 frames (4s per frame) */
     .f1, .f2, .f3 { opacity: 0; }
     .f1 { animation: loop1 12s infinite; }
     .f2 { animation: loop2 12s infinite; }
@@ -34,172 +33,169 @@
     @keyframes loop1 { 0%, 31% { opacity: 1; } 34%, 100% { opacity: 0; } }
     @keyframes loop2 { 0%, 32% { opacity: 0; } 34%, 65% { opacity: 1; } 68%, 100% { opacity: 0; } }
     @keyframes loop3 { 0%, 66% { opacity: 0; } 68%, 98% { opacity: 1; } 100% { opacity: 0; } }
-  </style>
+</style>
   <rect class="outer" x="1" y="1" width="998" height="426" rx="12" />
   <rect class="topbar" x="1" y="1" width="998" height="46" rx="12" />
   <rect x="1" y="34" width="998" height="13" fill="#101318" />
   <line x1="1" y1="47" x2="999" y2="47" stroke="#222934" stroke-width="1" />
 
-  <!-- Brand + Port -->
-  <rect class="b-info" x="16" y="12" width="136" height="24" rx="5" />
-  <text x="84" y="28" text-anchor="middle" class="mono t-acc" font-size="11" font-weight="700">praxis :18095</text>
+  <!-- Geometric Brand Mark + Live Daemon Badge -->
+  <rect class="b-info" x="16" y="12" width="24" height="24" rx="6" />
+  <path d="M22.5 18.5h6a2.8 2.8 0 0 1 0 5.6h-3.2v3.4" fill="none" stroke="#2dd4bf" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="31.2" cy="27.2" r="1.4" fill="#2dd4bf" />
+  <text x="48" y="28.5" class="mono t-pri" font-size="13" font-weight="700">praxis</text>
+  <rect class="b-mut" x="104" y="13" width="84" height="22" rx="5" />
+  <circle cx="116" cy="24" r="3" fill="#34d399" />
+  <text x="151" y="27.5" text-anchor="middle" class="mono t-sec" font-size="10" font-weight="600">:18095</text>
 
-  <!-- 5 Console Tabs -->
-  <rect class="pill-act" x="166" y="12" width="104" height="24" rx="5" />
-  <text x="218.0" y="28" text-anchor="middle" class="sans t-acc" font-size="11" font-weight="700">Memories</text>
-  <rect class="pill-idle" x="278" y="12" width="96" height="24" rx="5" />
-  <text x="326.0" y="28" text-anchor="middle" class="sans t-sec" font-size="11" font-weight="600">Progress</text>
-  <rect class="pill-idle" x="382" y="12" width="102" height="24" rx="5" />
-  <text x="433.0" y="28" text-anchor="middle" class="sans t-sec" font-size="11" font-weight="600">Guardrails</text>
-  <rect class="pill-idle" x="492" y="12" width="92" height="24" rx="5" />
-  <text x="538.0" y="28" text-anchor="middle" class="sans t-sec" font-size="11" font-weight="600">Engines</text>
-  <rect class="pill-idle" x="592" y="12" width="134" height="24" rx="5" />
-  <text x="659.0" y="28" text-anchor="middle" class="sans t-sec" font-size="11" font-weight="600">Calibration &amp; Test</text>
+  <!-- 6 Console Tabs -->
+  <rect class="pill-act" x="204" y="12" width="78" height="24" rx="5" />
+  <text x="243.0" y="28" text-anchor="middle" class="sans t-acc" font-size="10.5" font-weight="700">Memories</text>
+  <rect class="pill-idle" x="288" y="12" width="86" height="24" rx="5" />
+  <text x="331.0" y="28" text-anchor="middle" class="sans t-sec" font-size="10.5" font-weight="600">Team Rules</text>
+  <rect class="pill-idle" x="380" y="12" width="76" height="24" rx="5" />
+  <text x="418.0" y="28" text-anchor="middle" class="sans t-sec" font-size="10.5" font-weight="600">Progress</text>
+  <rect class="pill-idle" x="462" y="12" width="82" height="24" rx="5" />
+  <text x="503.0" y="28" text-anchor="middle" class="sans t-sec" font-size="10.5" font-weight="600">Guardrails</text>
+  <rect class="pill-idle" x="550" y="12" width="72" height="24" rx="5" />
+  <text x="586.0" y="28" text-anchor="middle" class="sans t-sec" font-size="10.5" font-weight="600">Engines</text>
+  <rect class="pill-idle" x="628" y="12" width="122" height="24" rx="5" />
+  <text x="689.0" y="28" text-anchor="middle" class="sans t-sec" font-size="10.5" font-weight="600">Calibration &amp; Test</text>
 
-  <!-- Topbar right indicator -->
-  <rect class="b-mut" x="836" y="12" width="148" height="24" rx="5" />
-  <text x="910" y="28" text-anchor="middle" class="mono t-sec" font-size="10.2" font-weight="600">AUTO-PLAY · 4s/step</text>
-
+  <!-- Step Indicator -->
+  <rect class="b-mut" x="844" y="12" width="140" height="24" rx="5" />
+  <text x="914" y="27.5" text-anchor="middle" class="mono t-sec" font-size="9.8" font-weight="600">Auto-Play · 4s/step</text>
   <rect class="sub" x="16" y="58" width="314" height="28" rx="6" />
-  <g class="f1">
-    <rect class="sub-hi" x="16" y="58" width="314" height="28" rx="6" />
-  </g>
-  <text x="173" y="76" text-anchor="middle" class="sans t-pri" font-size="11" font-weight="600">Step 1: Scope Filter &amp; 2D Treemap</text>
+  <g class="f1"><rect class="sub-hi" x="16" y="58" width="314" height="28" rx="6" /></g>
+  <text x="173" y="76" text-anchor="middle" class="sans t-pri" font-size="10.8" font-weight="600">Step 1: Scope Filter &amp; 2D Treemap</text>
   <rect class="sub" x="343" y="58" width="314" height="28" rx="6" />
-  <g class="f2">
-    <rect class="sub-hi" x="343" y="58" width="314" height="28" rx="6" />
-  </g>
-  <text x="500" y="76" text-anchor="middle" class="sans t-pri" font-size="11" font-weight="600">Step 2: Pin Rule / Toggle Personal</text>
+  <g class="f2"><rect class="sub-hi" x="343" y="58" width="314" height="28" rx="6" /></g>
+  <text x="500" y="76" text-anchor="middle" class="sans t-pri" font-size="10.8" font-weight="600">Step 2: Pin Core Rule &amp; Overlay Personal</text>
   <rect class="sub" x="670" y="58" width="314" height="28" rx="6" />
-  <g class="f3">
-    <rect class="sub-hi" x="670" y="58" width="314" height="28" rx="6" />
-  </g>
-  <text x="827" y="76" text-anchor="middle" class="sans t-pri" font-size="11" font-weight="600">Step 3: AI Duplicate Merge</text>
+  <g class="f3"><rect class="sub-hi" x="670" y="58" width="314" height="28" rx="6" /></g>
+  <text x="827" y="76" text-anchor="middle" class="sans t-pri" font-size="10.8" font-weight="600">Step 3: AI Consolidation (Lineage Kept)</text>
 
-  <!-- KPI Row (Animated counters in Frame 2 & 3) -->
+  <!-- KPI Strip with Semantic Left Accent Bars -->
   <rect class="card" x="16" y="96" width="170" height="52" rx="7" />
-  <text x="28" y="114" class="sans t-sec" font-size="10.5">Active</text>
-  <text x="28" y="138" class="mono t-ok f1" font-size="18" font-weight="700">14</text>
-  <text x="28" y="138" class="mono t-ok f2" font-size="18" font-weight="700">15</text>
-  <text x="28" y="138" class="mono t-ok f3" font-size="18" font-weight="700">14</text>
+  <rect x="16" y="96" width="3.5" height="52" rx="2" fill="#2dd4bf" />
+  <text x="30" y="114" class="sans t-sec" font-size="10.2">Active Rules</text>
+  <text x="30" y="138" class="mono t-acc f1" font-size="18" font-weight="700">14</text>
+  <text x="30" y="138" class="mono t-acc f2" font-size="18" font-weight="700">15</text>
+  <text x="30" y="138" class="mono t-acc f3" font-size="18" font-weight="700">14</text>
 
   <rect class="card" x="196" y="96" width="170" height="52" rx="7" />
-  <text x="208" y="114" class="sans t-sec" font-size="10.5">Pinned</text>
-  <text x="208" y="138" class="mono t-warn f1" font-size="18" font-weight="700">3</text>
-  <text x="208" y="138" class="mono t-warn f2" font-size="18" font-weight="700">4</text>
-  <text x="208" y="138" class="mono t-warn f3" font-size="18" font-weight="700">4</text>
+  <rect x="196" y="96" width="3.5" height="52" rx="2" fill="#fbbf24" />
+  <text x="210" y="114" class="sans t-sec" font-size="10.2">Core Rules</text>
+  <text x="210" y="138" class="mono t-warn f1" font-size="18" font-weight="700">3</text>
+  <text x="210" y="138" class="mono t-warn f2" font-size="18" font-weight="700">4</text>
+  <text x="210" y="138" class="mono t-warn f3" font-size="18" font-weight="700">4</text>
 
   <rect class="card" x="376" y="96" width="170" height="52" rx="7" />
-  <text x="388" y="114" class="sans t-sec" font-size="10.5">Tombstones</text>
-  <text x="388" y="138" class="mono t-sec f1" font-size="18" font-weight="700">4</text>
-  <text x="388" y="138" class="mono t-sec f2" font-size="18" font-weight="700">4</text>
-  <text x="388" y="138" class="mono t-acc f3" font-size="18" font-weight="700">6</text>
+  <text x="390" y="114" class="sans t-sec" font-size="10.2">Tombstones</text>
+  <text x="390" y="138" class="mono t-sec f1" font-size="18" font-weight="700">4</text>
+  <text x="390" y="138" class="mono t-sec f2" font-size="18" font-weight="700">4</text>
+  <text x="390" y="138" class="mono t-sec f3" font-size="18" font-weight="700">6</text>
 
-  <!-- Right Action Bar -->
+  <!-- Toolbar -->
   <rect class="card" x="556" y="96" width="428" height="52" rx="7" />
-  <rect class="sub" x="568" y="110" width="18" height="18" rx="3" />
-  <g class="f2"><rect class="b-info" x="568" y="110" width="18" height="18" rx="3" /><path d="M572 119 L576 123 L582 115" fill="none" stroke="#2dd4bf" stroke-width="2" /></g>
-  <g class="f3"><rect class="b-info" x="568" y="110" width="18" height="18" rx="3" /><path d="M572 119 L576 123 L582 115" fill="none" stroke="#2dd4bf" stroke-width="2" /></g>
-  <text x="593" y="123" class="sans t-pri" font-size="10.5">Read Personal in Projects</text>
+  <rect class="sub" x="568" y="113" width="16" height="16" rx="3" />
+  <g class="f2"><rect class="b-info" x="568" y="113" width="16" height="16" rx="3" /><path d="M571.5 121 L574.8 124.2 L580.5 117.5" fill="none" stroke="#2dd4bf" stroke-width="1.9" /></g>
+  <g class="f3"><rect class="b-info" x="568" y="113" width="16" height="16" rx="3" /><path d="M571.5 121 L574.8 124.2 L580.5 117.5" fill="none" stroke="#2dd4bf" stroke-width="1.9" /></g>
+  <text x="591" y="125" class="sans t-pri" font-size="10.2">Include personal notes in project</text>
+  <rect class="btn-pri" x="796" y="110" width="84" height="24" rx="5" />
+  <text x="838" y="125.5" text-anchor="middle" class="sans t-pri" font-size="10.2" font-weight="700">+ Add Rule</text>
+  <rect class="pill-idle f1" x="888" y="110" width="86" height="24" rx="5" />
+  <rect class="pill-idle f2" x="888" y="110" width="86" height="24" rx="5" />
+  <rect class="pill-act f3" x="888" y="110" width="86" height="24" rx="5" />
+  <text x="931" y="125.5" text-anchor="middle" class="sans t-pri" font-size="10.2" font-weight="600">Consolidate...</text>
 
-  <rect class="btn-pri" x="806" y="109" width="76" height="24" rx="5" />
-  <text x="844" y="125" text-anchor="middle" class="sans t-pri" font-size="10.5" font-weight="700">+ Add</text>
-  <rect class="pill-idle f1" x="890" y="109" width="84" height="24" rx="5" />
-  <rect class="pill-idle f2" x="890" y="109" width="84" height="24" rx="5" />
-  <rect class="pill-act f3" x="890" y="109" width="84" height="24" rx="5" />
-  <text x="932" y="125" text-anchor="middle" class="sans t-pri" font-size="10.5" font-weight="600">AI Merge</text>
+  <!-- Left: 2D Treemap -->
+  <rect class="card" x="16" y="158" width="344" height="254" rx="8" />
+  <text x="28" y="180" class="sans t-pri" font-size="11.2" font-weight="700">Category · Sub-Category Treemap</text>
+  <rect class="b-info" x="28" y="192" width="188" height="138" rx="5" />
+  <text x="38" y="212" class="mono t-acc" font-size="10.2" font-weight="700">architecture / engine</text>
+  <text x="38" y="229" class="mono t-sec" font-size="10">42% · 6</text>
+  <rect class="b-ok" x="222" y="192" width="126" height="138" rx="5" />
+  <text x="230" y="212" class="mono t-ok" font-size="9.8" font-weight="700">security / auth</text>
+  <text x="230" y="229" class="mono t-sec" font-size="10">29% · 4</text>
+  <rect class="b-warn" x="28" y="336" width="206" height="62" rx="5" />
+  <text x="38" y="361" class="mono t-warn" font-size="10.2" font-weight="700">testing / go (21%)</text>
+  <rect class="b-mut" x="240" y="336" width="108" height="62" rx="5" />
+  <text x="248" y="361" class="mono t-sec" font-size="9.8" font-weight="700">conv (8%)</text>
 
-  <!-- Left Card: 2D Squarified Treemap -->
-  <rect class="card" x="16" y="158" width="350" height="254" rx="8" />
-  <text x="28" y="180" class="sans t-pri" font-size="11.5" font-weight="700">Scope Distribution (2D Treemap)</text>
-  <rect class="b-info" x="28" y="192" width="194" height="140" rx="5" />
-  <text x="38" y="212" class="mono t-acc" font-size="10.5" font-weight="700">arch / build</text>
-  <text x="38" y="229" class="mono t-sec" font-size="10">42%</text>
-  <rect class="b-ok" x="228" y="192" width="124" height="140" rx="5" />
-  <text x="236" y="212" class="mono t-ok" font-size="10" font-weight="700">security / auth</text>
-  <text x="236" y="229" class="mono t-sec" font-size="10">31%</text>
-  <rect class="b-warn" x="28" y="338" width="212" height="60" rx="5" />
-  <text x="38" y="362" class="mono t-warn" font-size="10.5" font-weight="700">testing (18%)</text>
-  <rect class="b-mut" x="246" y="338" width="106" height="60" rx="5" />
-  <text x="254" y="362" class="mono t-sec" font-size="10" font-weight="700">pref (9%)</text>
+  <!-- Right: Rule Table -->
+  <rect class="card" x="370" y="158" width="614" height="254" rx="8" />
+  <rect class="sub" x="382" y="170" width="590" height="26" rx="4" />
+  <text x="394" y="187" class="mono t-mut" font-size="9.8" font-weight="700">ID</text>
+  <text x="436" y="187" class="mono t-mut" font-size="9.8" font-weight="700">SCOPE</text>
+  <text x="554" y="187" class="mono t-mut" font-size="9.8" font-weight="700">STATE</text>
+  <text x="632" y="187" class="mono t-mut" font-size="9.8" font-weight="700">RULE</text>
 
-  <!-- Right Card: Memory Table -->
-  <rect class="card" x="376" y="158" width="608" height="254" rx="8" />
-  <rect class="sub" x="388" y="170" width="584" height="26" rx="4" />
-  <text x="400" y="187" class="mono t-mut" font-size="10" font-weight="700">ID</text>
-  <text x="444" y="187" class="mono t-mut" font-size="10" font-weight="700">SCOPE</text>
-  <text x="556" y="187" class="mono t-mut" font-size="10" font-weight="700">STATE</text>
-  <text x="634" y="187" class="mono t-mut" font-size="10" font-weight="700">CONTENT</text>
+  <rect class="sub" x="382" y="202" width="590" height="34" rx="5" />
+  <text x="394" y="223" class="mono t-pri" font-size="10.2">#1</text>
+  <text x="436" y="223" class="mono t-acc" font-size="10.2">project:praxis</text>
+  <rect class="b-warn" x="554" y="210" width="62" height="18" rx="4" />
+  <text x="585" y="222.5" text-anchor="middle" class="mono t-warn" font-size="9.2" font-weight="700">CORE</text>
+  <text x="632" y="223" class="sans t-pri" font-size="10.8">Keep pure-Go static builds (CGO_ENABLED=0)</text>
 
-  <!-- Row #1 (Static across steps) -->
-  <rect class="sub" x="388" y="202" width="584" height="34" rx="5" />
-  <text x="400" y="223" class="mono t-pri" font-size="10.5">#1</text>
-  <text x="444" y="223" class="mono t-acc" font-size="10.5">project:app</text>
-  <rect class="b-warn" x="556" y="210" width="60" height="18" rx="4" />
-  <text x="586" y="223" text-anchor="middle" class="mono t-warn" font-size="9.5" font-weight="700">PINNED</text>
-  <text x="634" y="223" class="sans t-pri" font-size="11">Never use CGO in Go builds</text>
-
-  <!-- Frame 1: Regular Rows #4, #7, #9 -->
   <g class="f1">
-    <rect class="sub" x="388" y="242" width="584" height="34" rx="5" />
-    <text x="400" y="263" class="mono t-pri" font-size="10.5">#4</text>
-    <text x="444" y="263" class="mono t-acc" font-size="10.5">project:app</text>
-    <rect class="b-ok" x="556" y="250" width="60" height="18" rx="4" />
-    <text x="586" y="263" text-anchor="middle" class="mono t-ok" font-size="9.5" font-weight="700">ACTIVE</text>
-    <text x="634" y="263" class="sans t-pri" font-size="11">Use HttpOnly session cookies</text>
+    <rect class="sub" x="382" y="242" width="590" height="34" rx="5" />
+    <text x="394" y="263" class="mono t-pri" font-size="10.2">#4</text>
+    <text x="436" y="263" class="mono t-acc" font-size="10.2">project:praxis</text>
+    <rect class="b-ok" x="554" y="250" width="62" height="18" rx="4" />
+    <text x="585" y="262.5" text-anchor="middle" class="mono t-ok" font-size="9.2" font-weight="700">ACTIVE</text>
+    <text x="632" y="263" class="sans t-pri" font-size="10.8">Use signed HttpOnly cookies for session auth</text>
 
-    <rect class="sub" x="388" y="282" width="584" height="34" rx="5" />
-    <text x="400" y="303" class="mono t-pri" font-size="10.5">#7</text>
-    <text x="444" y="303" class="mono t-acc" font-size="10.5">project:app</text>
-    <rect class="b-ok" x="556" y="290" width="60" height="18" rx="4" />
-    <text x="586" y="303" text-anchor="middle" class="mono t-ok" font-size="9.5" font-weight="700">ACTIVE</text>
-    <text x="634" y="303" class="sans t-pri" font-size="11">Prefer table-driven unit tests</text>
+    <rect class="sub" x="382" y="282" width="590" height="34" rx="5" />
+    <text x="394" y="303" class="mono t-pri" font-size="10.2">#7</text>
+    <text x="436" y="303" class="mono t-acc" font-size="10.2">project:praxis</text>
+    <rect class="b-ok" x="554" y="290" width="62" height="18" rx="4" />
+    <text x="585" y="302.5" text-anchor="middle" class="mono t-ok" font-size="9.2" font-weight="700">ACTIVE</text>
+    <text x="632" y="303" class="sans t-pri" font-size="10.8">Write unit tests as table-driven subtests</text>
 
-    <rect class="sub" x="388" y="322" width="584" height="34" rx="5" />
-    <text x="400" y="343" class="mono t-pri" font-size="10.5">#9</text>
-    <text x="444" y="343" class="mono t-acc" font-size="10.5">project:app</text>
-    <rect class="b-ok" x="556" y="330" width="60" height="18" rx="4" />
-    <text x="586" y="343" text-anchor="middle" class="mono t-ok" font-size="9.5" font-weight="700">ACTIVE</text>
-    <text x="634" y="343" class="sans t-pri" font-size="11">Group unit test cases as table specs</text>
+    <rect class="sub" x="382" y="322" width="590" height="34" rx="5" />
+    <text x="394" y="343" class="mono t-pri" font-size="10.2">#9</text>
+    <text x="436" y="343" class="mono t-acc" font-size="10.2">project:praxis</text>
+    <rect class="b-ok" x="554" y="330" width="62" height="18" rx="4" />
+    <text x="585" y="342.5" text-anchor="middle" class="mono t-ok" font-size="9.2" font-weight="700">ACTIVE</text>
+    <text x="632" y="343" class="sans t-pri" font-size="10.8">Reuse table-driven test specs in domain files</text>
   </g>
 
-  <!-- Frame 2: #4 promoted to PINNED + #12 personal injected -->
   <g class="f2">
-    <rect class="sub-hi" x="388" y="242" width="584" height="34" rx="5" />
-    <text x="400" y="263" class="mono t-pri" font-size="10.5">#4</text>
-    <text x="444" y="263" class="mono t-acc" font-size="10.5">project:app</text>
-    <rect class="b-warn" x="556" y="250" width="60" height="18" rx="4" />
-    <text x="586" y="263" text-anchor="middle" class="mono t-warn" font-size="9.5" font-weight="700">PINNED</text>
-    <text x="634" y="263" class="sans t-pri" font-size="11" font-weight="600">Use HttpOnly session cookies</text>
+    <rect class="sub-hi" x="382" y="242" width="590" height="34" rx="5" />
+    <text x="394" y="263" class="mono t-pri" font-size="10.2">#4</text>
+    <text x="436" y="263" class="mono t-acc" font-size="10.2">project:praxis</text>
+    <rect class="b-warn" x="554" y="250" width="62" height="18" rx="4" />
+    <text x="585" y="262.5" text-anchor="middle" class="mono t-warn" font-size="9.2" font-weight="700">CORE</text>
+    <text x="632" y="263" class="sans t-pri" font-size="10.8" font-weight="600">Use signed HttpOnly cookies for session auth</text>
 
-    <rect class="sub-ok" x="388" y="282" width="584" height="34" rx="5" />
-    <text x="400" y="303" class="mono t-ok" font-size="10.5">#12</text>
-    <text x="444" y="303" class="mono t-ok" font-size="10.5">personal</text>
-    <rect class="b-ok" x="556" y="290" width="60" height="18" rx="4" />
-    <text x="586" y="303" text-anchor="middle" class="mono t-ok" font-size="9.5" font-weight="700">INCLUDED</text>
-    <text x="634" y="303" class="sans t-ok" font-size="11" font-weight="600">Peanut allergy — exclude peanut oil</text>
+    <rect class="sub-ok" x="382" y="282" width="590" height="34" rx="5" />
+    <text x="394" y="303" class="mono t-ok" font-size="10.2">#12</text>
+    <text x="436" y="303" class="mono t-ok" font-size="10.2">personal</text>
+    <rect class="b-ok" x="554" y="290" width="62" height="18" rx="4" />
+    <text x="585" y="302.5" text-anchor="middle" class="mono t-ok" font-size="9.0" font-weight="700">OVERLAY</text>
+    <text x="632" y="303" class="sans t-ok" font-size="10.8" font-weight="600">Lead with the conclusion in concise Markdown</text>
   </g>
 
-  <!-- Frame 3: AI Merge Result Banner & Merged Rule #15 -->
   <g class="f3">
-    <rect class="sub" x="388" y="242" width="584" height="34" rx="5" />
-    <text x="400" y="263" class="mono t-pri" font-size="10.5">#4</text>
-    <text x="444" y="263" class="mono t-acc" font-size="10.5">project:app</text>
-    <rect class="b-warn" x="556" y="250" width="60" height="18" rx="4" />
-    <text x="586" y="263" text-anchor="middle" class="mono t-warn" font-size="9.5" font-weight="700">PINNED</text>
-    <text x="634" y="263" class="sans t-pri" font-size="11">Use HttpOnly session cookies</text>
+    <rect class="sub" x="382" y="242" width="590" height="34" rx="5" />
+    <text x="394" y="263" class="mono t-pri" font-size="10.2">#4</text>
+    <text x="436" y="263" class="mono t-acc" font-size="10.2">project:praxis</text>
+    <rect class="b-warn" x="554" y="250" width="62" height="18" rx="4" />
+    <text x="585" y="262.5" text-anchor="middle" class="mono t-warn" font-size="9.2" font-weight="700">CORE</text>
+    <text x="632" y="263" class="sans t-pri" font-size="10.8">Use signed HttpOnly cookies for session auth</text>
 
-    <rect class="sub-ok" x="388" y="282" width="584" height="34" rx="5" />
-    <text x="400" y="303" class="mono t-ok" font-size="10.5">#15</text>
-    <text x="444" y="303" class="mono t-acc" font-size="10.5">project:app</text>
-    <rect class="b-info" x="556" y="290" width="60" height="18" rx="4" />
-    <text x="586" y="303" text-anchor="middle" class="mono t-acc" font-size="9.5" font-weight="700">MERGED</text>
-    <text x="634" y="303" class="sans t-ok" font-size="11" font-weight="600">[#15] Use table-driven Go unit tests</text>
+    <rect class="sub-ok" x="382" y="282" width="590" height="34" rx="5" />
+    <text x="394" y="303" class="mono t-ok" font-size="10.2">#15</text>
+    <text x="436" y="303" class="mono t-acc" font-size="10.2">project:praxis</text>
+    <rect class="b-info" x="554" y="290" width="62" height="18" rx="4" />
+    <text x="585" y="302.5" text-anchor="middle" class="mono t-acc" font-size="9.2" font-weight="700">MERGED</text>
+    <text x="632" y="303" class="sans t-ok" font-size="10.4" font-weight="600">[#15] Consolidate tests into table-driven subtests (Replaces #7, #9)</text>
 
-    <rect class="sub-hi" x="388" y="328" width="584" height="70" rx="6" />
-    <text x="404" y="352" class="sans t-acc" font-size="11.5" font-weight="700">AI Duplicate Merge Proposal</text>
-    <text x="404" y="376" class="sans t-pri" font-size="11">Merge #7 + #9 -&gt; Keep unified rule #15</text>
-    <rect class="btn-pri" x="866" y="356" width="92" height="26" rx="5" />
-    <text x="912" y="373" text-anchor="middle" class="sans t-pri" font-size="10.5" font-weight="700">Apply Merge</text>
+    <rect class="sub-hi" x="382" y="328" width="590" height="70" rx="6" />
+    <text x="398" y="352" class="sans t-acc" font-size="11.2" font-weight="700">AI Consolidation Proposal</text>
+    <text x="398" y="376" class="sans t-pri" font-size="10.6">Merge overlapping #7 + #9 → single rule #15 (Replaces lineage preserved)</text>
+    <rect class="btn-pri" x="866" y="352" width="92" height="26" rx="5" />
+    <text x="912" y="369" text-anchor="middle" class="sans t-pri" font-size="10.2" font-weight="700">Apply Merge</text>
   </g>
 </svg>

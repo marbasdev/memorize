@@ -2,135 +2,137 @@
 
 [한국어 (README.ko.md)](./README.ko.md) · [Team & Multi-Device Guide](./TEAM.md) · [Architecture Reference](./ARCHITECTURE.md) · [AI-First Setup Guide](./guides/AI_SETUP.md)
 
-**Stateful Memory & Execution Harness for AI Coding Agents — doesn't just recall rules; enforces your latest decisions across code and shell execution.**
+**An AI coding harness that doesn't just recall rules—it enforces your latest decisions across code and shell execution.**
 
-_Ships as a **single zero-dependency Go binary** powering **Claude Code · Antigravity · generic MCP clients** and a built-in **Web Console** with no Python, Node, or external vector DB._
+_Runs as a **single zero-dependency Go binary** powering **Claude Code · Antigravity · generic MCP clients** and a built-in **Web Console** with no Python, Node, or external vector DB._
 
 ---
 
-## Why `praxis` over Static Files & Memory MCPs?
+## How `praxis` Is Different
 
-Most memory MCPs only help an agent **recall** past notes—if the agent forgets to call the tool, nothing happens, and even recalled rules are never enforced when writing code. Static `CLAUDE.md` files burn tokens every turn while clashing with newer decisions made in chat.
+Generic memory MCPs only let an agent **recall** past notes when it remembers to call a tool, and static `CLAUDE.md` files burn tokens every turn without stopping the agent from ignoring your rules in code.
 
-`praxis` wraps the agent lifecycle with hooks to **automatically maintain only the latest truth and block or self-correct violations at execution time**:
+`praxis` wraps the agent lifecycle with hooks—**without manual file edits or `"remember this"` prompts**—to handle three jobs automatically:
+
+1. **Overwrite Stale Rules Immediately**: When a decision changes in chat, `praxis` retires the superseded rule before code is touched and automatically restores active rules after `/compact`.
+2. **Inject Only Unsent Deltas**: Instead of re-sending your entire rulebook every turn, only newly relevant, unsent rules are injected—zero repeat-turn token waste or latency.
+3. **Block Bad Commands & Self-Correct Diffs**: Unsafe shell commands are blocked upfront, while file edits flow uninterrupted and are **verified once at turn end so the agent fixes any rule violation on its own** _(backed by `git pre-commit`)_.
+
+![Without praxis vs With praxis session comparison](./assets/overview.svg)
 
 | Dimension | `CLAUDE.md` · Generic Memory MCPs | `praxis` |
 | :--- | :--- | :--- |
-| **Usability (Zero Manual Chore)** | Relies on `"remember this"`, manual file edits, or explicit tool calls | **Just chat naturally** — captures updates automatically and gates edits until new decisions are saved |
-| **Conflict & Compaction Safety** | Stale notes pile up beside new ones; `/compact` drops early rules | **New decisions atomically overwrite & retire old rules**; auto-restores after `/compact` |
-| **Token & Speed Efficiency** | Re-reads whole files every turn or suffers tool round-trips & `TOP-K` misses | **Injects only unsent deltas (`0` inference on repeat turns)** with zero per-edit stalls |
-| **Execution Enforcement** | Advisory only — cannot stop a bad shell command or rule-breaking edit | **Blocks unsafe shell commands upfront** + **auto-fixes violating diffs at turn end** + `git pre-commit` |
-| **Cross-Agent Continuity** | Rules fragment across tools (`CLAUDE.md`, `.cursorrules`, separate MCPs) | **Switch freely between Claude Code, Antigravity & Cursor** sharing one live rule DB |
-| **Setup & Footprint** | Python/Node runtimes, external vector/graph DBs, cold-start overhead | **Single static binary (`0` external dependencies)** · auto-spawning daemon + Web Console |
-
-| Integration Mode | Supported Clients | Capabilities |
-| :--- | :--- | :--- |
-| **Agent Plugin** _(MCP + Hooks)_ | **Claude Code** · **Antigravity** | Per-turn delta injection · pre-mutate rule gate · upfront shell block · turn-end auto-fix · `pre-commit` |
-| **Universal MCP Server** | **Cursor** · **Windsurf** · **Claude Desktop** & others | Connects over `stdio` or Streamable HTTP (`/mcp`) sharing the same DB, Web Console, evaluator & MCP tools |
-
-![Real-world session comparison: Without praxis vs With praxis](./assets/overview.svg)
+| **Usability** | Depends on manual file edits or hoping the agent calls a tool | **Just chat naturally** — captures updates and gates edits until new decisions are saved |
+| **Rule Consistency** | Old notes pile up beside new ones; `/compact` drops early agreements | **New decisions atomically overwrite & retire old rules**; auto-restores after compaction |
+| **Token & Speed Efficiency** | Re-reads whole files every turn or suffers tool round-trips & misses | **Delta-only injection (`0` inference on repeat turns)** · zero per-edit stalls |
+| **Enforcement** | Advisory only — cannot stop a bad shell command or rule-breaking edit | **Upfront shell block** + **turn-end diff auto-fix** + `git pre-commit` gate |
+| **Cross-Agent Continuity** | Rules fragment across tools (`CLAUDE.md`, `.cursorrules`, separate MCPs) | **Switch freely between Claude Code, Antigravity & Cursor** on one shared live DB |
+| **Install & Footprint** | Requires Python/Node runtimes or external vector/graph databases | **Single static binary (`0` external deps)** · auto-spawns background daemon & Web Console |
 
 ---
 
 ## Quick Start
 
 > [!TIP]
-> **1-Prompt AI Setup**: Paste this prompt into your coding agent to let it install `praxis`, verify health via `praxis doctor`, and guide initial project onboarding automatically:
+> **1-Prompt AI Setup**: Paste this into your coding agent to let it install `praxis`, verify health via `praxis doctor`, and walk through initial onboarding automatically:
 > ```text
 > Please set up and configure praxis for this project following guides/AI_SETUP.md. Run praxis doctor to verify health, confirm the inference engine, and guide me through initial onboarding.
 > ```
 
-### 1. Install & Verify
+### 1. Install Your Client
 
-**Claude Code** _(macOS · Linux)_
-```bash
-/plugin marketplace add https://github.com/marbasdev/praxis.git
-/plugin install praxis@praxis-marketplace
-```
+- **Agent Plugin (Claude Code · Antigravity — _full lifecycle hooks + guardrails + MCP_)**
+  ```bash
+  # Claude Code (macOS · Linux)
+  /plugin marketplace add https://github.com/marbasdev/praxis.git
+  /plugin install praxis@praxis-marketplace
 
-**Antigravity (`agy`)** _(macOS · Linux)_
-```bash
-git clone https://github.com/marbasdev/praxis.git && cd praxis
-agy plugin install ./plugins/praxis
-```
+  # Antigravity (macOS · Linux)
+  git clone https://github.com/marbasdev/praxis.git && cd praxis
+  agy plugin install ./plugins/praxis
+  ```
 
-**Standalone Binary · Windows · Generic MCP Clients** _(Cursor · Windsurf · Claude Desktop)_
-```bash
-CGO_ENABLED=0 go build -trimpath -o bin/praxis ./cmd/praxis
-```
-Register `./plugins/praxis/scripts/run-praxis.sh` (auto-sync wrapper on macOS/Linux), `bin/praxis` (`praxis.exe`), or `http://127.0.0.1:18095/mcp` in your client's MCP config. Run the built-in diagnostic anytime:
-```bash
-praxis doctor
-```
+- **Universal MCP Clients · Windows (Cursor · Windsurf · Claude Desktop — _shared DB + Web Console + MCP tools_)**
+  ```bash
+  CGO_ENABLED=0 go build -trimpath -o bin/praxis ./cmd/praxis
+  ```
+  Register `./plugins/praxis/scripts/run-praxis.sh` (auto-sync wrapper on macOS/Linux), `bin/praxis` (`praxis.exe`), or `http://127.0.0.1:18095/mcp` in your client's MCP config. Verify health anytime with:
+  ```bash
+  praxis doctor
+  ```
 
 ### 2. Connect an Inference Engine _(Required)_
 
 > [!WARNING]
-> Rule extraction, relevance filtering, and guardrail enforcement **require an active inference engine**.
+> Rule extraction, relevance scoring, and guardrail blocking **activate once an inference engine is connected**.
 
-On your first MCP or hook call, the background daemon and Web Console (**`http://127.0.0.1:18095`**) start automatically. Open the **Engines** tab to pick an engine:
-- **macOS · Linux**: **1-click Local GGUF download** _(no API key needed; or choose `Gemini` · `System 1` · `Custom Local URL`)_
+Open the auto-started Web Console (**`http://127.0.0.1:18095`**) → **Engines** tab:
+- **macOS · Linux**: **1-click Local GGUF download** _(no API key · runs offline, or choose `Gemini` · `System 1` · `Custom Local URL`)_
 - **Windows**: Connect a **Custom Local URL** (`Ollama` · `LM Studio` · `vLLM`), `Gemini API key`, or `System 1` _(built-in GGUF unsupported)_
-- **Team Server / Multi-Device _(Optional)_**: Connect via `praxis connect` to use a shared server with zero local model setup — see [Team Guide](./TEAM.md)
+- **Team Server / Multi-Device _(Optional)_**: Run `praxis connect` to use a shared server with zero local model setup — see [Team Guide](./TEAM.md)
 
-### 3. Onboard Existing Projects _(First Run)_
+### 3. Onboard Existing Codebases _(Auto-Suggested on First Chat)_
 
-When opening an existing Git repository with `0` stored rules, `praxis` automatically offers one-time onboarding:
-- Inspects core manifests and source files, **asks which pattern wins whenever legacy and newer conventions conflict**, and commits only confirmed rules.
-- You can skip (`skip_onboarding`) or re-trigger (`reset_onboarding`) anytime. _(In hookless MCP clients, simply ask the agent to onboard the project in chat.)_
+When you open an existing Git repository with `0` stored rules, `praxis` offers one-time onboarding: inspecting core manifests and files, **asking which convention wins whenever legacy and newer patterns conflict**, and committing only confirmed rules. _(Supports `skip_onboarding` and `reset_onboarding`.)_
 
 ---
 
 ## Web Console (`http://127.0.0.1:18095`)
 
 <details open>
-<summary><strong>Memories</strong> — Scope KPIs · 2D Treemap Breakdown · Inline Edit/Pin · AI Consolidation</summary>
+<summary><strong>Memories</strong> — Semantic KPIs · 2D Treemap · Core Rules · AI Consolidation</summary>
 
 ![Web Console Memories Tab Simulation](./assets/tab-memories.svg)
 
 </details>
 
 <details>
-<summary><strong>Progress</strong> — Read-Only Project Activity Board · Memory & Git Sync · Auto-TTL</summary>
+<summary><strong>Team Rules</strong> — Isolated <code>git worktree</code> Commits for <code>.praxis/TEAM_RULES.md</code> · Combo-Box Taxonomy</summary>
 
-![Web Console Progress Tab Simulation](./assets/tab-progress.svg)
+![Web Console Team Rules Tab Simulation](./assets/tab-team.svg)
 
 </details>
 
 <details>
-<summary><strong>Guardrails</strong> — Pre-Execution Plan Verifier · Tool & Commit Audit Log · PASS-First Cleanup</summary>
+<summary><strong>Progress</strong> — Read-Only Work · Memory · Git Activity Timeline · Auto-TTL</summary>
+
+![Web Console Progress Activity Board Simulation](./assets/tab-progress.svg)
+
+</details>
+
+<details>
+<summary><strong>Guardrails</strong> — Pre-Execution Plan Verifier · PreToolUse / Stop / pre-commit Audit Log</summary>
 
 ![Web Console Guardrails Tab Simulation](./assets/tab-guardrails.svg)
 
 </details>
 
 <details>
-<summary><strong>Engines</strong> — Latency Telemetry · 1-Click Local GGUF Download · Per-Task Routing</summary>
+<summary><strong>Engines</strong> — Latency Telemetry · 1-Click Local GGUF Setup · Per-Task Model Routing</summary>
 
 ![Web Console Engines Tab Simulation](./assets/tab-engines.svg)
 
 </details>
 
 <details>
-<summary><strong>Calibration & Test</strong> — Per-Scope Confidence Distribution · Threshold Tuning · Live Query Testbench</summary>
+<summary><strong>Calibration &amp; Test</strong> — Confidence Histogram · Gate Slider · Live Query Testbench</summary>
 
 ![Web Console Calibration & Test Tab Simulation](./assets/tab-calibrate.svg)
 
 </details>
 
-- **Safe Taxonomy & Consolidation**: Spot uncategorized or overlapping subcategories on the **2D Treemap** to re-tag via **`AI Cleanup`** without altering rule text, or merge scattered rules via **`Consolidate`** while preserving `Replaces` lineage.
-- **Core Rules & Reversible Lifecycle**: Pin non-negotiable invariants as **`Core Rules`** for guaranteed injection, and retire outdated entries safely via `Forget` → `Undo` → `Purge`.
-- **Automatic Per-Repo Isolation**: Detects `.git` roots to isolate `project:<repo>` rules from cross-project `global` conventions, `personal` notes, and Git-tracked `.praxis/TEAM_RULES.md`.
+- **Non-Destructive Taxonomy & Lineage**: Re-tag uncategorized or overlapping subcategories on the 2D Treemap via **`AI Cleanup`** without touching rule text, or merge duplicate rules via **`Consolidate`** while preserving `Replaces` lineage.
+- **Core Rules & Reversible Lifecycle**: Promote non-negotiable invariants to **`Core Rules`** for guaranteed injection, and retire rules safely through `Forget` → `Undo` → `Purge`.
+- **Automatic Per-Repo Isolation**: Scopes rules automatically to each `.git` root (`project:<repo>`), keeping team standards (`.praxis/TEAM_RULES.md`), cross-project `global` rules, and `personal` notes cleanly separated.
 
 ---
 
-## Maintenance, Backup & Uninstall
+## Operations, Backup & Uninstall
 
-All runtime files (binary, `memories.db`, local models) live under a single client-neutral directory: **`~/.praxis`** (`%USERPROFILE%\.praxis` on Windows, configurable via `PRAXIS_DATA_DIR`).
+All binaries, `memories.db`, and local models live in one client-neutral directory: **`~/.praxis`** (`%USERPROFILE%\.praxis` on Windows, overridable via `PRAXIS_DATA_DIR`).
 
 ```bash
-# Health check & daemon lifecycle (auto-falls back to a free port on conflict)
-~/.praxis/bin/praxis doctor
+~/.praxis/bin/praxis doctor           # Full health check across binary, daemon, DB, Git & engine
 ~/.praxis/bin/praxis daemon status    # start | stop | restart | logs | port
 ```
 
@@ -150,26 +152,25 @@ sqlite3 ~/.praxis/memories.db ".backup './memories-backup.db'"
 # Full DB restore
 ~/.praxis/bin/praxis daemon stop
 rm -f ~/.praxis/memories.db-wal ~/.praxis/memories.db-shm
-cp ./memories-backup.db ~/.praxis/memories.db
-~/.praxis/bin/praxis daemon start
+cp ./memories-backup.db ~/.praxis/memories.db && ~/.praxis/bin/praxis daemon start
 ```
 
 ### Uninstall
 ```bash
-# 1. Detach client integration only (keeps memories.db)
+# 1. Detach client integration only (preserves stored rules)
 /plugin uninstall praxis      # Claude Code
 agy plugin uninstall praxis   # Antigravity
 # Generic MCP clients: remove "praxis" from MCP config (and rm -f .git/hooks/pre-commit if installed)
 
-# 2. Stop daemon and remove all local data
+# 2. Stop daemon and delete all local data
 ~/.praxis/bin/praxis daemon stop && rm -rf ~/.praxis
 ```
 
-> **Note**: Project auto-scoping and `pre-commit` checks rely on a **Git repository (`.git`)** root. In hookless MCP clients (such as Cursor or Windsurf), run `query_project_memory(refresh=true)` once after chat compaction to restore active rules.
+> **Note**: Automatic project scoping and `pre-commit` enforcement rely on a **Git repository (`.git`)** root. In hookless MCP clients, call `query_project_memory(refresh=true)` once after chat compaction to restore active rules.
 
 ---
 
 ## Docs & Feedback
 
-- **Docs**: [Team & Multi-Device Guide](./TEAM.md) · [Architecture & Env Reference](./ARCHITECTURE.md) · [AI-First Setup Guide](./guides/AI_SETUP.md) · [Contributing](./CONTRIBUTING.md) · [Security Policy](./SECURITY.md) · [MIT License](./LICENSE)
-- **Feedback**: External code PRs are not accepted, but bug reports, feedback, and vulnerability disclosures are always welcome via [GitHub Issues](https://github.com/marbasdev/praxis/issues).
+- **Guides**: [Team & Multi-Device Guide](./TEAM.md) · [Architecture & Env Reference](./ARCHITECTURE.md) · [AI-First Setup Guide](./guides/AI_SETUP.md) · [Contributing](./CONTRIBUTING.md) · [Security Policy](./SECURITY.md) · [MIT License](./LICENSE)
+- **Feedback**: External code PRs are not accepted; bug reports, ideas, and vulnerability disclosures are welcome via [GitHub Issues](https://github.com/marbasdev/praxis/issues).

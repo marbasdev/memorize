@@ -1,15 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 385" width="100%" height="100%" role="img" aria-label="기존 방식과 praxis 실전 타임라인 비교">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 385" width="100%" height="100%" role="img" aria-label="기존 방식과 praxis 실전 세션 비교">
   <defs>
     <style>
       .s-outer { fill: #090b0e; stroke: #222934; stroke-width: 1.5; }
       .s-top { fill: #101318; stroke: #222934; stroke-width: 1; }
       .s-panel { fill: #101318; stroke: #222934; stroke-width: 1; }
-      .s-card { fill: #141820; stroke: #283140; stroke-width: 1; }
-      .s-term { fill: #0b0e13; stroke: #283140; stroke-width: 1; }
-      .s-err { fill: rgba(239, 68, 68, 0.13); stroke: rgba(239, 68, 68, 0.48); stroke-width: 1; }
-      .s-ok { fill: rgba(16, 185, 129, 0.12); stroke: rgba(16, 185, 129, 0.48); stroke-width: 1; }
-      .s-info { fill: rgba(45, 212, 191, 0.12); stroke: rgba(45, 212, 191, 0.36); stroke-width: 1; }
-      .s-sans { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", Roboto, sans-serif; }
+      .s-card { fill: #141820; stroke: #262f3d; stroke-width: 1; }
+      .s-term { fill: #0b0e13; stroke: #262f3d; stroke-width: 1; }
+      .s-err { fill: rgba(248, 113, 113, 0.12); stroke: rgba(248, 113, 113, 0.45); stroke-width: 1; }
+      .s-ok { fill: rgba(52, 211, 153, 0.12); stroke: rgba(52, 211, 153, 0.45); stroke-width: 1; }
+      .s-info { fill: rgba(45, 212, 191, 0.12); stroke: rgba(45, 212, 191, 0.40); stroke-width: 1; }
+      .s-sans { font-family: "Inter", "Pretendard", -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
       .s-mono { font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; }
       .c-pri { fill: #eef2f6; }
       .c-sec { fill: #8b95a5; }
@@ -26,70 +26,61 @@
   <rect x="1" y="32" width="998" height="13" fill="#101318" />
   <line x1="1" y1="45" x2="999" y2="45" stroke="#222934" stroke-width="1" />
 
-  <rect class="s-info" x="18" y="11" width="234" height="24" rx="5" />
-  <text x="135" y="27" text-anchor="middle" class="s-sans c-acc" font-size="11.5" font-weight="700">실전 세션에서 겪는 차이 (Before vs After)</text>
-  <text x="982" y="27" text-anchor="end" class="s-sans c-sec" font-size="11">규칙 교체 → /compact 대화 요약 → 42턴째 코드 작성</text>
+  <rect class="s-info" x="18" y="10" width="248" height="24" rx="5" />
+  <text x="142" y="26" text-anchor="middle" class="s-sans c-acc" font-size="11.2" font-weight="700">실전 코딩 세션 비교 (Before vs After)</text>
+  <text x="982" y="26" text-anchor="end" class="s-sans c-sec" font-size="11">규칙 변경 합의 → /compact 요약 압축 → 42턴째 코드 작성</text>
 
   <!-- LEFT: WITHOUT PRAXIS -->
   <rect class="s-panel" x="18" y="58" width="466" height="311" rx="8" />
-  <text x="34" y="82" class="s-sans c-pri" font-size="12.5" font-weight="700">기존 방식 (CLAUDE.md · 일반 메모리 MCP)</text>
-  <rect class="s-err" x="396" y="66" width="74" height="22" rx="4" />
-  <text x="433" y="81" text-anchor="middle" class="s-sans c-err" font-size="10.5" font-weight="700">구버전 회귀</text>
+  <text x="34" y="82" class="s-sans c-pri" font-size="12.2" font-weight="700">기존 방식 (CLAUDE.md · 일반 메모리 MCP)</text>
+  <rect class="s-err" x="372" y="66" width="98" height="22" rx="4" />
+  <text x="421" y="81" text-anchor="middle" class="s-sans c-err" font-size="10" font-weight="700">규칙 충돌 · 회귀</text>
 
-  <!-- Step 1 Left -->
   <rect class="s-card" x="34" y="98" width="434" height="58" rx="6" />
-  <text x="46" y="116" class="s-mono c-sec" font-size="10.5">10:05 · Turn 3  User</text>
-  <text x="46" y="133" class="s-sans c-pri" font-size="11.5">“지금부터 인증은 JWT 말고 세션 쿠키로 가자”</text>
-  <text x="46" y="149" class="s-sans c-mut" font-size="10">↳ 정적 CLAUDE.md와 과거 메모리엔 옛 규칙(“JWT 사용”)이 그대로 잔존</text>
+  <text x="46" y="116" class="s-mono c-sec" font-size="10.2">10:05 · Turn 3  User</text>
+  <text x="46" y="133" class="s-sans c-pri" font-size="11.2">“지금부터 API 인증은 JWT 말고 세션 쿠키로 가자”</text>
+  <text x="46" y="149" class="s-sans c-mut" font-size="9.9">↳ CLAUDE.md와 과거 메모에는 옛 “JWT 사용” 기록이 그대로 남음</text>
 
-  <!-- Step 2 Left -->
   <rect class="s-card" x="34" y="164" width="434" height="52" rx="6" />
-  <text x="46" y="182" class="s-mono c-warn" font-size="10.5">11:40 · /compact 대화 압축 발생</text>
-  <text x="46" y="199" class="s-sans c-sec" font-size="11">긴 디버깅 로그 요약 과정에서 오전 10:05 세션 쿠키 합의가 밀려남</text>
+  <text x="46" y="182" class="s-mono c-warn" font-size="10.2">11:40 · /compact 대화 압축 (또는 도구 미호출)</text>
+  <text x="46" y="199" class="s-sans c-sec" font-size="10.6">긴 디버깅 내역에 밀려 초반 세션 쿠키 합의가 컨텍스트에서 유실됨</text>
 
-  <!-- Step 3 Left -->
   <rect class="s-term" x="34" y="224" width="434" height="74" rx="6" />
-  <text x="46" y="242" class="s-mono c-sec" font-size="10.5">14:20 · Turn 42  Agent → write_file("auth.ts")</text>
-  <rect x="46" y="250" width="410" height="22" rx="3" fill="rgba(239,68,68,0.14)" />
-  <text x="54" y="265" class="s-mono c-err" font-size="10.2">+ import jwt from "jsonwebtoken"  // 옛 규칙 그대로 참조</text>
-  <text x="46" y="289" class="s-sans c-sec" font-size="10.5">아무 제지 없이 파일 저장 &amp; 이후 커밋까지 진행</text>
+  <text x="46" y="242" class="s-mono c-sec" font-size="10.2">14:20 · Turn 42  Agent → write_file('auth.ts')</text>
+  <rect x="46" y="250" width="410" height="22" rx="3" fill="rgba(248,113,113,0.13)" />
+  <text x="54" y="265" class="s-mono c-err" font-size="10">+ import jwt from 'jsonwebtoken'  // 폐기된 옛 규칙 재사용</text>
+  <text x="46" y="289" class="s-sans c-sec" font-size="10.2">규칙을 어겨도 제지할 수 없어 파일 저장 및 커밋까지 그대로 통과</text>
 
-  <!-- Result Left -->
   <rect class="s-err" x="34" y="306" width="434" height="48" rx="6" />
-  <text x="251" y="326" text-anchor="middle" class="s-sans c-err" font-size="12" font-weight="700">결과: 다 짜놓고 나서야 “또 JWT로 짰네” 발견</text>
-  <text x="251" y="343" text-anchor="middle" class="s-sans c-sec" font-size="10.5">폐기된 코드 되돌리기 + 매 턴 수천 토큰 규칙 파일 낭비</text>
+  <text x="251" y="326" text-anchor="middle" class="s-sans c-err" font-size="11.4" font-weight="700">결과: 다 짜놓은 뒤에야 “왜 또 JWT로 짰지?” 뒤늦게 수정</text>
+  <text x="251" y="343" text-anchor="middle" class="s-sans c-sec" font-size="10.2">수동 롤백 + 매 턴 수천 토큰씩 전체 규칙 파일 반복 소모</text>
 
-  <!-- VS Badge -->
-  <circle cx="500" cy="214" r="14" fill="#141820" stroke="#323d4f" stroke-width="1.3" />
+  <circle cx="500" cy="214" r="14" fill="#141820" stroke="#2d3748" stroke-width="1.3" />
   <text x="500" y="218" text-anchor="middle" class="s-mono c-acc" font-size="10" font-weight="700">VS</text>
 
   <!-- RIGHT: WITH PRAXIS -->
   <rect class="s-panel" x="516" y="58" width="466" height="311" rx="8" />
-  <text x="532" y="82" class="s-sans c-pri" font-size="12.5" font-weight="700">praxis 적용 후</text>
-  <rect class="s-ok" x="852" y="66" width="114" height="22" rx="4" />
-  <text x="909" y="81" text-anchor="middle" class="s-sans c-ok" font-size="10.5" font-weight="700">이원화 가드레일</text>
+  <text x="532" y="82" class="s-sans c-pri" font-size="12.2" font-weight="700">praxis 적용 후</text>
+  <rect class="s-ok" x="850" y="66" width="118" height="22" rx="4" />
+  <text x="909" y="81" text-anchor="middle" class="s-sans c-ok" font-size="10" font-weight="700">실행 강제 · 자동 교정</text>
 
-  <!-- Step 1 Right -->
   <rect class="s-card" x="532" y="98" width="434" height="58" rx="6" />
-  <text x="544" y="116" class="s-mono c-acc" font-size="10.5">10:05 · 쓰기 게이트 (원자적 1:N 교체)</text>
-  <text x="544" y="133" class="s-mono c-mut" font-size="10.5" text-decoration="line-through">[#4] JWT 사용</text>
-  <text x="638" y="133" class="s-sans c-ok" font-size="11" font-weight="700">→  [#9] 인증은 세션 쿠키만 사용</text>
-  <text x="544" y="149" class="s-sans c-mut" font-size="10">↳ 옛 규칙 즉시 비활성화 + 다른 열린 에이전트 세션에도 [REVOKED] 통지</text>
+  <text x="544" y="116" class="s-mono c-acc" font-size="10.2">10:05 · 자동 정제 게이트 (옛 규칙 즉시 덮어쓰기)</text>
+  <text x="544" y="133" class="s-mono c-mut" font-size="10.2" text-decoration="line-through">[#4] JWT 사용</text>
+  <text x="634" y="133" class="s-sans c-ok" font-size="10.8" font-weight="700">→  [#9] API 인증은 세션 쿠키만 사용</text>
+  <text x="544" y="149" class="s-sans c-mut" font-size="9.9">↳ 구버전 즉시 폐기 + 열린 다른 에이전트 세션에도 [REVOKED] 전파</text>
 
-  <!-- Step 2 Right -->
   <rect class="s-info" x="532" y="164" width="434" height="52" rx="6" />
-  <text x="544" y="182" class="s-mono c-acc" font-size="10.5">11:40 · /compact · 체크포인트 자동 감지</text>
-  <text x="544" y="199" class="s-sans c-pri" font-size="11">압축 감지 → <tspan class="c-ok" font-weight="700">[Post-Compact Restored]</tspan>로 [#9] · 핵심 규칙 복원</text>
+  <text x="544" y="182" class="s-mono c-acc" font-size="10.2">11:40 · /compact 압축 · 체크포인트 자동 감지</text>
+  <text x="544" y="199" class="s-sans c-pri" font-size="10.6">압축 직후 <tspan class="c-ok" font-weight="700">[Post-Compact Restored]</tspan>로 최신 규칙만 최소 복원</text>
 
-  <!-- Step 3 Right -->
   <rect class="s-term" x="532" y="224" width="434" height="74" rx="6" />
-  <text x="544" y="242" class="s-mono c-warn" font-size="10.5">14:20 · Turn 42  write_file("auth.ts") → 턴 종료 Stop 훅</text>
-  <rect x="544" y="250" width="410" height="22" rx="3" fill="rgba(251,191,36,0.14)" />
-  <text x="552" y="265" class="s-mono c-warn" font-size="10.8">[AUTO-FIX] Rule #9 위반: JWT 금지 — 세션 쿠키 사용</text>
-  <text x="544" y="289" class="s-sans c-ok" font-size="10.5">↳ 턴 종료 전 자동 수정 루프 → 에이전트가 sessionCookie 코드로 재작성</text>
+  <text x="544" y="242" class="s-mono c-warn" font-size="10.1">14:20 · Turn 42  write_file('auth.ts') → 턴 종료 Stop 훅</text>
+  <rect x="544" y="250" width="410" height="22" rx="3" fill="rgba(251,191,36,0.13)" />
+  <text x="552" y="265" class="s-mono c-warn" font-size="10.2">[AUTO-FIX] 규칙 #9 위반 감지: JWT 금지 → 세션 쿠키 사용</text>
+  <text x="544" y="289" class="s-sans c-ok" font-size="10.2">↳ 에이전트가 턴을 마치기 전에 스스로 sessionCookie 코드로 재작성</text>
 
-  <!-- Result Right -->
   <rect class="s-ok" x="532" y="306" width="434" height="48" rx="6" />
-  <text x="749" y="326" text-anchor="middle" class="s-sans c-ok" font-size="11.5" font-weight="700">결과: 턴 종료 전 자체 수정 (+ 위험 쉘 명령은 실행 전 차단)</text>
-  <text x="749" y="343" text-anchor="middle" class="s-sans c-sec" font-size="10.5">새 규칙만 1회 주입(반복 추론 0회) · 수동 조작 없이 최신 결정 강제</text>
+  <text x="749" y="326" text-anchor="middle" class="s-sans c-ok" font-size="11.2" font-weight="700">결과: 위반 코드는 턴 종료 전 자동 교정 · 위험 쉘 명령은 사전 차단</text>
+  <text x="749" y="343" text-anchor="middle" class="s-sans c-sec" font-size="10.1">새로 필요한 규칙만 1회 주입(반복 턴 추론 0회) · 수동 파일 편집 불필요</text>
 </svg>
