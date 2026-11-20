@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"memorize/internal/infra/git"
+	"praxis/internal/infra/git"
 )
 
 func runGitCmd(t *testing.T, dir string, args ...string) {

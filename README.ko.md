@@ -1,8 +1,8 @@
-# memorize
+# praxis
 
 [English (README.md)](./README.md) · [팀 협업 가이드](./TEAM.ko.md) · [아키텍처 레퍼런스](./ARCHITECTURE.ko.md) · [AI 자율 설정 가이드](./guides/AI_SETUP.ko.md)
 
-**AI 코딩 에이전트용 상태 메모리 플러그인 — 규칙이 바뀌면 옛 지시는 즉시 폐기하고, 언제나 최신 결정만 강제합니다.**
+**AI 코딩 에이전트용 상태 메모리 & 실행 하네스 — 규칙이 바뀌면 옛 지시는 즉시 폐기하고, 언제나 최신 결정만 강제합니다.**
 
 _단일 로컬 바이너리로 **Claude Code · Antigravity** 및 **범용 MCP 클라이언트**와 **웹 콘솔**을 함께 제공합니다._
 
@@ -12,7 +12,7 @@ _단일 로컬 바이너리로 **Claude Code · Antigravity** 및 **범용 MCP �
 - **정적 규칙 파일 (`CLAUDE.md` 등)**: 매 턴 전체를 다시 읽혀 토큰과 컨텍스트 창을 소모하고, 채팅에서 바꾼 새 결정과 충돌해 옛 규칙으로 되돌아갑니다.
 - **기존 벡터 RAG**: 유사해 보이는 몇 조각(`TOP-K`)만 뽑아 오다 보니 표현이 다른 필수 제약을 놓치거나 폐기된 옛 규칙을 함께 불러옵니다.
 
-### `memorize`는 컨텍스트 관리를 자동으로 처리합니다
+### `praxis`는 컨텍스트 관리를 자동으로 처리합니다
 
 사람이 매번 규칙 파일을 수동 편집하거나 `"이거 기억해"`라고 명령하지 않아도, 라이프사이클 훅이 채팅 흐름을 감싸 최신 컨텍스트를 유지합니다:
 
@@ -25,16 +25,16 @@ _단일 로컬 바이너리로 **Claude Code · Antigravity** 및 **범용 MCP �
 | **에이전트 플러그인** _(MCP + 훅)_ | **Claude Code** · **Antigravity**                                | 턴별 미전달 규칙 자동 주입, 수정 전 규칙 정제 게이트, 쉘 사전 차단 및 턴 종료 일괄 수정 · Git pre-commit |
 | **범용 MCP 서버**                  | **Cursor** · **Windsurf** · **Claude Desktop** 등 MCP 클라이언트 | `stdio` 또는 Streamable HTTP(`/mcp`)로 연결해 동일한 웹 콘솔·System 1 평가·MCP 도구 프로토콜 사용        |
 
-![기존 방식과 memorize 실전 타임라인 비교](./assets/overview.ko.svg)
+![기존 방식과 praxis 실전 타임라인 비교](./assets/overview.ko.svg)
 
 ---
 
-## 왜 `memorize`인가요?
+## 왜 `praxis`인가요?
 
 > [!IMPORTANT]
 > **단순 참고용 메모(Recall)만으로는 코딩 에이전트의 옛 규칙 회귀와 규칙 이탈을 막기 어렵습니다.**
 
-대부분의 AI 에이전트 메모리 도구가 과거 대화·작업 이력을 요약해 나중에 **“참고하게 해주는(Recall)”** 데 머무르는 반면, `memorize`는 다음 세 가지를 **외부 벡터·그래프 DB나 Node/Python 런타임 없는 단일 로컬 Go 바이너리**에 하나로 결합했습니다:
+대부분의 AI 에이전트 메모리 도구가 과거 대화·작업 이력을 요약해 나중에 **“참고하게 해주는(Recall)”** 데 머무르는 반면, `praxis`는 다음 세 가지를 **외부 벡터·그래프 DB나 Node/Python 런타임 없는 단일 로컬 Go 바이너리**에 하나로 결합했습니다:
 
 - **규칙의 최신 상태 보장**: 요약 누적이 아니라 **`1:N` 원자적 덮어쓰기 + `[REVOKED]` 폐기 통지**로 옛 규칙 회귀 차단
 - **행동 강제 · 자동 수정**: 단순 권고(`CLAUDE.md` · `MEMORY.md` · 일반 RAG)에 그치지 않고 **쉘 실행 전 차단, 턴 종료 일괄 자체 수정, `git pre-commit` 게이트**까지 연계
@@ -44,7 +44,7 @@ _단일 로컬 바이너리로 **Claude Code · Antigravity** 및 **범용 MCP �
 
 정적 규칙 파일·벡터 RAG·요약 누적형 메모리와 항목별로 비교하면 동작 구조의 차이가 분명히 드러납니다:
 
-| 기준                               | 기존 방식 (`CLAUDE.md` · 벡터 RAG · 요약 누적형)               | `memorize`                                                                                                                                    |
+| 기준                               | 기존 방식 (`CLAUDE.md` · 벡터 RAG · 요약 누적형)               | `praxis`                                                                                                                                    |
 | :--------------------------------- | :------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------- |
 | **상태 일관성**                    | 옛 규칙과 새 결정이 혼재해 구버전 회귀                         | **원자적 `1:N` 덮어쓰기 · 철회 통지**로 최신 결정만 유지                                                                                      |
 | **전수 평가 · 캐시**               | 매 턴 전체 재주입 또는 `TOP-K` 누락                            | **반복 턴 추론 `0`회** · 미전달 **100% 병렬 평가** · **고정 Prefix KV 캐시**                                                                  |
@@ -75,9 +75,9 @@ _(세부 DB 구조, MCP 도구 명세, 내부 엔드포인트는 [아키텍처 �
 </table>
 
 > [!TIP]
-> **AI 에이전트 1줄 자동 설정**: 에이전트 채팅(Claude Code, Antigravity, Cursor 등)에 아래 문구를 붙여넣으면 설치부터 `memorize doctor` 진단 및 온보딩까지 자율 진행합니다:
+> **AI 에이전트 1줄 자동 설정**: 에이전트 채팅(Claude Code, Antigravity, Cursor 등)에 아래 문구를 붙여넣으면 설치부터 `praxis doctor` 진단 및 온보딩까지 자율 진행합니다:
 > ```text
-> guides/AI_SETUP.ko.md 가이드를 따라 이 프로젝트에 memorize를 설치 및 설정해 줘. memorize doctor로 상태를 점검하고, 추론 엔진 상태를 확인한 뒤 초기 프로젝트 온보딩을 진행해 줘.
+> guides/AI_SETUP.ko.md 가이드를 따라 이 프로젝트에 praxis를 설치 및 설정해 줘. praxis doctor로 상태를 점검하고, 추론 엔진 상태를 확인한 뒤 초기 프로젝트 온보딩을 진행해 줘.
 > ```
 
 ### 1. 설치
@@ -85,28 +85,28 @@ _(세부 DB 구조, MCP 도구 명세, 내부 엔드포인트는 [아키텍처 �
 **Claude Code** _(macOS · Linux 플러그인 런처)_
 
 ```bash
-/plugin marketplace add https://github.com/marbasdev/memorize.git
-/plugin install memorize@memorize-marketplace
+/plugin marketplace add https://github.com/marbasdev/praxis.git
+/plugin install praxis@praxis-marketplace
 ```
 
 **Antigravity (`agy`)** _(macOS · Linux 플러그인 런처)_
 
 ```bash
-git clone https://github.com/marbasdev/memorize.git && cd memorize
-agy plugin install ./plugins/memorize
+git clone https://github.com/marbasdev/praxis.git && cd praxis
+agy plugin install ./plugins/praxis
 ```
 
 **단독 바이너리 · Windows · 기타 MCP 클라이언트** (Cursor · Windsurf · Claude Desktop)
 
 ```bash
-CGO_ENABLED=0 go build -trimpath -o bin/memorize ./cmd/memorize
+CGO_ENABLED=0 go build -trimpath -o bin/praxis ./cmd/praxis
 ```
 
-빌드 후 클라이언트 MCP 설정에 `./plugins/memorize/scripts/run-memorize.sh`(`macOS`/`Linux` 플러그인 `stdio`), `bin/memorize` / `memorize.exe`(단독 `stdio`, Windows는 `memorize.exe -hook <event>` 지원), 또는 `http://127.0.0.1:18095/mcp`를 등록하세요.
+빌드 후 클라이언트 MCP 설정에 `./plugins/praxis/scripts/run-praxis.sh`(`macOS`/`Linux` 플러그인 `stdio`), `bin/praxis` / `praxis.exe`(단독 `stdio`, Windows는 `praxis.exe -hook <event>` 지원), 또는 `http://127.0.0.1:18095/mcp`를 등록하세요.
 
 설치 및 데몬 동작 상태는 언제든 내장 자가 진단 도구로 점검할 수 있습니다:
 ```bash
-memorize doctor
+praxis doctor
 ```
 
 ### 2. 추론 엔진 연결 (필수)
@@ -119,14 +119,14 @@ memorize doctor
 
 - **macOS · Linux**: **로컬 GGUF** 권장 모델 1클릭 다운로드 _(또는 `Gemini` · `System 1` · `로컬 URL`)_
 - **Windows**: 내장 GGUF 미지원 → **로컬 URL**(`Ollama` · `LM Studio` · `vLLM`), `System 1`, 또는 `Gemini API 키` 연결
-- **팀 원격 연결 _(선택)_**: 사내 팀 서버에 연결(`memorize connect` 또는 웹 콘솔 **`Remote Servers`**)하면 로컬 DB나 추론 엔진 설정 없이 바로 사용할 수 있습니다 — [팀 협업 가이드](./TEAM.ko.md) 참고
+- **팀 원격 연결 _(선택)_**: 사내 팀 서버에 연결(`praxis connect` 또는 웹 콘솔 **`Remote Servers`**)하면 로컬 DB나 추론 엔진 설정 없이 바로 사용할 수 있습니다 — [팀 협업 가이드](./TEAM.ko.md) 참고
 
 ### 3. 기존 프로젝트 온보딩 _(기존 코드베이스 첫 연결)_
 
 이미 개발이 진행된 **기존 Git 프로젝트**에서도 처음부터 규칙을 일일이 적어 넣을 필요 없이 온보딩을 지원합니다. 추론 엔진이 연결된 상태에서 기억이 `0`개인 `project:<저장소>`로 첫 대화를 열면(**Claude Code** · **Antigravity** 훅 환경) **초기 규칙 온보딩을 자동으로 제안**합니다:
 
 - **핵심 파일 점검 · 상충 패턴 우선 정리**: 온보딩을 수락하면 에이전트가 저장소 핵심 파일·매니페스트를 직접 살펴보고, **기존 코드에 서로 어긋나는 옛 패턴과 새 패턴이 공존할 때 먼저 어떤 기준을 따를지 물어본 뒤** 확정된 규칙만 저장하고 위반 파일 정비까지 이어갑니다.
-- **건너뛰기 · 재실행 & Git 기준점 동기화**: 원치 않으면 건너뛰고(`skip_onboarding`) 나중에 다시 켜서(`reset_onboarding`) 실행할 수 있으며, `MEMORY_GIT_SYNC=1`을 켜면 오래된 과거 이력은 건너뛰고 `HEAD` 기준점 이후 커밋 변경분만 점진 동기화할 수 있습니다. _(훅 없는 일반 MCP 클라이언트는 채팅에서 온보딩이나 `memorize://playbook/memory-curator` 실행을 요청하면 됩니다.)_
+- **건너뛰기 · 재실행 & Git 기준점 동기화**: 원치 않으면 건너뛰고(`skip_onboarding`) 나중에 다시 켜서(`reset_onboarding`) 실행할 수 있으며, `PRAXIS_GIT_SYNC=1`을 켜면 오래된 과거 이력은 건너뛰고 `HEAD` 기준점 이후 커밋 변경분만 점진 동기화할 수 있습니다. _(훅 없는 일반 MCP 클라이언트는 채팅에서 온보딩이나 `praxis://playbook/memory-curator` 실행을 요청하면 됩니다.)_
 
 ---
 
@@ -169,7 +169,7 @@ memorize doctor
 
 </details>
 
-_(저장소 팀 공통 규칙(`.memorize/TEAM_RULES.md`)과 계정별 격리·원격 씬 클라이언트 연결·공유 KV 프리픽스 캐시를 지원하는 **공유 팀 서버 모드**는 [팀 협업 가이드](./TEAM.ko.md)에 정리되어 있습니다.)_
+_(저장소 팀 공통 규칙(`.praxis/TEAM_RULES.md`)과 계정별 격리·원격 씬 클라이언트 연결·공유 KV 프리픽스 캐시를 지원하는 **공유 팀 서버 모드**는 [팀 협업 가이드](./TEAM.ko.md)에 정리되어 있습니다.)_
 
 ### 기억 관리 · 정리
 
@@ -193,20 +193,20 @@ _(저장소 팀 공통 규칙(`.memorize/TEAM_RULES.md`)과 계정별 격리·�
 
 ## 데몬 제어 · 저장 경로 · 유지보수
 
-### 공통 데이터 디렉토리 (`~/.memorize`)
+### 공통 데이터 디렉토리 (`~/.praxis`)
 
-어떤 클라이언트(**Claude Code**, **Antigravity**, 일반 **MCP 클라이언트**)에서 설치·연동하더라도 실행 바이너리, DB, 로컬 모델, 데몬 상태 파일은 호스트 설정 폴더(`~/.claude`, `~/.gemini`, `~/.cursor`)와 분리된 중립 기본 경로 **`~/.memorize`**(Windows: `%USERPROFILE%\.memorize`)에 통합 저장됩니다. 경로를 바꾸려면 `MEMORY_DATA_DIR`(또는 `MEMORY_DB_PATH`) 환경변수를 설정하세요.
+어떤 클라이언트(**Claude Code**, **Antigravity**, 일반 **MCP 클라이언트**)에서 설치·연동하더라도 실행 바이너리, DB, 로컬 모델, 데몬 상태 파일은 호스트 설정 폴더(`~/.claude`, `~/.gemini`, `~/.cursor`)와 분리된 중립 기본 경로 **`~/.praxis`**(Windows: `%USERPROFILE%\.praxis`)에 통합 저장됩니다. 경로를 바꾸려면 `PRAXIS_DATA_DIR`(또는 `PRAXIS_DB_PATH`) 환경변수를 설정하세요.
 
 ### 백그라운드 데몬 · 포트 변경
 
-데몬/웹 콘솔(기본 `18095`)과 내장 로컬 GGUF 서버(기본 `18088`) 포트는 CLI나 웹 콘솔 상단 배지(`memorize :18095`)에서 바꿀 수 있으며, 지정한 포트가 사용 중이면 빈 루프백 포트로 **자동 폴백**하고 훅·열린 MCP `stdio` 브리지가 새 포트를 자동 추적합니다.
+데몬/웹 콘솔(기본 `18095`)과 내장 로컬 GGUF 서버(기본 `18088`) 포트는 CLI나 웹 콘솔 상단 배지(`praxis :18095`)에서 바꿀 수 있으며, 지정한 포트가 사용 중이면 빈 루프백 포트로 **자동 폴백**하고 훅·열린 MCP `stdio` 브리지가 새 포트를 자동 추적합니다.
 
 ```bash
-~/.memorize/bin/memorize daemon status                 # status | start | stop | restart | logs (소스 빌드 시 ./bin/memorize)
-~/.memorize/bin/memorize daemon port                   # 현재 설정·활성 포트 확인
-~/.memorize/bin/memorize daemon port 19095 19088       # 데몬 · GGUF 포트 변경 (또는 --daemon N --gguf N)
-~/.memorize/bin/memorize daemon port reset             # 기본 포트(18095 / 18088) 복원
-~/.memorize/bin/memorize serve --addr 0.0.0.0:18095    # 공유 팀 서버 실행 (계정·연결 명령은 TEAM.ko.md 참고)
+~/.praxis/bin/praxis daemon status                 # status | start | stop | restart | logs (소스 빌드 시 ./bin/praxis)
+~/.praxis/bin/praxis daemon port                   # 현재 설정·활성 포트 확인
+~/.praxis/bin/praxis daemon port 19095 19088       # 데몬 · GGUF 포트 변경 (또는 --daemon N --gguf N)
+~/.praxis/bin/praxis daemon port reset             # 기본 포트(18095 / 18088) 복원
+~/.praxis/bin/praxis serve --addr 0.0.0.0:18095    # 공유 팀 서버 실행 (계정·연결 명령은 TEAM.ko.md 참고)
 ```
 
 ### 업데이트 (`memories.db` 자동 유지 · 마이그레이션)
@@ -216,43 +216,43 @@ _(저장소 팀 공통 규칙(`.memorize/TEAM_RULES.md`)과 계정별 격리·�
 /plugin update
 
 # Antigravity
-git pull && agy plugin install ./plugins/memorize
+git pull && agy plugin install ./plugins/praxis
 
 # 소스 직접 빌드 사용 시
-git pull && CGO_ENABLED=0 go build -trimpath -o bin/memorize ./cmd/memorize
-./plugins/memorize/scripts/run-memorize.sh daemon restart
+git pull && CGO_ENABLED=0 go build -trimpath -o bin/praxis ./cmd/praxis
+./plugins/praxis/scripts/run-praxis.sh daemon restart
 ```
 
 ### 백업 · 복원 · 포터블 이관
 
 ```bash
 # SQLite 전체 안전 백업 (WAL 체크포인트 포함)
-sqlite3 ~/.memorize/memories.db ".backup './memories-backup.db'"
+sqlite3 ~/.praxis/memories.db ".backup './memories-backup.db'"
 
 # SQLite 전체 안전 복원 (데몬 정지 및 기존 WAL/SHM 파일 정리 후 교체)
-~/.memorize/bin/memorize daemon stop
-mkdir -p ~/.memorize && rm -f ~/.memorize/memories.db-wal ~/.memorize/memories.db-shm
-cp ./memories-backup.db ~/.memorize/memories.db
-~/.memorize/bin/memorize daemon start
+~/.praxis/bin/praxis daemon stop
+mkdir -p ~/.praxis && rm -f ~/.praxis/memories.db-wal ~/.praxis/memories.db-shm
+cp ./memories-backup.db ~/.praxis/memories.db
+~/.praxis/bin/praxis daemon start
 
 # 스코프별 포터블 JSON 내보내기 · AI 병합 가져오기 · 서버 업로드 (웹 콘솔 기억 관리 탭에서도 지원)
-~/.memorize/bin/memorize export --scope global -o global.json
-~/.memorize/bin/memorize import global.json --mode merge --dry-run
-~/.memorize/bin/memorize push --scope global --mode exact
+~/.praxis/bin/praxis export --scope global -o global.json
+~/.praxis/bin/praxis import global.json --mode merge --dry-run
+~/.praxis/bin/praxis push --scope global --mode exact
 ```
 
 ### 삭제
 
 ```bash
 # 1. 클라이언트 플러그인 · MCP · Git 훅 연동만 제거 (memories.db 보존)
-/plugin uninstall memorize                    # Claude Code
-agy plugin uninstall memorize                 # Antigravity
-# 일반 MCP 클라이언트 (Cursor · Windsurf · Claude Desktop): MCP 설정 파일에서 "memorize" 항목 제거
-# Git 훅을 설치한 저장소(`memorize -install git-hook`): rm -f .git/hooks/pre-commit
+/plugin uninstall praxis                    # Claude Code
+agy plugin uninstall praxis                 # Antigravity
+# 일반 MCP 클라이언트 (Cursor · Windsurf · Claude Desktop): MCP 설정 파일에서 "praxis" 항목 제거
+# Git 훅을 설치한 저장소(`praxis -install git-hook`): rm -f .git/hooks/pre-commit
 
 # 2. 데몬 정지 후 공통 바이너리·모델·로컬 데이터 완전 삭제
-~/.memorize/bin/memorize daemon stop
-rm -rf ~/.memorize                            # MEMORY_DATA_DIR 변경 시 해당 경로 (Windows: Remove-Item -Recurse "$env:USERPROFILE\.memorize")
+~/.praxis/bin/praxis daemon stop
+rm -rf ~/.praxis                            # PRAXIS_DATA_DIR 변경 시 해당 경로 (Windows: Remove-Item -Recurse "$env:USERPROFILE\.praxis")
 ```
 
 ---
@@ -261,5 +261,5 @@ rm -rf ~/.memorize                            # MEMORY_DATA_DIR 변경 시 해�
 
 - **로드맵**
   - 자동 P2P·클라우드 기기 간 동기화는 보류되었으며, **공유 팀 서버 모드**(`serve` · `connect` · 멀티 계정 `switch`)와 **포터블 번들 이관**(`push` · `export` · `import`)이 추가되었습니다 — [팀 협업 가이드](./TEAM.ko.md) 참고.
-- **의견 및 피드백**: 외부 코드 PR(컨트리뷰션)은 받지 않지만, 사용 중 의견·버그·취약점 제보는 [GitHub Issues](https://github.com/marbasdev/memorize/issues)에 남겨주시면 확인되는 대로 즉시 조치하겠습니다. _(취약점의 세부 익스플로잇 내용은 공개 이슈에 적지 마세요 — [보안 정책](./SECURITY.md))_
+- **의견 및 피드백**: 외부 코드 PR(컨트리뷰션)은 받지 않지만, 사용 중 의견·버그·취약점 제보는 [GitHub Issues](https://github.com/marbasdev/praxis/issues)에 남겨주시면 확인되는 대로 즉시 조치하겠습니다. _(취약점의 세부 익스플로잇 내용은 공개 이슈에 적지 마세요 — [보안 정책](./SECURITY.md))_
 - **문서**: [팀 협업 가이드](./TEAM.ko.md) · [아키텍처 & 환경변수](./ARCHITECTURE.ko.md) · [피드백 및 기여 정책](./CONTRIBUTING.md) · [보안 정책](./SECURITY.md) · [MIT License](./LICENSE)

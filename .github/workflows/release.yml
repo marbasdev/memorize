@@ -118,14 +118,14 @@ jobs:
             GOARCH="${target#*/}"
             STAGE="dist/stage-${GOOS}-${GOARCH}"
             mkdir -p "$STAGE"
-            BIN_NAME="memorize"
-            if [ "$GOOS" = "windows" ]; then BIN_NAME="memorize.exe"; fi
+            BIN_NAME="praxis"
+            if [ "$GOOS" = "windows" ]; then BIN_NAME="praxis.exe"; fi
             CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
               go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
-              -o "$STAGE/$BIN_NAME" ./cmd/memorize
-            tar -C "$STAGE" -czf "dist/memorize-${GOOS}-${GOARCH}.tar.gz" "$BIN_NAME"
+              -o "$STAGE/$BIN_NAME" ./cmd/praxis
+            tar -C "$STAGE" -czf "dist/praxis-${GOOS}-${GOARCH}.tar.gz" "$BIN_NAME"
             if [ "$GOOS" = "windows" ]; then
-              (cd "$STAGE" && zip -q "../memorize-${GOOS}-${GOARCH}.zip" "$BIN_NAME")
+              (cd "$STAGE" && zip -q "../praxis-${GOOS}-${GOARCH}.zip" "$BIN_NAME")
             fi
             rm -rf "$STAGE"
           done
@@ -135,5 +135,5 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "${GITHUB_REF_NAME}" dist/*.tar.gz dist/*.zip dist/SHA256SUMS \
-            --title "memorize ${GITHUB_REF_NAME}" \
+            --title "praxis ${GITHUB_REF_NAME}" \
             --generate-notes

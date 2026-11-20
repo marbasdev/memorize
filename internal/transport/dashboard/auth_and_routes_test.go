@@ -12,10 +12,10 @@ import (
 	"strings"
 	"testing"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/config"
-	"memorize/internal/infra/sqlite"
-	thttp "memorize/internal/transport/http"
+	"praxis/internal/domain"
+	"praxis/internal/infra/config"
+	"praxis/internal/infra/sqlite"
+	thttp "praxis/internal/transport/http"
 )
 
 func TestI18nENKOParity(t *testing.T) {
@@ -343,7 +343,7 @@ func TestDashboardServerModeAuthRBACAndPersonalIsolation(t *testing.T) {
 	reqCreate.Header.Set("HX-Request", "true")
 	reqCreate.AddCookie(adminCookie)
 	h.ServeHTTP(recCreate, reqCreate)
-	if recCreate.Code != http.StatusOK || !strings.Contains(recCreate.Body.String(), "mem_") || !strings.Contains(recCreate.Body.String(), "alice") || !strings.Contains(recCreate.Body.String(), "/mcp") {
+	if recCreate.Code != http.StatusOK || !strings.Contains(recCreate.Body.String(), "prx_") || !strings.Contains(recCreate.Body.String(), "alice") || !strings.Contains(recCreate.Body.String(), "/mcp") {
 		t.Fatalf("admin user create failed (expected token and MCP snippet): %d %s", recCreate.Code, recCreate.Body.String())
 	}
 
@@ -465,7 +465,7 @@ func TestDashboardServerModeAuthRBACAndPersonalIsolation(t *testing.T) {
 
 func TestDashboardLocalRemoteConnectionsUI(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("MEMORY_DATA_DIR", tmp)
+	t.Setenv("PRAXIS_DATA_DIR", tmp)
 	dbPath := filepath.Join(tmp, "memories.db")
 	d := newTestDeps(t, dbPath, noopMutEval{}, filepath.Join(tmp, "models"), thttp.DashboardHooks{})
 	h := NewHandler(d)
@@ -475,7 +475,7 @@ func TestDashboardLocalRemoteConnectionsUI(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		if r.Header.Get("Authorization") != "Bearer mem_valid_team" {
+		if r.Header.Get("Authorization") != "Bearer prx_valid_team" {
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
@@ -506,7 +506,7 @@ func TestDashboardLocalRemoteConnectionsUI(t *testing.T) {
 	}
 
 	teamRepo := filepath.Join(tmp, "team-project")
-	goodForm := url.Values{"mode": {"repo"}, "repo_path": {teamRepo}, "url": {teamSrv.URL}, "token": {"mem_valid_team"}}.Encode()
+	goodForm := url.Values{"mode": {"repo"}, "repo_path": {teamRepo}, "url": {teamSrv.URL}, "token": {"prx_valid_team"}}.Encode()
 	recGood := httptest.NewRecorder()
 	reqGood := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:18095/ui/remotes/connect", strings.NewReader(goodForm))
 	reqGood.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -516,7 +516,7 @@ func TestDashboardLocalRemoteConnectionsUI(t *testing.T) {
 	if recGood.Code != http.StatusOK || !strings.Contains(bodyGood, teamSrv.URL) || !strings.Contains(bodyGood, "@alice") || !strings.Contains(bodyGood, "hx-swap-oob=\"outerHTML\"") {
 		t.Fatalf("expected valid connect response with URL/@alice/OOB badge, got %d %s", recGood.Code, bodyGood)
 	}
-	if strings.Contains(bodyGood, "mem_valid_team") {
+	if strings.Contains(bodyGood, "prx_valid_team") {
 		t.Fatalf("plaintext token must not be leaked into HTML modal")
 	}
 	if got, ok := config.ResolveRemoteTarget(tmp, teamRepo); !ok || got.URL != teamSrv.URL {
@@ -576,7 +576,7 @@ func TestDashboardServerModeTeamReadOnlyConfigRBACAndSharedToPersonalGuard(t *te
 	reqTeamAlice.AddCookie(aliceCookie)
 	h.ServeHTTP(recTeamAlice, reqTeamAlice)
 	bodyAlice := recTeamAlice.Body.String()
-	if recTeamAlice.Code != http.StatusOK || !strings.Contains(bodyAlice, ".memorize/TEAM_RULES.md") ||
+	if recTeamAlice.Code != http.StatusOK || !strings.Contains(bodyAlice, ".praxis/TEAM_RULES.md") ||
 		strings.Contains(bodyAlice, `id="btnTeamSync"`) || strings.Contains(bodyAlice, `id="btnTeamToggleAdd"`) || strings.Contains(bodyAlice, `id="teamAuthorForm"`) {
 		t.Fatalf("unexpected member /ui/team HTML (%d):\n%s", recTeamAlice.Code, bodyAlice)
 	}
@@ -752,7 +752,7 @@ func TestDashboardMultiAccountSwitcherAndBundleImportModal(t *testing.T) {
 		return nil
 	}
 
-	// Login as @home -> must set both memorize_session and memorize_accounts cookies.
+	// Login as @home -> must set both praxis_session and praxis_accounts cookies.
 	recLogin := httptest.NewRecorder()
 	reqLogin := httptest.NewRequest(http.MethodPost, "http://"+host+"/login", strings.NewReader(url.Values{"token": {admIss.PlainToken}}.Encode()))
 	reqLogin.Host = host
@@ -811,7 +811,7 @@ func TestDashboardMultiAccountSwitcherAndBundleImportModal(t *testing.T) {
 	}
 
 	// Import modal preview + apply + export as @home.
-	bundlePayload := `{"format":"memorize.bundle.v1","items":[{"scope":"global","category":"convention","content":"Dashboard imported rule","pinned":true}]}`
+	bundlePayload := `{"format":"praxis.bundle.v1","items":[{"scope":"global","category":"convention","content":"Dashboard imported rule","pinned":true}]}`
 	recPrev := httptest.NewRecorder()
 	reqPrev := httptest.NewRequest(http.MethodPost, "http://"+host+"/ui/memories/import/preview", strings.NewReader(url.Values{
 		"bundle_json": {bundlePayload},

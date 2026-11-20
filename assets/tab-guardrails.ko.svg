@@ -42,7 +42,7 @@
 
   <!-- Brand + Port -->
   <rect class="b-info" x="16" y="12" width="136" height="24" rx="5" />
-  <text x="84" y="28" text-anchor="middle" class="mono t-acc" font-size="11" font-weight="700">memorize :18095</text>
+  <text x="84" y="28" text-anchor="middle" class="mono t-acc" font-size="11" font-weight="700">praxis :18095</text>
 
   <!-- 5 Console Tabs -->
   <rect class="pill-idle" x="166" y="12" width="104" height="24" rx="5" />
@@ -80,12 +80,12 @@
   <rect class="card" x="16" y="96" width="968" height="148" rx="8" />
   <text x="30" y="120" class="sans t-pri" font-size="11.5" font-weight="700">실행 전 작업 계획 위반 사전 검사</text>
   <rect class="b-info" x="30" y="130" width="130" height="26" rx="5" />
-  <text x="95" y="147" text-anchor="middle" class="mono t-acc" font-size="10.2" font-weight="700">project:memorize</text>
+  <text x="95" y="147" text-anchor="middle" class="mono t-acc" font-size="10.2" font-weight="700">project:praxis</text>
 
   <rect class="sub" x="168" y="130" width="676" height="26" rx="5" />
-  <text x="180" y="147" class="mono t-pri f1" font-size="10.8">CGO_ENABLED=1 go build ./cmd/memorize 실행</text>
-  <text x="180" y="147" class="mono t-err f2" font-size="10.8">CGO_ENABLED=1 go build ./cmd/memorize 실행</text>
-  <text x="180" y="147" class="mono t-ok f3" font-size="10.8">CGO_ENABLED=0 go build -trimpath ./cmd/memorize 실행</text>
+  <text x="180" y="147" class="mono t-pri f1" font-size="10.8">CGO_ENABLED=1 go build ./cmd/praxis 실행</text>
+  <text x="180" y="147" class="mono t-err f2" font-size="10.8">CGO_ENABLED=1 go build ./cmd/praxis 실행</text>
+  <text x="180" y="147" class="mono t-ok f3" font-size="10.8">CGO_ENABLED=0 go build -trimpath ./cmd/praxis 실행</text>
 
   <rect class="btn-pri" x="852" y="130" width="118" height="26" rx="5" />
   <text x="911" y="147" text-anchor="middle" class="sans t-pri" font-size="10.5" font-weight="700">위반 여부 검사</text>

@@ -13,14 +13,14 @@ import (
 	"sync"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/config"
-	"memorize/internal/transport/dashboard"
-	thttp "memorize/internal/transport/http"
+	"praxis/internal/domain"
+	"praxis/internal/infra/config"
+	"praxis/internal/transport/dashboard"
+	thttp "praxis/internal/transport/http"
 )
 
 func isDevHotReloadEnabled() bool {
-	return strings.TrimSpace(os.Getenv("MEMORIZE_DEV_HOTRELOAD")) == "1"
+	return strings.TrimSpace(os.Getenv("PRAXIS_DEV_HOTRELOAD")) == "1"
 }
 
 func WatchedBinaryCandidates() []string {
@@ -43,22 +43,22 @@ func WatchedBinaryCandidates() []string {
 			out = append(out, resolved)
 		}
 	}
-	if envBin := strings.TrimSpace(os.Getenv("MEMORY_DAEMON_BIN")); envBin != "" {
+	if envBin := strings.TrimSpace(os.Getenv("PRAXIS_DAEMON_BIN")); envBin != "" {
 		add(envBin)
 		return out
 	}
 	if exe, err := os.Executable(); err == nil {
 		add(exe)
 	}
-	binName := "memorize"
+	binName := "praxis"
 	if runtime.GOOS == "windows" {
-		binName = "memorize.exe"
+		binName = "praxis.exe"
 	}
 	if dir := config.DefaultDataDir(); dir != "" {
 		add(filepath.Join(dir, "bin", binName))
 	}
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		add(filepath.Join(home, ".memorize", "bin", binName))
+		add(filepath.Join(home, ".praxis", "bin", binName))
 	}
 	if isDevHotReloadEnabled() {
 		if wd, err := os.Getwd(); err == nil {
@@ -187,7 +187,7 @@ func StartBackgroundServer(addr string, deps dashboard.Deps, dbPath string) (str
 							cmd := exec.Command(path, "-dashboard", boundAddr)
 							cmd.Env = os.Environ()
 							if err := cmd.Start(); err != nil {
-								log.Printf("memorize dashboard handover restart failed: %v", err)
+								log.Printf("praxis dashboard handover restart failed: %v", err)
 							}
 							return
 						}

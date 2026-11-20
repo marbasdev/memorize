@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/git"
-	"memorize/internal/modules/memory"
+	"praxis/internal/domain"
+	"praxis/internal/infra/git"
+	"praxis/internal/modules/memory"
 )
 
 type stubRuleEval struct{}
@@ -406,7 +406,7 @@ func TestPublishProposal_RetryOnPushConflictAndProtectedBranchError(t *testing.T
 	if err == nil || !errors.Is(err, git.ErrBranchProtected) {
 		t.Fatalf("expected git.ErrBranchProtected on protected branch without PR fallback, got err=%v", err)
 	}
-	if branches := strings.TrimSpace(runGitTest(t, devADir, "ls-remote", "--heads", "origin", "memorize/*")); branches != "" {
+	if branches := strings.TrimSpace(runGitTest(t, devADir, "ls-remote", "--heads", "origin", "praxis/*")); branches != "" {
 		t.Fatalf("expected no fallback PR branch created on origin, got %q", branches)
 	}
 }

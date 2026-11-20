@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-const PlaybookURI = "memorize://playbook/memory-curator"
+const PlaybookURI = "praxis://playbook/memory-curator"
 
 //go:embed playbook/SKILL.md
 var PlaybookSkillMD string

@@ -10,9 +10,9 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/git"
-	"memorize/internal/infra/sqlite"
+	"praxis/internal/domain"
+	"praxis/internal/infra/git"
+	"praxis/internal/infra/sqlite"
 )
 
 func (s *Service) GetSyncedCommit(ctx context.Context, rawScope string) string {

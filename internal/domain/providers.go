@@ -103,7 +103,7 @@ func NormalizeProviderID(provider string) string {
 }
 
 func ResolveExplicitEnvProvider() string {
-	if explicit := NormalizeProviderID(os.Getenv("MEMORY_PROVIDER")); explicit != "" {
+	if explicit := NormalizeProviderID(os.Getenv("PRAXIS_PROVIDER")); explicit != "" {
 		return explicit
 	}
 	var matched []string

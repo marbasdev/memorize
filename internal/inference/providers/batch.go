@@ -9,7 +9,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 func envInt(key string, fallback int) int {
@@ -30,8 +30,8 @@ func NewBatchEvaluator(name string, base domain.Evaluator, defaultBatch, default
 	return &BatchEvaluator{
 		name:        name,
 		base:        base,
-		batchSize:   envInt("MEMORY_BATCH_SIZE", defaultBatch),
-		concurrency: envInt("MEMORY_CONCURRENCY", defaultConc),
+		batchSize:   envInt("PRAXIS_BATCH_SIZE", defaultBatch),
+		concurrency: envInt("PRAXIS_CONCURRENCY", defaultConc),
 	}
 }
 

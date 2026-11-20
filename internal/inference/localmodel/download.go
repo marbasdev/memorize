@@ -161,7 +161,7 @@ func (m *Manager) InstallRuntimeSync(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", "memorize-localmodel")
+	req.Header.Set("User-Agent", "praxis-localmodel")
 	resp, err := apiClient.Do(req)
 	if err != nil {
 		return err
@@ -212,7 +212,7 @@ func (m *Manager) downloadFileWithProgress(ctx context.Context, dlURL, destPath 
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", "memorize-localmodel")
+	req.Header.Set("User-Agent", "praxis-localmodel")
 	resp, err := downloadClient.Do(req)
 	if err != nil {
 		return err

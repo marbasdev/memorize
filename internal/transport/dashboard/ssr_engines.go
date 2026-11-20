@@ -7,11 +7,11 @@ import (
 	"os"
 	"strings"
 
-	"memorize/internal/domain"
-	"memorize/internal/inference/discovery"
-	"memorize/internal/inference/localmodel"
-	"memorize/internal/inference/providers"
-	"memorize/internal/infra/config"
+	"praxis/internal/domain"
+	"praxis/internal/inference/discovery"
+	"praxis/internal/inference/localmodel"
+	"praxis/internal/inference/providers"
+	"praxis/internal/infra/config"
 )
 
 type ssrEnginesData struct {
@@ -517,7 +517,7 @@ func buildEngineSetupWarning(lang string, rawCfg, cfg map[string]string, provNam
 
 func checkDashboardLocalSetup(lang string, rawCfg map[string]string) string {
 	if strings.TrimSpace(rawCfg[config.CfgActiveProvider]) == "" &&
-		strings.TrimSpace(os.Getenv("MEMORY_PROVIDER")) == "" &&
+		strings.TrimSpace(os.Getenv("PRAXIS_PROVIDER")) == "" &&
 		strings.TrimSpace(rawCfg["local_model_url"]) == "" &&
 		strings.TrimSpace(os.Getenv("LOCAL_MODEL_URL")) == "" {
 		return setupMsg(lang,

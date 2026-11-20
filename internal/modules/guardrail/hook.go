@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/git"
+	"praxis/internal/domain"
+	"praxis/internal/infra/git"
 )
 
 type hookWorkspaceTarget struct {
@@ -366,7 +366,7 @@ func (s *Service) checkTurnPreMutateGate(ctx context.Context, ev NormalizedHookE
 		targetIDs = []int64{dec.ConflictFactID}
 	}
 	if dec.Action == "OVERWRITE" && len(targetIDs) > 0 {
-		return fmt.Sprintf("[MEMORIZE PRE-MUTATE GATE] Current user input updates existing memory %v. Call manage_memory(action=\"update\") or commit_memory(candidate_facts=[...]) FIRST before editing files or running commands.", targetIDs), targetIDs
+		return fmt.Sprintf("[PRAXIS PRE-MUTATE GATE] Current user input updates existing memory %v. Call manage_memory(action=\"update\") or commit_memory(candidate_facts=[...]) FIRST before editing files or running commands.", targetIDs), targetIDs
 	}
-	return "[MEMORIZE PRE-MUTATE GATE] Current user input defines a new durable rule/decision. Call commit_memory(candidate_facts=[...]) FIRST before editing files or running commands.", nil
+	return "[PRAXIS PRE-MUTATE GATE] Current user input defines a new durable rule/decision. Call commit_memory(candidate_facts=[...]) FIRST before editing files or running commands.", nil
 }

@@ -55,7 +55,7 @@ var agentCatalog = []AgentSpec{
 		ID:          "antigravity",
 		DisplayName: "Antigravity",
 		PluginDirRelPaths: []string{
-			filepath.Join(".gemini", "config", "plugins", "memorize"),
+			filepath.Join(".gemini", "config", "plugins", "praxis"),
 		},
 		ManifestRelPaths: []string{
 			"hooks.json",

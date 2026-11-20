@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/config"
+	"praxis/internal/domain"
+	"praxis/internal/infra/config"
 )
 
 var ErrDaemonAuthRequired = errors.New("daemon authentication required")
@@ -28,7 +28,7 @@ var (
 )
 
 func ExplicitDaemonOverride(explicit string) string {
-	for _, v := range []string{explicit, os.Getenv("MEMORY_DAEMON_ADDR"), os.Getenv("MEMORY_DASHBOARD_ADDR")} {
+	for _, v := range []string{explicit, os.Getenv("PRAXIS_DAEMON_ADDR"), os.Getenv("PRAXIS_DASHBOARD_ADDR")} {
 		if s := strings.TrimSpace(v); s != "" {
 			return s
 		}
@@ -327,19 +327,19 @@ func PostDaemonMCPWithAuth(addrOrURL, bearerToken, sid, cwd, account string, roo
 	if tok := strings.TrimSpace(bearerToken); tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
-	req.Header.Set("X-Memorize-Session", sid)
+	req.Header.Set("X-Praxis-Session", sid)
 	if cwd != "" {
-		req.Header.Set("X-Memorize-Cwd", cwd)
+		req.Header.Set("X-Praxis-Cwd", cwd)
 	}
 	if account != "" {
-		req.Header.Set("X-Memorize-Account", account)
+		req.Header.Set("X-Praxis-Account", account)
 	}
 	if len(roots) > 0 {
-		req.Header.Set("X-Memorize-Roots", strings.Join(roots, "\t"))
+		req.Header.Set("X-Praxis-Roots", strings.Join(roots, "\t"))
 	}
 	if len(scopeHints) > 0 {
 		if rawHints, err := json.Marshal(scopeHints); err == nil {
-			req.Header.Set("X-Memorize-Scope-Hints", string(rawHints))
+			req.Header.Set("X-Praxis-Scope-Hints", string(rawHints))
 		}
 	}
 

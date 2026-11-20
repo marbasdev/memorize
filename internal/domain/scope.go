@@ -100,7 +100,7 @@ func NormalizeAccount(raw string) string {
 }
 
 func DefaultAccount() string {
-	for _, k := range []string{"MEMORY_ACCOUNT", "AGY_ACCOUNT", "USER", "USERNAME"} {
+	for _, k := range []string{"PRAXIS_ACCOUNT", "AGY_ACCOUNT", "USER", "USERNAME"} {
 		if v := NormalizeAccount(os.Getenv(k)); v != "" {
 			return v
 		}
@@ -133,7 +133,7 @@ func SafeCwdScope() string {
 }
 
 func DefaultScope() string {
-	if env := strings.TrimSpace(os.Getenv("MEMORY_DEFAULT_SCOPE")); env != "" {
+	if env := strings.TrimSpace(os.Getenv("PRAXIS_DEFAULT_SCOPE")); env != "" {
 		return NormalizeScope(env)
 	}
 	if cwdScope := SafeCwdScope(); cwdScope != "" {

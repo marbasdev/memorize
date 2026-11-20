@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 func TestGeminiZeroThinkingFallbackAndThoughtPartFiltering(t *testing.T) {
@@ -488,7 +488,7 @@ func TestSchemaEvaluatorSummarizeCommitMilestones(t *testing.T) {
 	if !ok {
 		t.Fatal("expected BatchEvaluator to implement ProgressMilestoneSummarizer")
 	}
-	got, err := ms.SummarizeCommitMilestones(context.Background(), "project:memorize", "en", []domain.GitCommitBrief{
+	got, err := ms.SummarizeCommitMilestones(context.Background(), "project:praxis", "en", []domain.GitCommitBrief{
 		{SHA: "aaa1111", Date: "2026-11-18", Subject: "feat: chunk diffs"},
 		{SHA: "bbb2222", Date: "2026-11-18", Subject: "feat: add budget probe"},
 		{SHA: "ccc3333", Date: "2026-11-18", Subject: "feat: bounded stop re-verify"},

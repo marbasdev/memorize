@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 type cooldownTracker struct {

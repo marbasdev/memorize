@@ -281,7 +281,7 @@ func SortFactsByPrefixTier(facts []Fact) {
 	})
 }
 
-const MemoryBundleFormat = "memorize.bundle.v1"
+const MemoryBundleFormat = "praxis.bundle.v1"
 
 type MemoryBundleItem struct {
 	Scope       string   `json:"scope"`

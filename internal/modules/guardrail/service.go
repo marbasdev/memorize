@@ -9,11 +9,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/inference/router"
-	"memorize/internal/infra/eventbus"
-	"memorize/internal/modules/memory"
-	"memorize/internal/modules/progress"
+	"praxis/internal/domain"
+	"praxis/internal/inference/router"
+	"praxis/internal/infra/eventbus"
+	"praxis/internal/modules/memory"
+	"praxis/internal/modules/progress"
 )
 
 type RulePack interface {

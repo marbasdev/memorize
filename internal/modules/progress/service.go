@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"sync/atomic"
 
-	"memorize/internal/inference/router"
-	"memorize/internal/infra/eventbus"
-	"memorize/internal/modules/memory"
+	"praxis/internal/inference/router"
+	"praxis/internal/infra/eventbus"
+	"praxis/internal/modules/memory"
 )
 
 type Service struct {

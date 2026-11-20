@@ -14,10 +14,10 @@ import (
 
 	"github.com/mark3labs/mcp-go/server"
 
-	"memorize/internal/domain"
-	"memorize/internal/modules/guardrail"
-	"memorize/internal/modules/memory"
-	transportmcp "memorize/internal/transport/mcp"
+	"praxis/internal/domain"
+	"praxis/internal/modules/guardrail"
+	"praxis/internal/modules/memory"
+	transportmcp "praxis/internal/transport/mcp"
 )
 
 type DaemonDeps struct {
@@ -132,7 +132,7 @@ func NewDaemonMux(deps DaemonDeps) http.Handler {
 			http.Error(w, `{"error":"mcp server unavailable"}`, http.StatusServiceUnavailable)
 			return
 		}
-		reqCtx := attachAuthContext(r.Context(), deps, p, r.Header.Get("X-Memorize-Account"))
+		reqCtx := attachAuthContext(r.Context(), deps, p, r.Header.Get("X-Praxis-Account"))
 		streamHTTP.ServeHTTP(w, r.WithContext(reqCtx))
 	}))
 
@@ -243,12 +243,12 @@ func NewDaemonMux(deps DaemonDeps) http.Handler {
 			http.Error(w, `{"error":"empty rpc payload"}`, http.StatusBadRequest)
 			return
 		}
-		sid := strings.TrimSpace(r.Header.Get("X-Memorize-Session"))
+		sid := strings.TrimSpace(r.Header.Get("X-Praxis-Session"))
 		if sid == "" {
 			sid = "bridge-default"
 		}
 		var roots []string
-		if rawRoots := strings.TrimSpace(r.Header.Get("X-Memorize-Roots")); rawRoots != "" {
+		if rawRoots := strings.TrimSpace(r.Header.Get("X-Praxis-Roots")); rawRoots != "" {
 			for _, part := range strings.Split(rawRoots, "\t") {
 				if part = strings.TrimSpace(part); part != "" {
 					roots = append(roots, part)
@@ -256,13 +256,13 @@ func NewDaemonMux(deps DaemonDeps) http.Handler {
 			}
 		}
 		var scopeHints map[string]string
-		if rawHints := strings.TrimSpace(r.Header.Get("X-Memorize-Scope-Hints")); rawHints != "" {
+		if rawHints := strings.TrimSpace(r.Header.Get("X-Praxis-Scope-Hints")); rawHints != "" {
 			_ = json.Unmarshal([]byte(rawHints), &scopeHints)
 		}
-		ctx := attachAuthContext(r.Context(), deps, p, r.Header.Get("X-Memorize-Account"))
+		ctx := attachAuthContext(r.Context(), deps, p, r.Header.Get("X-Praxis-Account"))
 		ctx = transportmcp.WithBridgeMeta(ctx, transportmcp.BridgeReqMeta{
 			SessionID:  sid,
-			Cwd:        strings.TrimSpace(r.Header.Get("X-Memorize-Cwd")),
+			Cwd:        strings.TrimSpace(r.Header.Get("X-Praxis-Cwd")),
 			Roots:      roots,
 			ScopeHints: scopeHints,
 		})
@@ -353,14 +353,14 @@ func NewDaemonMux(deps DaemonDeps) http.Handler {
 			SubCategory: strings.TrimSpace(q.Get("sub_category")),
 			Search:      q.Get("q"),
 		}
-		reqCtx := attachAuthContext(r.Context(), deps, p, r.Header.Get("X-Memorize-Account"))
+		reqCtx := attachAuthContext(r.Context(), deps, p, r.Header.Get("X-Praxis-Account"))
 		bundle, err := deps.Memory.ExportBundle(reqCtx, rq, ids)
 		if err != nil {
 			WriteErr(w, http.StatusInternalServerError, err)
 			return
 		}
 		if q.Get("download") == "1" {
-			w.Header().Set("Content-Disposition", `attachment; filename="memorize-bundle.json"`)
+			w.Header().Set("Content-Disposition", `attachment; filename="praxis-bundle.json"`)
 		}
 		WriteJSON(w, http.StatusOK, bundle)
 	})
@@ -383,7 +383,7 @@ func NewDaemonMux(deps DaemonDeps) http.Handler {
 			http.Error(w, `{"error":"invalid bundle import json"}`, http.StatusBadRequest)
 			return
 		}
-		reqCtx := attachAuthContext(r.Context(), deps, p, r.Header.Get("X-Memorize-Account"))
+		reqCtx := attachAuthContext(r.Context(), deps, p, r.Header.Get("X-Praxis-Account"))
 		res, err := deps.Memory.ImportBundle(reqCtx, req.Bundle, req.Options)
 		if err != nil {
 			WriteErr(w, http.StatusBadRequest, err)

@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 func normalizeLang(raw string) string {

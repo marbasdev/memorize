@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 type ssrTelemetryTaskBar struct {

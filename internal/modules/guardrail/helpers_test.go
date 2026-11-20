@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"memorize/internal/domain"
-	"memorize/internal/modules/memory"
-	"memorize/internal/modules/progress"
+	"praxis/internal/domain"
+	"praxis/internal/modules/memory"
+	"praxis/internal/modules/progress"
 )
 
 type testStack struct {

@@ -10,13 +10,13 @@ import (
 	"strings"
 	"testing"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/sqlite"
-	"memorize/internal/modules/guardrail"
-	"memorize/internal/modules/memory"
-	"memorize/internal/modules/progress"
-	thttp "memorize/internal/transport/http"
-	transportmcp "memorize/internal/transport/mcp"
+	"praxis/internal/domain"
+	"praxis/internal/infra/sqlite"
+	"praxis/internal/modules/guardrail"
+	"praxis/internal/modules/memory"
+	"praxis/internal/modules/progress"
+	thttp "praxis/internal/transport/http"
+	transportmcp "praxis/internal/transport/mcp"
 )
 
 func TestSecurityGuardsAndDaemonMux(t *testing.T) {
@@ -42,7 +42,7 @@ func TestSecurityGuardsAndDaemonMux(t *testing.T) {
 		t.Fatalf("expected foreign Origin to be rejected")
 	}
 
-	t.Setenv("MEMORY_DAEMON_ADDR", "127.0.0.1:29999")
+	t.Setenv("PRAXIS_DAEMON_ADDR", "127.0.0.1:29999")
 	if got := thttp.ResolveDaemonAddrForDB("", ""); got != "127.0.0.1:29999" {
 		t.Fatalf("ResolveDaemonAddrForDB env = %q", got)
 	}
@@ -88,7 +88,7 @@ func TestSecurityGuardsAndDaemonMux(t *testing.T) {
 		bytes.NewReader([]byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)))
 	rpcReq.Host = "127.0.0.1:18095"
 	rpcReq.Header.Set("Content-Type", "application/json")
-	rpcReq.Header.Set("X-Memorize-Session", "http-test-sess")
+	rpcReq.Header.Set("X-Praxis-Session", "http-test-sess")
 	rpcRec := httptest.NewRecorder()
 	mux.ServeHTTP(rpcRec, rpcReq)
 	if rpcRec.Code != http.StatusOK || !strings.Contains(rpcRec.Body.String(), "query_project_memory") {
@@ -258,7 +258,7 @@ func TestDaemonMuxServerAuthAndAntiSpoofing(t *testing.T) {
 	reqMCP := httptest.NewRequest(http.MethodPost, "http://team.local:18095/api/daemon/mcp", bytes.NewBufferString(rpcBody))
 	reqMCP.Header.Set("Content-Type", "application/json")
 	reqMCP.Header.Set("Authorization", "Bearer "+aliceIss.PlainToken)
-	reqMCP.Header.Set("X-Memorize-Account", "bob")
+	reqMCP.Header.Set("X-Praxis-Account", "bob")
 	h.ServeHTTP(recMCP, reqMCP)
 	if recMCP.Code != http.StatusOK {
 		t.Fatalf("member MCP call failed: %d %s", recMCP.Code, recMCP.Body.String())
@@ -317,7 +317,7 @@ func TestDaemonMuxServerAuthAndAntiSpoofing(t *testing.T) {
 		reqImp := httptest.NewRequest(http.MethodPost, "http://team.local:18095/api/daemon/import", bytes.NewReader(impBody))
 		reqImp.Header.Set("Content-Type", "application/json")
 		reqImp.Header.Set("Authorization", "Bearer "+aliceIss.PlainToken)
-		reqImp.Header.Set("X-Memorize-Account", "hostadmin") // spoof attempt must be ignored
+		reqImp.Header.Set("X-Praxis-Account", "hostadmin") // spoof attempt must be ignored
 		h.ServeHTTP(recImp, reqImp)
 		if recImp.Code != http.StatusOK {
 			t.Fatalf("alice /api/daemon/import failed: %d %s", recImp.Code, recImp.Body.String())
@@ -331,7 +331,7 @@ func TestDaemonMuxServerAuthAndAntiSpoofing(t *testing.T) {
 		reqExpAlice := httptest.NewRequest(http.MethodGet, "http://team.local:18095/api/daemon/export?scope=global&download=1", nil)
 		reqExpAlice.Header.Set("Authorization", "Bearer "+aliceIss.PlainToken)
 		h.ServeHTTP(recExpAlice, reqExpAlice)
-		if recExpAlice.Code != http.StatusOK || !strings.Contains(recExpAlice.Header().Get("Content-Disposition"), "memorize-bundle.json") {
+		if recExpAlice.Code != http.StatusOK || !strings.Contains(recExpAlice.Header().Get("Content-Disposition"), "praxis-bundle.json") {
 			t.Fatalf("alice /api/daemon/export failed: %d hdr=%q", recExpAlice.Code, recExpAlice.Header().Get("Content-Disposition"))
 		}
 		var expAlice domain.MemoryBundle
@@ -359,9 +359,9 @@ func TestProxySecurityHelpersAndHealthzDBFailure(t *testing.T) {
 		reqProxy := httptest.NewRequest(http.MethodGet, "http://internal:18095/", nil)
 		reqProxy.RemoteAddr = "10.0.0.10:5555"
 		reqProxy.Header.Set("X-Forwarded-For", "203.0.113.7, 10.0.0.10")
-		reqProxy.Header.Set("X-Forwarded-Host", "memorize.team.example")
+		reqProxy.Header.Set("X-Forwarded-Host", "praxis.team.example")
 		reqProxy.Header.Set("X-Forwarded-Proto", "https")
-		reqProxy.Header.Set("Origin", "https://memorize.team.example")
+		reqProxy.Header.Set("Origin", "https://praxis.team.example")
 		if got := thttp.ClientPeerIP(reqProxy); got != "203.0.113.7" {
 			t.Fatalf("ClientPeerIP = %q", got)
 		}
@@ -385,8 +385,8 @@ func TestProxySecurityHelpersAndHealthzDBFailure(t *testing.T) {
 	t.Run("bearer_post_json_and_closed_db_healthz", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:18095/test", strings.NewReader(`{"x":1}`))
 		req.Host = "127.0.0.1:18095"
-		req.Header.Set("Authorization", "Bearer mem_abc")
-		if tok, ok := thttp.ExtractBearerToken(req); !ok || tok != "mem_abc" {
+		req.Header.Set("Authorization", "Bearer prx_abc")
+		if tok, ok := thttp.ExtractBearerToken(req); !ok || tok != "prx_abc" {
 			t.Fatalf("ExtractBearerToken = %q %v", tok, ok)
 		}
 		handler := thttp.PostJSONMode(false, func(w http.ResponseWriter, r *http.Request) {

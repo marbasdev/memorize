@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 const maxTrimmedRuleRunes = 180

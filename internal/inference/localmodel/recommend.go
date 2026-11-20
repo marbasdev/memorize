@@ -377,7 +377,7 @@ func DiscoverHuggingFaceModels(ctx context.Context, sortMode, searchQuery string
 		apiURL := fmt.Sprintf("%s/api/models?filter=gguf&pipeline_tag=text-generation&search=%s&sort=%s&direction=-1&limit=16",
 			base, url.QueryEscape(q), sortField)
 		req, _ := http.NewRequestWithContext(cctx, http.MethodGet, apiURL, nil)
-		req.Header.Set("User-Agent", "memorize-recommender")
+		req.Header.Set("User-Agent", "praxis-recommender")
 		resp, err := apiClient.Do(req)
 		if err != nil {
 			return nil, err
@@ -403,7 +403,7 @@ func DiscoverHuggingFaceModels(ctx context.Context, sortMode, searchQuery string
 				if err != nil {
 					return nil
 				}
-				req.Header.Set("User-Agent", "memorize-recommender")
+				req.Header.Set("User-Agent", "praxis-recommender")
 				resp, err := apiClient.Do(req)
 				if err != nil {
 					return nil
@@ -457,7 +457,7 @@ func DiscoverHuggingFaceModels(ctx context.Context, sortMode, searchQuery string
 			if err != nil {
 				return nil
 			}
-			req.Header.Set("User-Agent", "memorize-recommender")
+			req.Header.Set("User-Agent", "praxis-recommender")
 			resp, err := apiClient.Do(req)
 			if err != nil {
 				return nil

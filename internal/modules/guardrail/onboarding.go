@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/config"
+	"praxis/internal/domain"
+	"praxis/internal/infra/config"
 )
 
 func (s *Service) GetOnboardingStatus(ctx context.Context, rawScope string) string {
@@ -78,10 +78,10 @@ func (s *Service) ConsumeEngineSetupOffer(ctx context.Context, sessionID, reason
 		detail = "no active inference engine configured"
 	}
 	if domain.IsServerMode(ctx) && !domain.CanAccessAdminFeatures(ctx) {
-		return fmt.Sprintf("[MEMORIZE ENGINE SETUP REQUIRED] Team server inference engine is not ready (%s). Ask your team server administrator to configure an engine.", detail)
+		return fmt.Sprintf("[PRAXIS ENGINE SETUP REQUIRED] Team server inference engine is not ready (%s). Ask your team server administrator to configure an engine.", detail)
 	}
 	setupURL := strings.TrimRight(config.ActiveDaemonURL(s.dbPath), "/") + "/#engines"
-	return fmt.Sprintf("[MEMORIZE ENGINE SETUP REQUIRED] Inference engine is not ready (%s). Do NOT run commit_memory or rule onboarding yet; guide the user to open %s (Web Console -> Engines tab) to download Local GGUF in 1 click or connect Ollama/LM Studio, Gemini, or System 1.", detail, setupURL)
+	return fmt.Sprintf("[PRAXIS ENGINE SETUP REQUIRED] Inference engine is not ready (%s). Do NOT run commit_memory or rule onboarding yet; guide the user to open %s (Web Console -> Engines tab) to download Local GGUF in 1 click or connect Ollama/LM Studio, Gemini, or System 1.", detail, setupURL)
 }
 
 func (s *Service) ConsumeOnboardingOffer(ctx context.Context, sessionID, rawScope string) string {

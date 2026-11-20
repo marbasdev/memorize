@@ -9,12 +9,12 @@ import (
 	"strings"
 	"testing"
 
-	"memorize/internal/domain"
-	"memorize/internal/inference/localmodel"
-	"memorize/internal/modules/guardrail"
-	"memorize/internal/modules/memory"
-	"memorize/internal/modules/progress"
-	thttp "memorize/internal/transport/http"
+	"praxis/internal/domain"
+	"praxis/internal/inference/localmodel"
+	"praxis/internal/modules/guardrail"
+	"praxis/internal/modules/memory"
+	"praxis/internal/modules/progress"
+	thttp "praxis/internal/transport/http"
 )
 
 func newTestDeps(t *testing.T, dbPath string, eval domain.Evaluator, modelsDir string, hooks thttp.DashboardHooks) Deps {

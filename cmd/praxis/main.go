@@ -3,8 +3,8 @@ package main
 import (
 	"os"
 
-	"memorize/internal/app/localdaemon"
-	"memorize/internal/transport/cli"
+	"praxis/internal/app/localdaemon"
+	"praxis/internal/transport/cli"
 )
 
 var version = "1.2.0"

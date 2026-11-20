@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 func TestInsertRule_ScaffoldAndRoundTrip(t *testing.T) {
@@ -16,12 +16,12 @@ func TestInsertRule_ScaffoldAndRoundTrip(t *testing.T) {
 		AddedBy:     "@marbas",
 		AddedAt:     "2026-11-14",
 	}
-	raw, err := InsertRule(nil, "project:memorize", first)
+	raw, err := InsertRule(nil, "project:praxis", first)
 	if err != nil {
 		t.Fatalf("InsertRule scaffold failed: %v", err)
 	}
 	text := string(raw)
-	if !strings.Contains(text, "# Team Rules (`memorize`)") ||
+	if !strings.Contains(text, "# Team Rules (`praxis`)") ||
 		!strings.Contains(text, "## Architecture (`architecture`)") ||
 		!strings.Contains(text, "- (`workflow`) Keep acyclic unidirectional package layering · `@marbas` · `2026-11-14`") {
 		t.Fatalf("unexpected generated markdown:\n%s", text)
@@ -30,7 +30,7 @@ func TestInsertRule_ScaffoldAndRoundTrip(t *testing.T) {
 		t.Fatalf("expected no visible key or tier tags in markdown:\n%s", text)
 	}
 
-	doc, err := ParseDocument(raw, "project:memorize")
+	doc, err := ParseDocument(raw, "project:praxis")
 	if err != nil {
 		t.Fatalf("ParseDocument round-trip failed: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestInsertRule_ScaffoldAndRoundTrip(t *testing.T) {
 
 func TestInsertRule_SurgicalOrderingAndBytePreservation(t *testing.T) {
 	initial := strings.Join([]string{
-		"# Team Rules (`memorize`)",
+		"# Team Rules (`praxis`)",
 		"",
 		"> Custom team intro note preserved verbatim.",
 		"",

@@ -10,11 +10,11 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"memorize/internal/domain"
-	"memorize/internal/modules/guardrail"
-	"memorize/internal/modules/memory"
-	"memorize/internal/modules/progress"
-	"memorize/internal/modules/rulepack"
+	"praxis/internal/domain"
+	"praxis/internal/modules/guardrail"
+	"praxis/internal/modules/memory"
+	"praxis/internal/modules/progress"
+	"praxis/internal/modules/rulepack"
 )
 
 func toInt64(v any) (int64, bool) {
@@ -132,7 +132,7 @@ func RegisterResourcesAndPrompts(srv *server.MCPServer) {
 	srv.AddPrompt(
 		mcp.NewPrompt(
 			"memory-curator",
-			mcp.WithPromptDescription("Load the memorize Memory Curator operating playbook."),
+			mcp.WithPromptDescription("Load the praxis Memory Curator operating playbook."),
 		),
 		func(ctx context.Context, req mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 			return mcp.NewGetPromptResult(
@@ -147,7 +147,7 @@ func RegisterResourcesAndPrompts(srv *server.MCPServer) {
 
 func RegisterTools(srv *server.MCPServer, deps Deps, resolver *ScopeResolver) {
 	scopeDesc := "Scope: 'project:<name>' (auto-detected if omitted), 'global', or 'personal'."
-	accountDesc := "User account key isolating 'personal' scope (defaults to MEMORY_ACCOUNT/AGY_ACCOUNT/OS user)."
+	accountDesc := "User account key isolating 'personal' scope (defaults to PRAXIS_ACCOUNT/AGY_ACCOUNT/OS user)."
 
 	srv.AddTool(mcp.NewTool("query_project_memory",
 		mcp.WithDescription("Query active memories relevant to the current task with session delta deduplication."),
@@ -224,7 +224,7 @@ func handleQueryTool(mem *memory.Service, prog *progress.Service, rp *rulepack.S
 			rpNotice, _ = rp.SyncTurnNotice(ctx, sc, repoDir)
 		}
 		syncHint := ""
-		if os.Getenv("MEMORY_GIT_SYNC") == "1" || os.Getenv("MEMORY_AUTO_GIT_SYNC") == "1" {
+		if os.Getenv("PRAXIS_GIT_SYNC") == "1" || os.Getenv("PRAXIS_AUTO_GIT_SYNC") == "1" {
 			syncHint = mem.InspectRepoSync(ctx, sid, sc, repoDir, refresh)
 		}
 		out, err := mem.QuerySessionMemory(ctx,

@@ -1,17 +1,17 @@
 {
-  "memorize-enforcer": {
+  "praxis-enforcer": {
     "enabled": true,
     "SessionStart": [
       {
         "type": "command",
-        "command": "sh ./scripts/run-memorize.sh -hook antigravity-start",
+        "command": "sh ./scripts/run-praxis.sh -hook antigravity-start",
         "timeout": 8
       }
     ],
     "PreInvocation": [
       {
         "type": "command",
-        "command": "sh ./scripts/run-memorize.sh -hook antigravity-turn",
+        "command": "sh ./scripts/run-praxis.sh -hook antigravity-turn",
         "timeout": 8
       }
     ],
@@ -21,7 +21,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh ./scripts/run-memorize.sh -hook antigravity-pretool",
+            "command": "sh ./scripts/run-praxis.sh -hook antigravity-pretool",
             "timeout": 8
           }
         ]
@@ -30,7 +30,7 @@
     "Stop": [
       {
         "type": "command",
-        "command": "sh ./scripts/run-memorize.sh -hook antigravity-stop",
+        "command": "sh ./scripts/run-praxis.sh -hook antigravity-stop",
         "timeout": 15
       }
     ]

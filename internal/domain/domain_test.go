@@ -146,7 +146,7 @@ func TestAuthScopeSecurityAndDiffDomain(t *testing.T) {
 				t.Fatalf("expected ValidateAccountName(%q) to fail", bad)
 			}
 		}
-		if hint := FormatTokenHint("mem_0123456789abcdef"); !strings.Contains(hint, "...") {
+		if hint := FormatTokenHint("prx_0123456789abcdef"); !strings.Contains(hint, "...") {
 			t.Fatalf("unexpected token hint: %q", hint)
 		}
 	})

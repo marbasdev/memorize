@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/modules/memory"
+	"praxis/internal/domain"
+	"praxis/internal/modules/memory"
 )
 
 const (

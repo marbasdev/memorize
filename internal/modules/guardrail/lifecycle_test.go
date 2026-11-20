@@ -18,10 +18,10 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"memorize/internal/domain"
-	"memorize/internal/inference/providers"
-	"memorize/internal/modules/memory"
-	"memorize/internal/modules/progress"
+	"praxis/internal/domain"
+	"praxis/internal/inference/providers"
+	"praxis/internal/modules/memory"
+	"praxis/internal/modules/progress"
 )
 
 type autoScoreEval struct {
@@ -744,7 +744,7 @@ func TestGuardrailLogsAuditPaginationAndIsolation(t *testing.T) {
 	}
 
 	eval.violate = false
-	passPayload := []byte(`{"tool_name":"run_command","tool_input":{"command":"CGO_ENABLED=0 go build ./cmd/memorize"},"cwd":"/tmp/guard"}`)
+	passPayload := []byte(`{"tool_name":"run_command","tool_input":{"command":"CGO_ENABLED=0 go build ./cmd/praxis"},"cwd":"/tmp/guard"}`)
 	outAllow, _, err := st.gr.ExecuteHook(ctx, "antigravity-pretool", passPayload, "project:guard")
 	if err != nil || !strings.Contains(outAllow, `"decision":"allow"`) {
 		t.Fatalf("expected antigravity-pretool allow, got %q (%v)", outAllow, err)

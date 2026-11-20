@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/config"
-	"memorize/internal/infra/git"
-	"memorize/internal/infra/sqlite"
-	thttp "memorize/internal/transport/http"
+	"praxis/internal/domain"
+	"praxis/internal/infra/config"
+	"praxis/internal/infra/git"
+	"praxis/internal/infra/sqlite"
+	thttp "praxis/internal/transport/http"
 )
 
 type ssrLoginData struct {
@@ -243,7 +243,7 @@ func buildUsersModalData(r *http.Request, d Deps, lang string, issued *domain.Us
 		data.IssuedToken = issued.PlainToken
 		mcpCfg := map[string]any{
 			"mcpServers": map[string]any{
-				"memorize": map[string]any{
+				"praxis": map[string]any{
 					"url": strings.TrimRight(data.ConnectHintURL, "/") + "/mcp",
 					"headers": map[string]string{
 						"Authorization": "Bearer " + issued.PlainToken,
@@ -268,7 +268,7 @@ func safeRemoteHTTPURL(raw string) string {
 }
 
 func remoteBindingsDataDir(d Deps) string {
-	if envDir := strings.TrimSpace(os.Getenv("MEMORY_DATA_DIR")); envDir != "" {
+	if envDir := strings.TrimSpace(os.Getenv("PRAXIS_DATA_DIR")); envDir != "" {
 		return envDir
 	}
 	if d.Memory != nil {

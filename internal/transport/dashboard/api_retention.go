@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	thttp "memorize/internal/transport/http"
+	thttp "praxis/internal/transport/http"
 )
 
 var streamBootID = time.Now().UnixNano()

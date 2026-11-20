@@ -5,7 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 type Bus struct {

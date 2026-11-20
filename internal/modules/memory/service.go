@@ -11,11 +11,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/inference/router"
-	"memorize/internal/infra/config"
-	"memorize/internal/infra/eventbus"
-	"memorize/internal/infra/sqlite"
+	"praxis/internal/domain"
+	"praxis/internal/inference/router"
+	"praxis/internal/infra/config"
+	"praxis/internal/infra/eventbus"
+	"praxis/internal/infra/sqlite"
 )
 
 const (
@@ -263,7 +263,7 @@ func (s *Service) IsAutoGitSyncEnabled() bool {
 }
 
 func (s *Service) IncludePersonalInProject(ctx context.Context) bool {
-	if os.Getenv("MEMORY_INCLUDE_PERSONAL") == "1" {
+	if os.Getenv("PRAXIS_INCLUDE_PERSONAL") == "1" {
 		return true
 	}
 	return s.GetConfigMap(ctx)[config.CfgIncludePersonalInProject] == "1"
@@ -276,7 +276,7 @@ func (s *Service) CurrentAccount(ctx context.Context) string {
 	if acc := domain.AccountFromContext(ctx); acc != "" {
 		return acc
 	}
-	for _, k := range []string{"MEMORY_ACCOUNT", "AGY_ACCOUNT"} {
+	for _, k := range []string{"PRAXIS_ACCOUNT", "AGY_ACCOUNT"} {
 		if v := domain.NormalizeAccount(os.Getenv(k)); v != "" {
 			return v
 		}

@@ -13,9 +13,9 @@ import (
 	"strings"
 	"testing"
 
-	"memorize/internal/domain"
-	"memorize/internal/inference/providers"
-	thttp "memorize/internal/transport/http"
+	"praxis/internal/domain"
+	"praxis/internal/inference/providers"
+	thttp "praxis/internal/transport/http"
 )
 
 func TestModularStaticAssetsDNSRebindingAndPinPreservation(t *testing.T) {
@@ -433,7 +433,7 @@ func TestSSRv3PartialsNewestSortQuickTabsAndEngineActiveIsolation(t *testing.T) 
 	saveHTMLBytes, _ := io.ReadAll(hxResp.Body)
 	_ = hxResp.Body.Close()
 	saveHTML := string(saveHTMLBytes)
-	if !strings.Contains(hxResp.Header.Get("HX-Trigger"), "memorizeToast") || !strings.Contains(saveHTML, `id="engineActiveBadge"`) || strings.Contains(saveHTML, `id="providerBadge"`) {
+	if !strings.Contains(hxResp.Header.Get("HX-Trigger"), "praxisToast") || !strings.Contains(saveHTML, `id="engineActiveBadge"`) || strings.Contains(saveHTML, `id="providerBadge"`) {
 		t.Fatalf("expected HX-Trigger toast and in-tab engineActiveBadge (without topbar providerBadge OOB) on engine save")
 	}
 	if strings.Contains(getBody("/"), `id="providerBadge"`) {
@@ -543,8 +543,8 @@ func TestDashboardSecurityHardeningAndDevHotReloadGate(t *testing.T) {
 		!strings.Contains(rootResp.Header.Get("Content-Security-Policy"), "default-src 'self'") {
 		t.Fatalf("missing expected security headers: %+v", rootResp.Header)
 	}
-	if !strings.Contains(string(rootBytes), `memorizeRefreshEngines from:body`) {
-		t.Fatalf("expected layout #enginesSection to listen for memorizeRefreshEngines event")
+	if !strings.Contains(string(rootBytes), `praxisRefreshEngines from:body`) {
+		t.Fatalf("expected layout #enginesSection to listen for praxisRefreshEngines event")
 	}
 
 	xssScope := `global"',alert(1),"`
@@ -574,7 +574,7 @@ func TestDashboardSecurityHardeningAndDevHotReloadGate(t *testing.T) {
 	portReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/ui/ports/save", strings.NewReader(url.Values{"daemon_port": {"19295"}, "gguf_port": {"19288"}}.Encode()))
 	portReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	portReq.Header.Set("HX-Request", "true")
-	portReq.AddCookie(&http.Cookie{Name: "memorize_lang", Value: "ko"})
+	portReq.AddCookie(&http.Cookie{Name: "praxis_lang", Value: "ko"})
 	portResp, err := http.DefaultClient.Do(portReq)
 	if err != nil {
 		t.Fatal(err)
@@ -599,7 +599,7 @@ func TestDashboardSecurityHardeningAndDevHotReloadGate(t *testing.T) {
 	if err := os.WriteFile(liveThemePath, []byte("// HOTRELOAD_GATE_MARKER\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("MEMORIZE_DEV_HOTRELOAD", "")
+	t.Setenv("PRAXIS_DEV_HOTRELOAD", "")
 	resOff, err := http.Get(ts.URL + "/assets/theme.js")
 	if err != nil {
 		t.Fatal(err)
@@ -607,9 +607,9 @@ func TestDashboardSecurityHardeningAndDevHotReloadGate(t *testing.T) {
 	bodyOff, _ := io.ReadAll(resOff.Body)
 	_ = resOff.Body.Close()
 	if strings.Contains(string(bodyOff), "HOTRELOAD_GATE_MARKER") {
-		t.Fatalf("expected embedded theme.js when MEMORIZE_DEV_HOTRELOAD is unset, got live override")
+		t.Fatalf("expected embedded theme.js when PRAXIS_DEV_HOTRELOAD is unset, got live override")
 	}
-	t.Setenv("MEMORIZE_DEV_HOTRELOAD", "1")
+	t.Setenv("PRAXIS_DEV_HOTRELOAD", "1")
 	resOn, err := http.Get(ts.URL + "/assets/theme.js")
 	if err != nil {
 		t.Fatal(err)
@@ -617,7 +617,7 @@ func TestDashboardSecurityHardeningAndDevHotReloadGate(t *testing.T) {
 	bodyOn, _ := io.ReadAll(resOn.Body)
 	_ = resOn.Body.Close()
 	if !strings.Contains(string(bodyOn), "HOTRELOAD_GATE_MARKER") {
-		t.Fatalf("expected live theme.js override when MEMORIZE_DEV_HOTRELOAD=1, got %q", string(bodyOn))
+		t.Fatalf("expected live theme.js override when PRAXIS_DEV_HOTRELOAD=1, got %q", string(bodyOn))
 	}
 }
 
@@ -729,8 +729,8 @@ func TestAIConsolidationSuggestAndOneClickConfirm(t *testing.T) {
 		t.Fatalf("POST /ui/consolidate/apply-plan failed: %v (%v)", appResp, err)
 	}
 	_ = appResp.Body.Close()
-	if !strings.Contains(appResp.Header.Get("HX-Trigger"), "memorizeCloseModal") {
-		t.Fatalf("expected memorizeCloseModal HX-Trigger after apply-plan")
+	if !strings.Contains(appResp.Header.Get("HX-Trigger"), "praxisCloseModal") {
+		t.Fatalf("expected praxisCloseModal HX-Trigger after apply-plan")
 	}
 
 	page, err := svc.QueryRecordsPage(ctx, domain.RecordQuery{Scope: "project:ai-merge", State: "active", Page: 1, PageSize: 20})
@@ -924,7 +924,7 @@ func TestTelemetryDashboardGuardrailAndReset(t *testing.T) {
 	}
 	uiJSBytes, _ := io.ReadAll(uiJSResp.Body)
 	_ = uiJSResp.Body.Close()
-	for _, want := range []string{"telemetryOpen:", "setTelemetryOpen(", "memorize_telemetry_open"} {
+	for _, want := range []string{"telemetryOpen:", "setTelemetryOpen(", "praxis_telemetry_open"} {
 		if !strings.Contains(string(uiJSBytes), want) {
 			t.Fatalf("expected %q in /assets/ui.js", want)
 		}

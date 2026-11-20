@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 type ssrProgressData struct {

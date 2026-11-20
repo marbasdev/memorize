@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/git"
+	"praxis/internal/domain"
+	"praxis/internal/infra/git"
 )
 
 type commitMilestone struct {

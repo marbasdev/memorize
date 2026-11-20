@@ -11,13 +11,13 @@ import (
 	"strings"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/inference/localmodel"
-	"memorize/internal/infra/config"
-	"memorize/internal/infra/git"
-	"memorize/internal/infra/sqlite"
-	"memorize/internal/modules/memory"
-	thttp "memorize/internal/transport/http"
+	"praxis/internal/domain"
+	"praxis/internal/inference/localmodel"
+	"praxis/internal/infra/config"
+	"praxis/internal/infra/git"
+	"praxis/internal/infra/sqlite"
+	"praxis/internal/modules/memory"
+	thttp "praxis/internal/transport/http"
 )
 
 type DoctorCheck struct {
@@ -82,7 +82,7 @@ func runDoctorCLI(args []string, dbPath, modelsDir, version string, hooks Runtim
 		return 1
 	}
 
-	fmt.Println("[memorize doctor]")
+	fmt.Println("[praxis doctor]")
 	for _, c := range checks {
 		tag := "[OK]  "
 		switch c.Status {
@@ -113,7 +113,7 @@ func checkDoctorBinary(version string) DoctorCheck {
 
 	homeDir, _ := os.UserHomeDir()
 	if homeDir != "" {
-		pluginPath := filepath.Join(homeDir, ".gemini", "config", "plugins", "memorize", "plugin.json")
+		pluginPath := filepath.Join(homeDir, ".gemini", "config", "plugins", "praxis", "plugin.json")
 		if data, err := os.ReadFile(pluginPath); err == nil {
 			var p struct {
 				Version string `json:"version"`
@@ -133,7 +133,7 @@ func checkDoctorBinary(version string) DoctorCheck {
 					Category: "binary",
 					Status:   "warn",
 					Title:    title,
-					Detail:   fmt.Sprintf("binary v%s (%s) vs plugin manifest v%s (run 'agy plugin install ./plugins/memorize')", version, exe, p.Version),
+					Detail:   fmt.Sprintf("binary v%s (%s) vs plugin manifest v%s (run 'agy plugin install ./plugins/praxis')", version, exe, p.Version),
 				}
 			}
 		}
@@ -150,6 +150,9 @@ func checkDoctorBinary(version string) DoctorCheck {
 func checkDoctorDaemon(dbPath string) DoctorCheck {
 	title := "Daemon Process"
 	st, targetAddr, ok, authReq := thttp.ProbeLiveDaemonState("", dbPath)
+	if targetAddr == "" {
+		targetAddr, _ = thttp.ResolveDaemonTargetAddr("", dbPath)
+	}
 	healthz := thttp.ProbeDaemonHealthz(targetAddr)
 	healthzStr := "unreachable"
 	if healthz {
@@ -273,12 +276,12 @@ func checkDoctorGitScope(ctx context.Context) DoctorCheck {
 
 	hookStatus := "not installed"
 	preCommitHook := filepath.Join(root, ".git", "hooks", "pre-commit")
-	if b, err := os.ReadFile(preCommitHook); err == nil && strings.Contains(string(b), "memorize") {
+	if b, err := os.ReadFile(preCommitHook); err == nil && strings.Contains(string(b), "praxis") {
 		hookStatus = "installed"
 	}
 
 	teamRulesNote := ""
-	teamRulesPath := filepath.Join(root, ".memorize", "TEAM_RULES.md")
+	teamRulesPath := filepath.Join(root, ".praxis", "TEAM_RULES.md")
 	if b, err := os.ReadFile(teamRulesPath); err == nil {
 		ruleCount := 0
 		for _, line := range strings.Split(string(b), "\n") {
@@ -435,7 +438,7 @@ func checkDoctorRemotes(dbPath string) DoctorCheck {
 			Category: "remotes",
 			Status:   "ok",
 			Title:    title,
-			Detail:   fmt.Sprintf("local solo mode (%d saved remote profiles; use 'memorize switch' to connect)", len(bindings.Profiles)),
+			Detail:   fmt.Sprintf("local solo mode (%d saved remote profiles; use 'praxis switch' to connect)", len(bindings.Profiles)),
 		}
 	}
 

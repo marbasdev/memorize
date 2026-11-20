@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 var scoreRubric = []string{

@@ -1,14 +1,14 @@
 {
-  "name": "memorize",
+  "name": "praxis",
   "version": "1.2.0",
-  "description": "State-evaluated MCP memory server backed by SQLite with lifecycle context injection, Git rule sync, hybrid PreToolUse/Stop guardrails, and web console.",
+  "description": "Stateful memory and execution harness backed by SQLite with lifecycle delta injection, Git rule sync, hybrid PreToolUse/Stop guardrails, and web console.",
   "license": "MIT",
-  "repository": "https://github.com/marbasdev/memorize",
+  "repository": "https://github.com/marbasdev/praxis",
   "mcpServers": {
-    "memorize": {
+    "praxis": {
       "command": "/bin/sh",
       "args": [
-        "${CLAUDE_PLUGIN_ROOT}/scripts/run-memorize.sh"
+        "${CLAUDE_PLUGIN_ROOT}/scripts/run-praxis.sh"
       ]
     }
   },
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-memorize.sh\" -hook claude-start"
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-praxis.sh\" -hook claude-start"
           }
         ]
       }
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-memorize.sh\" -hook claude-turn"
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-praxis.sh\" -hook claude-turn"
           }
         ]
       }
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-memorize.sh\" -hook claude-pretool"
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-praxis.sh\" -hook claude-pretool"
           }
         ]
       }
@@ -49,7 +49,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-memorize.sh\" -hook claude-stop"
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-praxis.sh\" -hook claude-stop"
           }
         ]
       }
@@ -59,7 +59,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-memorize.sh\" -hook claude-end"
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-praxis.sh\" -hook claude-end"
           }
         ]
       }
@@ -69,7 +69,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-memorize.sh\" -hook claude-compact"
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-praxis.sh\" -hook claude-compact"
           }
         ]
       }

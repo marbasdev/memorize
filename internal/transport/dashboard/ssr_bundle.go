@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"memorize/internal/domain"
-	thttp "memorize/internal/transport/http"
+	"praxis/internal/domain"
+	thttp "praxis/internal/transport/http"
 )
 
 type ssrImportModalData struct {
@@ -42,7 +42,7 @@ func registerSSRBundleRoutes(mux *http.ServeMux, d Deps) {
 			thttp.WriteErr(w, http.StatusInternalServerError, err)
 			return
 		}
-		w.Header().Set("Content-Disposition", `attachment; filename="memorize-bundle.json"`)
+		w.Header().Set("Content-Disposition", `attachment; filename="praxis-bundle.json"`)
 		thttp.WriteJSON(w, http.StatusOK, bundle)
 	}))
 

@@ -10,8 +10,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/git"
+	"praxis/internal/domain"
+	"praxis/internal/infra/git"
 )
 
 const (
@@ -396,7 +396,7 @@ func (s *Service) verifyStopDiffSections(
 
 	if res.VerifyErr != nil {
 		if atRetryCap {
-			failClosed := os.Getenv("MEMORY_GUARDRAIL_FAIL_CLOSED") == "1"
+			failClosed := os.Getenv("PRAXIS_GUARDRAIL_FAIL_CLOSED") == "1"
 			_, _ = s.RecordGuardrailLog(persistCtx, domain.GuardrailLogInput{
 				Scope:       scope,
 				Source:      ev.Mode,
@@ -410,7 +410,7 @@ func (s *Service) verifyStopDiffSections(
 			})
 			if failClosed {
 				s.mem.SetTurnPartialNotice(persistCtx, sid, scope, fmt.Sprintf(
-					"[MEMORIZE GUARDRAIL NOTICE] Stop re-verification limit reached (%d retries) with evaluation error (%s); run verify_plan_against_memory or git pre-commit before committing.",
+					"[PRAXIS GUARDRAIL NOTICE] Stop re-verification limit reached (%d retries) with evaluation error (%s); run verify_plan_against_memory or git pre-commit before committing.",
 					maxStopReverifyAttempts, res.VerifyErr.Error(),
 				))
 				return nil, true, ""
@@ -437,7 +437,7 @@ func (s *Service) verifyStopDiffSections(
 				ElapsedMs:   elapsedMs,
 			})
 			s.mem.SetTurnPartialNotice(persistCtx, sid, scope, fmt.Sprintf(
-				"[MEMORIZE GUARDRAIL NOTICE] Stop re-verification limit reached (%d retries) with unresolved rule violations — resolve before committing:\n%s",
+				"[PRAXIS GUARDRAIL NOTICE] Stop re-verification limit reached (%d retries) with unresolved rule violations — resolve before committing:\n%s",
 				maxStopReverifyAttempts, vDetails,
 			))
 			return res.Blocking, false, ""
@@ -450,7 +450,7 @@ func (s *Service) verifyStopDiffSections(
 		return res.Blocking, false, partialNote
 	}
 	if res.Partial {
-		failClosed := os.Getenv("MEMORY_GUARDRAIL_FAIL_CLOSED") == "1"
+		failClosed := os.Getenv("PRAXIS_GUARDRAIL_FAIL_CLOSED") == "1"
 		detail := fmt.Sprintf("Evaluated %d/%d diff chunks within Stop hook budget; unverified files: %s",
 			res.EvaluatedChunks, res.TotalChunks, strings.Join(res.UnverifiedFiles, ", "))
 		_, _ = s.RecordGuardrailLog(persistCtx, domain.GuardrailLogInput{
@@ -469,7 +469,7 @@ func (s *Service) verifyStopDiffSections(
 				scope, res.EvaluatedChunks, res.TotalChunks, strings.Join(res.UnverifiedFiles, ", "))
 		}
 		s.mem.SetTurnPartialNotice(persistCtx, sid, scope, fmt.Sprintf(
-			"[MEMORIZE GUARDRAIL NOTICE] Previous turn diff exceeded Stop hook time budget (%d/%d chunks verified). Unverified files: %s — keep changes in smaller units or run verify_plan_against_memory / git pre-commit.",
+			"[PRAXIS GUARDRAIL NOTICE] Previous turn diff exceeded Stop hook time budget (%d/%d chunks verified). Unverified files: %s — keep changes in smaller units or run verify_plan_against_memory / git pre-commit.",
 			res.EvaluatedChunks, res.TotalChunks, strings.Join(res.UnverifiedFiles, ", "),
 		))
 		return nil, false, ""
@@ -481,7 +481,7 @@ func (s *Service) verifyStopDiffSections(
 func formatStopBlockingMessage(allBlocking []domain.PlanViolation, failClosedScopes, partialDetails, touchedFiles []string) string {
 	var sb strings.Builder
 	if len(allBlocking) > 0 {
-		sb.WriteString("[MEMORIZE GUARDRAIL — FIX BEFORE FINISHING] Your file edits in this turn violate active project rules:\n")
+		sb.WriteString("[PRAXIS GUARDRAIL — FIX BEFORE FINISHING] Your file edits in this turn violate active project rules:\n")
 		for _, v := range allBlocking {
 			fmt.Fprintf(&sb, "- [%s / %s %s] %s (violation prob: %.0f%%)\n",
 				v.Scope, v.Category, formatViolationRef(v.Fact), v.Content, v.Probability*100)
@@ -494,9 +494,9 @@ func formatStopBlockingMessage(allBlocking []domain.PlanViolation, failClosedSco
 		}
 		sb.WriteString("Fix the violating edits directly in those files (or update an intentionally superseded rule via manage_memory/commit_memory) before ending your response.")
 	} else if len(partialDetails) > 0 {
-		fmt.Fprintf(&sb, "[MEMORIZE GUARDRAIL — FIX BEFORE FINISHING] Stop batch verification exceeded hook time budget under fail-closed policy: %s", strings.Join(partialDetails, "; "))
+		fmt.Fprintf(&sb, "[PRAXIS GUARDRAIL — FIX BEFORE FINISHING] Stop batch verification exceeded hook time budget under fail-closed policy: %s", strings.Join(partialDetails, "; "))
 	} else {
-		fmt.Fprintf(&sb, "[MEMORIZE GUARDRAIL — FIX BEFORE FINISHING] Stop batch verification failed under fail-closed policy (%s).", strings.Join(failClosedScopes, ", "))
+		fmt.Fprintf(&sb, "[PRAXIS GUARDRAIL — FIX BEFORE FINISHING] Stop batch verification failed under fail-closed policy (%s).", strings.Join(failClosedScopes, ", "))
 	}
 	return strings.TrimSpace(sb.String())
 }

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 const evalTelemetryRetentionCap = 2000

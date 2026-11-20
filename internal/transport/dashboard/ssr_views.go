@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"memorize/internal/domain"
-	"memorize/internal/modules/progress"
+	"praxis/internal/domain"
+	"praxis/internal/modules/progress"
 )
 
 type ssrTabOption struct {

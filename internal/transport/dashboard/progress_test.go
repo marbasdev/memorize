@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"memorize/internal/domain"
-	thttp "memorize/internal/transport/http"
+	"praxis/internal/domain"
+	thttp "praxis/internal/transport/http"
 )
 
 func TestFourTabProgressDistributionAndScopeStatsUI(t *testing.T) {
@@ -297,7 +297,7 @@ func TestFourTabProgressDistributionAndScopeStatsUI(t *testing.T) {
 	if err := json.Unmarshal([]byte(rawTrig), &trigMap); err != nil {
 		t.Fatalf("unmarshal HX-Trigger %q: %v", rawTrig, err)
 	}
-	toastStr, _ := trigMap["memorizeToast"].(string)
+	toastStr, _ := trigMap["praxisToast"].(string)
 	if !strings.HasPrefix(toastStr, "동기화 완료") {
 		t.Fatalf("expected decoded Korean toast starting with '동기화 완료', got %q", toastStr)
 	}

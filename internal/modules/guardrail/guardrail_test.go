@@ -11,9 +11,9 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"memorize/internal/domain"
-	"memorize/internal/inference/localmodel"
-	"memorize/internal/modules/rulepack"
+	"praxis/internal/domain"
+	"praxis/internal/inference/localmodel"
+	"praxis/internal/modules/rulepack"
 )
 
 func TestGuardrailEnforcesNonPinnedRulesAndBlocksMutatingGitCommands(t *testing.T) {
@@ -99,7 +99,7 @@ func TestTurnPreMutateCodeGateAndSameTurnRuleEnforcement(t *testing.T) {
 	violatingEdit := fmt.Sprintf(`{"conversationId":"conv-gate-1","workspacePaths":[%q],"toolCall":{"name":"edit_file","args":{"Path":%q,"Replacement":"http.DefaultClient.Get(externalAPI) // 타임아웃 없음"}}}`,
 		repo, clientFile)
 	gateOut, gateCode, _ := st.gr.ExecuteHook(ctx, "antigravity-pretool", []byte(violatingEdit), "")
-	if gateCode != 0 || !strings.Contains(gateOut, `"decision":"deny"`) || !strings.Contains(gateOut, "[MEMORIZE PRE-MUTATE GATE]") {
+	if gateCode != 0 || !strings.Contains(gateOut, `"decision":"deny"`) || !strings.Contains(gateOut, "[PRAXIS PRE-MUTATE GATE]") {
 		t.Fatalf("expected Pre-Mutate Code Gate to deny edit before commit_memory, got code=%d out=%s", gateCode, gateOut)
 	}
 
@@ -116,7 +116,7 @@ func TestTurnPreMutateCodeGateAndSameTurnRuleEnforcement(t *testing.T) {
 	}
 	badCmd := fmt.Sprintf(`{"conversationId":"conv-gate-1","workspacePaths":[%q],"toolCall":{"name":"run_command","args":{"CommandLine":"go run ./cmd/fetch --no-timeout"}}}`, repo)
 	cmdDenyOut, cmdDenyCode, _ := st.gr.ExecuteHook(ctx, "antigravity-pretool", []byte(badCmd), "")
-	if cmdDenyCode != 0 || !strings.Contains(cmdDenyOut, `"decision":"deny"`) || !strings.Contains(cmdDenyOut, "[MEMORIZE GUARDRAIL BLOCKED]") || !strings.Contains(cmdDenyOut, "3초 타임아웃") {
+	if cmdDenyCode != 0 || !strings.Contains(cmdDenyOut, `"decision":"deny"`) || !strings.Contains(cmdDenyOut, "[PRAXIS GUARDRAIL BLOCKED]") || !strings.Contains(cmdDenyOut, "3초 타임아웃") {
 		t.Fatalf("expected same-turn Guardrail to block violating run_command immediately, got code=%d out=%s", cmdDenyCode, cmdDenyOut)
 	}
 
@@ -129,7 +129,7 @@ func TestTurnPreMutateCodeGateAndSameTurnRuleEnforcement(t *testing.T) {
 	}
 	stopPayload := fmt.Sprintf(`{"conversationId":"conv-gate-1","workspacePaths":[%q],"terminationReason":"NO_TOOL_CALL","continuationActive":false}`, repo)
 	stopFixOut, stopFixCode, _ := st.gr.ExecuteHook(ctx, "antigravity-stop", []byte(stopPayload), "")
-	if stopFixCode != 0 || !strings.Contains(stopFixOut, `"decision":"continue"`) || !strings.Contains(stopFixOut, "[MEMORIZE GUARDRAIL — FIX BEFORE FINISHING]") || !strings.Contains(stopFixOut, "3초 타임아웃") {
+	if stopFixCode != 0 || !strings.Contains(stopFixOut, `"decision":"continue"`) || !strings.Contains(stopFixOut, "[PRAXIS GUARDRAIL — FIX BEFORE FINISHING]") || !strings.Contains(stopFixOut, "3초 타임아웃") {
 		t.Fatalf("expected Stop hook to force continuation fix on violating edit against newly committed rule #1, got code=%d out=%s", stopFixCode, stopFixOut)
 	}
 
@@ -182,7 +182,7 @@ func TestFirstChatOnboardingOfferSkipAndGuardrailFlow(t *testing.T) {
 		t.Fatalf("expected repeat hook in same session not to re-prompt onboarding, got code=%d out=%s", code2, out2)
 	}
 
-	mcpCallPayload := fmt.Sprintf(`{"conversationId":"conv-onboard-1","workspacePaths":[%q],"toolCall":{"name":"call_mcp_tool","args":{"ServerName":"memorize_mcp","ToolName":"manage_memory"}}}`, repo)
+	mcpCallPayload := fmt.Sprintf(`{"conversationId":"conv-onboard-1","workspacePaths":[%q],"toolCall":{"name":"call_mcp_tool","args":{"ServerName":"praxis_mcp","ToolName":"manage_memory"}}}`, repo)
 	mcpOut, mcpCode, _ := st.gr.ExecuteHook(ctx, "antigravity-pretool", []byte(mcpCallPayload), "")
 	if mcpCode != 0 || mcpOut != `{"decision":"allow"}` {
 		t.Fatalf("expected call_mcp_tool(manage_memory) to allow cleanly, got code=%d out=%s", mcpCode, mcpOut)
@@ -334,7 +334,7 @@ func (s *spyReadyEval) ScoreRelevance(ctx context.Context, task string, facts []
 
 func TestFirstRunEngineSetupGateAndExplicitEnvProvider(t *testing.T) {
 	for _, k := range []string{
-		"MEMORY_PROVIDER", "GEMINI_API_KEY", "TYPESAFE_API_KEY",
+		"PRAXIS_PROVIDER", "GEMINI_API_KEY", "TYPESAFE_API_KEY",
 		"FLIDE_API_KEY", "JEV_API_URL", "LOCAL_MODEL_URL", "LOCAL_GGUF_URL",
 	} {
 		t.Setenv(k, "")
@@ -348,11 +348,11 @@ func TestFirstRunEngineSetupGateAndExplicitEnvProvider(t *testing.T) {
 	}
 	t.Setenv("LOCAL_MODEL_URL", "http://127.0.0.1:11434/v1")
 	if got := domain.ResolveExplicitEnvProvider(); got != "" {
-		t.Fatalf("expected ambiguous multiple provider env vars without MEMORY_PROVIDER to return empty, got %q", got)
+		t.Fatalf("expected ambiguous multiple provider env vars without PRAXIS_PROVIDER to return empty, got %q", got)
 	}
-	t.Setenv("MEMORY_PROVIDER", "local")
+	t.Setenv("PRAXIS_PROVIDER", "local")
 	if got := domain.ResolveExplicitEnvProvider(); got != "local" {
-		t.Fatalf("expected explicit MEMORY_PROVIDER to win over multiple env vars, got %q", got)
+		t.Fatalf("expected explicit PRAXIS_PROVIDER to win over multiple env vars, got %q", got)
 	}
 
 	ctx := context.Background()
@@ -385,7 +385,7 @@ func TestFirstRunEngineSetupGateAndExplicitEnvProvider(t *testing.T) {
 	}
 
 	t.Setenv("GEMINI_API_KEY", "")
-	t.Setenv("MEMORY_PROVIDER", "")
+	t.Setenv("PRAXIS_PROVIDER", "")
 	t.Setenv("TYPESAFE_API_KEY", "")
 	t.Setenv("LOCAL_MODEL_URL", "")
 	st.mem.Router().AttachLocalManager(localmodel.NewManager(t.TempDir()))
@@ -394,7 +394,7 @@ func TestFirstRunEngineSetupGateAndExplicitEnvProvider(t *testing.T) {
 	if err != nil || code1 != 0 {
 		t.Fatalf("ExecuteHook start unready: code=%d err=%v", code1, err)
 	}
-	if !strings.Contains(out1, "[MEMORIZE ENGINE SETUP REQUIRED]") || !strings.Contains(out1, "/#engines") {
+	if !strings.Contains(out1, "[PRAXIS ENGINE SETUP REQUIRED]") || !strings.Contains(out1, "/#engines") {
 		t.Fatalf("expected setup notice with /#engines link, got:\n%s", out1)
 	}
 	if !strings.Contains(out1, "Pinned: never bypass AuthMiddleware") {
@@ -411,7 +411,7 @@ func TestFirstRunEngineSetupGateAndExplicitEnvProvider(t *testing.T) {
 	if err != nil || code2 != 0 {
 		t.Fatalf("ExecuteHook turn unready: code=%d err=%v", code2, err)
 	}
-	if strings.Contains(out2, "[MEMORIZE ENGINE SETUP REQUIRED]") {
+	if strings.Contains(out2, "[PRAXIS ENGINE SETUP REQUIRED]") {
 		t.Fatalf("expected per-session cooldown to suppress duplicate setup banner, got:\n%s", out2)
 	}
 	if eval.scoreCalls != 0 {
@@ -506,7 +506,7 @@ func TestReadOnlyShellPureGoEnvPrefixes(t *testing.T) {
 
 	checkedCmds := []string{
 		"CGO_ENABLED=1 go test ./...",
-		"CGO_ENABLED=0 go build ./cmd/memorize",
+		"CGO_ENABLED=0 go build ./cmd/praxis",
 		"FOO=bar go vet ./...",
 		"CGO_ENABLED=0 ls",
 		"go test -c ./...",
@@ -581,7 +581,7 @@ func TestGuardrailOmitsStaleTurnPromptAfterMutation(t *testing.T) {
 		"session_id": sessID,
 		"cwd":        repo,
 		"tool_name":  "run_command",
-		"tool_input": map[string]any{"command": "CGO_ENABLED=0 go build ./cmd/memorize"},
+		"tool_input": map[string]any{"command": "CGO_ENABLED=0 go build ./cmd/praxis"},
 	})
 
 	if _, _, err := st.gr.ExecuteHook(ctx, "claude-pretool", buildPayload, repo); err != nil {
@@ -676,7 +676,7 @@ func TestGuardrailSyncsAndEnforcesTeamRulePack(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(repoDir, ".memorize"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(repoDir, ".praxis"), 0755); err != nil {
 		t.Fatal(err)
 	}
 

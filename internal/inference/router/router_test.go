@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/sqlite"
+	"praxis/internal/domain"
+	"praxis/internal/infra/sqlite"
 )
 
 func TestDynamicResolverAndPerFeatureRouting(t *testing.T) {

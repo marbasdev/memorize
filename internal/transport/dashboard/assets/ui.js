@@ -9,21 +9,21 @@
     showToast._tm = setTimeout(() => { el.style.display = 'none'; }, 3200);
   };
 
-  window.showMemorizeToast = showToast;
+  window.showPraxisToast = showToast;
 
-  document.body.addEventListener('memorizeToast', e => {
+  document.body.addEventListener('praxisToast', e => {
     const msg = e.detail && (typeof e.detail === 'string' ? e.detail : e.detail.value);
     if (msg) showToast(msg);
   });
 
-  document.body.addEventListener('memorizeCloseModal', () => {
+  document.body.addEventListener('praxisCloseModal', () => {
     document.querySelectorAll('#modalHost dialog[open]').forEach(d => d.close());
     const host = document.getElementById('modalHost');
     if (host) host.innerHTML = '';
   });
 
-  document.body.addEventListener('memorizeClearSel', () => {
-    window.dispatchEvent(new CustomEvent('memorize-clear-sel'));
+  document.body.addEventListener('praxisClearSel', () => {
+    window.dispatchEvent(new CustomEvent('praxis-clear-sel'));
   });
 
   document.body.addEventListener('htmx:responseError', e => {
@@ -106,7 +106,7 @@
   function resolveInitialTab() {
     const fromHash = hashTabName();
     if (fromHash) return fromHash;
-    const saved = String(sessionStorage.getItem('memorize_tab') || '').trim().toLowerCase();
+    const saved = String(sessionStorage.getItem('praxis_tab') || '').trim().toLowerCase();
     if (VALID_TABS.has(saved)) return saved;
     const wrap = document.querySelector('.wrap');
     return wrap && wrap.dataset && wrap.dataset.setupRequired === '1' ? 'engines' : 'memories';
@@ -114,8 +114,8 @@
 
   window.dashboardApp = () => ({
     activeTab: resolveInitialTab(),
-    distOpen: localStorage.getItem('memorize_dist_open') !== '0',
-    telemetryOpen: localStorage.getItem('memorize_telemetry_open') === '1',
+    distOpen: localStorage.getItem('praxis_dist_open') !== '0',
+    telemetryOpen: localStorage.getItem('praxis_telemetry_open') === '1',
     progCleanDays: '7',
     progCleanConfirm: false,
     grCleanDays: '7',
@@ -137,13 +137,13 @@
     setDistOpen(open) {
       const next = Boolean(open);
       this.distOpen = next;
-      localStorage.setItem('memorize_dist_open', next ? '1' : '0');
+      localStorage.setItem('praxis_dist_open', next ? '1' : '0');
     },
 
     setTelemetryOpen(open) {
       const next = Boolean(open);
       this.telemetryOpen = next;
-      localStorage.setItem('memorize_telemetry_open', next ? '1' : '0');
+      localStorage.setItem('praxis_telemetry_open', next ? '1' : '0');
     },
 
     isBusyForLiveRefresh() {
@@ -279,7 +279,7 @@
       if (!document.getElementById('tabBtn-' + this.activeTab)) {
         this.activeTab = 'memories';
       }
-      document.body.addEventListener('memorizeCloseModal', () => setTimeout(() => this.flushPendingLive(), 120));
+      document.body.addEventListener('praxisCloseModal', () => setTimeout(() => this.flushPendingLive(), 120));
       document.body.addEventListener('focusout', () => setTimeout(() => this.flushPendingLive(), 150));
       document.body.addEventListener('htmx:configRequest', e => {
         const path = (e.detail && e.detail.path) || '';
@@ -321,7 +321,7 @@
           this.grIncBlocked = false;
         }
       });
-      document.body.addEventListener('memorizePortRedirect', e => {
+      document.body.addEventListener('praxisPortRedirect', e => {
         const targetUrl = e && e.detail && e.detail.url ? String(e.detail.url).trim() : '';
         if (!targetUrl) return;
         let parsed;
@@ -360,7 +360,7 @@
 
     switchTab(name, fromHash = false) {
       this.activeTab = name;
-      sessionStorage.setItem('memorize_tab', name);
+      sessionStorage.setItem('praxis_tab', name);
       const btn = document.getElementById('tabBtn-' + name);
       const hasOwnHXGet = Boolean(btn && btn.hasAttribute('hx-get'));
       if ((!hasOwnHXGet || fromHash) && (this._dirtyTabs[name] || this._lastSeq > (this._tabSeq[name] || 0)) && !this.isBusyForLiveRefresh()) {
@@ -372,7 +372,7 @@
       const root = document.documentElement;
       const next = root.dataset.theme === 'dark' ? 'light' : 'dark';
       root.dataset.theme = next;
-      localStorage.setItem('memorize_theme', next);
+      localStorage.setItem('praxis_theme', next);
     },
 
     setPageActiveIDs(ids) {

@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 const recordSelectColumns = `m.id, m.scope, COALESCE(m.account, ''), m.category, COALESCE(m.sub_category, ''), m.tags, m.content, m.confidence, m.pinned, m.active, m.superseded_by, COALESCE(m.replaces_text, ''), COALESCE(m.created_at, '')`

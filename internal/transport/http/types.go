@@ -3,7 +3,7 @@ package http
 import (
 	"context"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 type DaemonStatus struct {

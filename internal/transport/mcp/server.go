@@ -7,20 +7,20 @@ import (
 
 	"github.com/mark3labs/mcp-go/server"
 
-	"memorize/internal/modules/guardrail"
-	"memorize/internal/modules/memory"
-	"memorize/internal/modules/progress"
-	"memorize/internal/modules/rulepack"
+	"praxis/internal/modules/guardrail"
+	"praxis/internal/modules/memory"
+	"praxis/internal/modules/progress"
+	"praxis/internal/modules/rulepack"
 )
 
-const ServerInstructions = `Memorize Protocol:
+const ServerInstructions = `Praxis Protocol:
 1. Scope: 'project:<repo>', 'global', or 'personal' (auto-detected if omitted).
-2. Query: call query_project_memory on new topics (refresh=true after compaction). Follow 'memorize://playbook/memory-curator' on Git onboarding/sync.
+2. Query: call query_project_memory on new topics (refresh=true after compaction). Follow 'praxis://playbook/memory-curator' on Git onboarding/sync.
 3. Commit Before Mutating: commit user decisions/approvals atomically (1 behavior = 1 item in candidate_facts, user's language) via commit_memory or manage_memory(update) BEFORE edits/commands; commit new choices before finishing.
 4. Onboarding: if [ONBOARDING AVAILABLE], ask user first; call manage_memory(skip_onboarding) if declined, or inspect files, resolve conflicts, commit, and offer cleanup.
 5. SSOT: active memories replace static rule files (CLAUDE.md/AGENTS.md) and override older turns; ignore (Replaces: ...) and [REVOKED ...].
 6. Progress: optionally call project_progress(action="record") after completing notable tasks or milestones to log completed work in the activity feed.
-7. Team Rules: use team_rules for shared .memorize/TEAM_RULES.md rules (list/sync/add/promote/update/remove/resolve_conflict/duplicates); NEVER hand-edit TEAM_RULES.md so workspace code stays unmixed.
+7. Team Rules: use team_rules for shared .praxis/TEAM_RULES.md rules (list/sync/add/promote/update/remove/resolve_conflict/duplicates); NEVER hand-edit TEAM_RULES.md so workspace code stays unmixed.
 8. Verify Plan: call verify_plan_against_memory once before multi-file refactors; shell commands gate PreToolUse while file edits batch-verify on Stop.`
 
 type BridgeReqMeta struct {
@@ -61,7 +61,7 @@ func NewServer(deps Deps) *server.MCPServer {
 	if deps.Memory != nil && deps.RulePack == nil {
 		deps.RulePack = rulepack.New(deps.Memory)
 	}
-	srv := server.NewMCPServer("memorize", ver,
+	srv := server.NewMCPServer("praxis", ver,
 		server.WithToolCapabilities(false),
 		server.WithResourceCapabilities(false, false),
 		server.WithPromptCapabilities(false),

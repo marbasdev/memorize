@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 func (s *Service) GetCategoryDistribution(ctx context.Context, scopeFilter string) (domain.ScopeDistribution, error) {

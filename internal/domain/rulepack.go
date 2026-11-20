@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	RulePackRelPath = ".memorize/TEAM_RULES.md"
+	RulePackRelPath = ".praxis/TEAM_RULES.md"
 
 	RuleOriginLocal = "local"
 	RuleOriginTeam  = "team"

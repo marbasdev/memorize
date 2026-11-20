@@ -1,7 +1,7 @@
 ---
 name: memory-curator
 description: >-
-  Curation playbook for memorize. Activate when running cold-start project
+  Curation playbook for praxis. Activate when running cold-start project
   onboarding, manual Git Baseline Onboarding / Incremental Git Sync, or
   consolidating fragmented memories.
 ---
@@ -28,6 +28,6 @@ description: >-
 - Optionally call `project_progress(action="record", track="...", summary="...")` after completing notable work milestones or non-commit tasks to record them in the chronological project activity timeline alongside automatic memory and Git commit sync entries.
 
 ## 6. Team Rule Pack & Team Server Mode
-- Use `team_rules` (`list`, `sync`, `add`, `promote`, `update`, `remove`, `resolve_conflict`, `duplicates`, `clean_duplicates`, `set_config`) for shared `.memorize/TEAM_RULES.md` rules; NEVER hand-edit `.memorize/TEAM_RULES.md` or mix uncommitted feature code into Team Rule commits (`memorize` commits and pushes strictly via an isolated `git worktree`).
+- Use `team_rules` (`list`, `sync`, `add`, `promote`, `update`, `remove`, `resolve_conflict`, `duplicates`, `clean_duplicates`, `set_config`) for shared `.praxis/TEAM_RULES.md` rules; NEVER hand-edit `.praxis/TEAM_RULES.md` or mix uncommitted feature code into Team Rule commits (`praxis` commits and pushes strictly via an isolated `git worktree`).
 - On `[TEAM RULE CONFLICT DETECTED]` or `conflict_pending`, pause and ask the user to adopt (`adopt_team`) or keep their local override (`local_override`).
-- In authenticated Team Server Mode (`memorize serve`), Team Rules always take top priority (`local_override` and server-host Git mutations are disabled), `project:*` rules are shared across teammates, `global` is isolated per user for cross-project dev rules, and `personal` is isolated per user for non-dev notes.
+- In authenticated Team Server Mode (`praxis serve`), Team Rules always take top priority (`local_override` and server-host Git mutations are disabled), `project:*` rules are shared across teammates, `global` is isolated per user for cross-project dev rules, and `personal` is isolated per user for non-dev notes.

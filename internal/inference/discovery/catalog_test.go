@@ -6,9 +6,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"memorize/internal/domain"
-	"memorize/internal/inference/discovery"
-	"memorize/internal/inference/localmodel"
+	"praxis/internal/domain"
+	"praxis/internal/inference/discovery"
+	"praxis/internal/inference/localmodel"
 )
 
 func TestModelRecommendationCriteriaAndLiveDiscovery(t *testing.T) {

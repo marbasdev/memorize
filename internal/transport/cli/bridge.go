@@ -14,10 +14,10 @@ import (
 	"sync"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/config"
-	"memorize/internal/infra/git"
-	thttp "memorize/internal/transport/http"
+	"praxis/internal/domain"
+	"praxis/internal/infra/config"
+	"praxis/internal/infra/git"
+	thttp "praxis/internal/transport/http"
 )
 
 type ensureDaemonFn func(explicitAddr, dbPath, modelsDir string) (*thttp.DaemonStatus, bool)
@@ -107,7 +107,7 @@ func candidatePluginDirs() []string {
 			dirs = append(dirs, p)
 		}
 	}
-	add(os.Getenv("MEMORY_PLUGIN_DIR"))
+	add(os.Getenv("PRAXIS_PLUGIN_DIR"))
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		for _, spec := range domain.AllAgentSpecs() {
 			for _, rel := range spec.PluginDirRelPaths {
@@ -116,7 +116,7 @@ func candidatePluginDirs() []string {
 		}
 	}
 	if wd, err := os.Getwd(); err == nil && wd != "" {
-		add(filepath.Join(wd, "plugins", "memorize"))
+		add(filepath.Join(wd, "plugins", "praxis"))
 	}
 	return dirs
 }
@@ -136,7 +136,7 @@ func agentManifestRelPaths() []string {
 }
 
 func resolveConfiguredHookTimeout(mode string) (time.Duration, bool) {
-	if raw, hasEnv := os.LookupEnv("MEMORY_HOOK_TIMEOUT"); hasEnv {
+	if raw, hasEnv := os.LookupEnv("PRAXIS_HOOK_TIMEOUT"); hasEnv {
 		return parseTimeoutSpec(raw)
 	}
 	m := strings.TrimSpace(mode)
@@ -275,7 +275,7 @@ func runStdioDaemonBridge(addr, dbPath, modelsDir string, ensureFn ensureDaemonF
 	sid := fmt.Sprintf("stdio-%d-%d", os.Getpid(), time.Now().UnixNano()%100000)
 	cwd, _ := os.Getwd()
 	dataDir := resolveClientDataDir(dbPath)
-	envAccount := domain.FirstNonEmpty(os.Getenv("MEMORY_ACCOUNT"), os.Getenv("AGY_ACCOUNT"))
+	envAccount := domain.FirstNonEmpty(os.Getenv("PRAXIS_ACCOUNT"), os.Getenv("AGY_ACCOUNT"))
 
 	var outMu sync.Mutex
 	writeLine := func(b []byte) error {
@@ -294,7 +294,7 @@ func runStdioDaemonBridge(addr, dbPath, modelsDir string, ensureFn ensureDaemonF
 	clientSupportsRoots := false
 
 	requestClientRoots := func() {
-		_ = writeLine([]byte(`{"jsonrpc":"2.0","id":"memorize-bridge-roots","method":"roots/list"}`))
+		_ = writeLine([]byte(`{"jsonrpc":"2.0","id":"praxis-bridge-roots","method":"roots/list"}`))
 	}
 
 	scanner := bufio.NewScanner(os.Stdin)
@@ -320,7 +320,7 @@ func runStdioDaemonBridge(addr, dbPath, modelsDir string, ensureFn ensureDaemonF
 			} `json:"result"`
 		}
 		if json.Unmarshal(line, &env) == nil {
-			if env.Method == "" && string(env.ID) == `"memorize-bridge-roots"` {
+			if env.Method == "" && string(env.ID) == `"praxis-bridge-roots"` {
 				var uris []string
 				for _, rt := range env.Result.Roots {
 					if u := strings.TrimSpace(rt.URI); u != "" {
@@ -378,11 +378,11 @@ func runStdioDaemonBridge(addr, dbPath, modelsDir string, ensureFn ensureDaemonF
 				}
 				targetAddr := thttp.ResolveDaemonAddrForDB(addr, dbPath)
 				if ensureFn == nil {
-					callErr = fmt.Errorf("memorize daemon unavailable on %s", targetAddr)
+					callErr = fmt.Errorf("praxis daemon unavailable on %s", targetAddr)
 					break
 				}
 				if st, ok := ensureFn(addr, dbPath, modelsDir); !ok {
-					callErr = fmt.Errorf("memorize daemon unavailable on %s", targetAddr)
+					callErr = fmt.Errorf("praxis daemon unavailable on %s", targetAddr)
 					continue
 				} else if st != nil && st.ListenAddr != "" {
 					targetAddr = st.ListenAddr
@@ -664,7 +664,7 @@ func buildClientHookContext(ctx context.Context, remote domain.RemoteTargetConfi
 			if root == "" {
 				continue
 			}
-			if rawMD, err := os.ReadFile(filepath.Join(root, ".memorize", "TEAM_RULES.md")); err == nil && len(rawMD) > 0 {
+			if rawMD, err := os.ReadFile(filepath.Join(root, ".praxis", "TEAM_RULES.md")); err == nil && len(rawMD) > 0 {
 				if len(rawMD) > domain.MaxRemoteRulePackDocBytes {
 					rawMD = rawMD[:domain.MaxRemoteRulePackDocBytes]
 				}
@@ -789,6 +789,6 @@ func runHookViaDaemon(addr, dbPath, modelsDir, mode string, rawStdin []byte, pro
 	defer cancel()
 
 	cwd, _ := os.Getwd()
-	envAccount := domain.FirstNonEmpty(os.Getenv("MEMORY_ACCOUNT"), os.Getenv("AGY_ACCOUNT"))
+	envAccount := domain.FirstNonEmpty(os.Getenv("PRAXIS_ACCOUNT"), os.Getenv("AGY_ACCOUNT"))
 	return thttp.PostDaemonHook(ctx, targetAddr, mode, rawStdin, cwd, envAccount, timeoutMs)
 }

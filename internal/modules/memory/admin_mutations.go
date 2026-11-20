@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 func (s *Service) clearInMemorySessionIDs(ids ...int64) {

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 func isGuardrailExemptTool(name string) bool {

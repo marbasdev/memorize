@@ -3,15 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>memorize — Control &amp; Calibration Console</title>
+<title>praxis — Control &amp; Calibration Console</title>
 <link rel="stylesheet" href="/assets/styles.css">
 <script src="/assets/theme.js"></script>
 </head>
 <body>
-<div class="wrap" data-setup-required="{{if .Engines.EngineSetupWarning}}1{{end}}" x-data="dashboardApp()" @memorize-clear-sel.window="clearSel()" @memorize-close-modal.window="closeModal()">
+<div class="wrap" data-setup-required="{{if .Engines.EngineSetupWarning}}1{{end}}" x-data="dashboardApp()" @praxis-clear-sel.window="clearSel()" @praxis-close-modal.window="closeModal()">
   <header class="topbar">
     <div class="brand-row">
-      <h1>memorize</h1>
+      <h1>praxis</h1>
       {{if .CanAdmin}}
         <button type="button" class="badge b-muted" id="daemonBadge" style="display:none;font-family:var(--mono);cursor:pointer;border:1px solid var(--border);" hx-get="/ui/modal/ports" hx-target="#modalHost" hx-swap="innerHTML" title="{{t .Lang "ports_title"}}"></button>
       {{end}}
@@ -105,7 +105,7 @@
   {{if .CanAdmin}}
   <section class="tab-panel" :class="{ 'active': activeTab === 'engines' }" id="panel-engines" role="tabpanel">
     <div class="card" id="enginesSection" style="display:flex;flex-direction:column;gap:0.9rem;"
-      hx-get="/ui/engines" hx-trigger="memorizeRefreshEngines from:body" hx-target="#enginesSection" hx-swap="innerHTML">
+      hx-get="/ui/engines" hx-trigger="praxisRefreshEngines from:body" hx-target="#enginesSection" hx-swap="innerHTML">
       {{template "engines_section" .Engines}}
     </div>
   </section>

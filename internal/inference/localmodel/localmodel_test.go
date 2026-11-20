@@ -19,8 +19,8 @@ import (
 	"testing"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/inference/providers"
+	"praxis/internal/domain"
+	"praxis/internal/inference/providers"
 )
 
 func TestStreamingDownloadNotAbortedByMetadataTimeout(t *testing.T) {
@@ -179,7 +179,7 @@ func TestPortFallbackDiscoveryAndManagedState(t *testing.T) {
 }
 
 func TestSelectManagedContextSize(t *testing.T) {
-	t.Setenv("MEMORY_GGUF_CTX", "")
+	t.Setenv("PRAXIS_GGUF_CTX", "")
 	if got := SelectManagedContextSize(HardwareSpec{RAMGB: 8}, 2<<30); got != 4096 {
 		t.Fatalf("expected 4096 for 8GB RAM, got %d", got)
 	}
@@ -189,9 +189,9 @@ func TestSelectManagedContextSize(t *testing.T) {
 	if got := SelectManagedContextSize(HardwareSpec{RAMGB: 32}, 4<<30); got != 16384 {
 		t.Fatalf("expected 16384 for 32GB RAM + 4GB model, got %d", got)
 	}
-	t.Setenv("MEMORY_GGUF_CTX", "12288")
+	t.Setenv("PRAXIS_GGUF_CTX", "12288")
 	if got := SelectManagedContextSize(HardwareSpec{RAMGB: 8}, 2<<30); got != 12288 {
-		t.Fatalf("expected MEMORY_GGUF_CTX=12288 override, got %d", got)
+		t.Fatalf("expected PRAXIS_GGUF_CTX=12288 override, got %d", got)
 	}
 }
 

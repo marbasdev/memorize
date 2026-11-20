@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"memorize/internal/domain"
-	"memorize/internal/modules/memory"
+	"praxis/internal/domain"
+	"praxis/internal/modules/memory"
 )
 
 type noopEval struct{}

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/modules/progress"
+	"praxis/internal/domain"
+	"praxis/internal/modules/progress"
 )
 
 func fmtProgressStamp(lang, rawTS string) string {

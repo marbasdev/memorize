@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/config"
+	"praxis/internal/domain"
+	"praxis/internal/infra/config"
 )
 
 func (m *Manager) SetPreferredPortFunc(fn func() int) {

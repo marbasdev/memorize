@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"memorize/internal/inference/providers"
+	"praxis/internal/inference/providers"
 )
 
 var systemOneClient = &http.Client{

@@ -13,8 +13,8 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/git"
+	"praxis/internal/domain"
+	"praxis/internal/infra/git"
 )
 
 func sessionIDFrom(ctx context.Context) string {
@@ -225,7 +225,7 @@ func (r *ScopeResolver) Resolve(ctx context.Context, explicitScope, explicitRepo
 			if base := strings.ToLower(domain.CanonicalPathBase(wd)); base != "" {
 				return "project:" + base, ""
 			}
-		} else if os.Getenv("MEMORY_SCOPE") == "" {
+		} else if os.Getenv("PRAXIS_SCOPE") == "" {
 			if sc, repoDir := git.CanonicalScope(ctx, wd); sc != "" {
 				return sc, repoDir
 			}

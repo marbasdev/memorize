@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/sqlite"
+	"praxis/internal/domain"
+	"praxis/internal/infra/sqlite"
 )
 
 func ExtractBearerToken(r *http.Request) (string, bool) {

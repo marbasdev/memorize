@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 type GGUFRuntimeProbe struct {

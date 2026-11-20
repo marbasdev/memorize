@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"memorize/internal/infra/config"
+	"praxis/internal/infra/config"
 )
 
 var (

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/git"
+	"praxis/internal/domain"
+	"praxis/internal/infra/git"
 )
 
 const maxPublishAttempts = 3 // 1 initial attempt + up to 2 CAS retries on concurrent push conflicts
@@ -212,7 +212,7 @@ func (s *Service) PublishProposal(ctx context.Context, in PublishInput) (Publish
 
 	commitMsg := strings.TrimSpace(in.CommitMessage)
 	if commitMsg == "" {
-		commitMsg = fmt.Sprintf("memorize(rulepack): add %s team rule", rule.Category)
+		commitMsg = fmt.Sprintf("praxis(rulepack): add %s team rule", rule.Category)
 	}
 
 	return s.runCASMutation(ctx, casMutationConfig{
@@ -268,7 +268,7 @@ func (s *Service) UpdateRule(ctx context.Context, in UpdateInput) (PublishResult
 
 	commitMsg := strings.TrimSpace(in.CommitMessage)
 	if commitMsg == "" {
-		commitMsg = fmt.Sprintf("memorize(rulepack): update %s team rule", upd.Category)
+		commitMsg = fmt.Sprintf("praxis(rulepack): update %s team rule", upd.Category)
 	}
 
 	return s.runCASMutation(ctx, casMutationConfig{
@@ -311,7 +311,7 @@ func (s *Service) RemoveRuleRemote(ctx context.Context, in RemoveInput) (Publish
 
 	commitMsg := strings.TrimSpace(in.CommitMessage)
 	if commitMsg == "" {
-		commitMsg = "memorize(rulepack): remove team rule"
+		commitMsg = "praxis(rulepack): remove team rule"
 	}
 
 	var removedRule domain.TeamRule

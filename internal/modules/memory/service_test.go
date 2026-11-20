@@ -14,9 +14,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"memorize/internal/domain"
-	"memorize/internal/inference/providers"
-	"memorize/internal/modules/memory"
+	"praxis/internal/domain"
+	"praxis/internal/inference/providers"
+	"praxis/internal/modules/memory"
 )
 
 type stubEval struct {

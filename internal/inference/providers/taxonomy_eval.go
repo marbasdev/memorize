@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 // SuggestTaxonomyRebalance runs on-demand AI re-categorization to suggest semantic

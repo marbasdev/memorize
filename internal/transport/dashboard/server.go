@@ -12,13 +12,13 @@ import (
 	"strings"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/inference/localmodel"
-	"memorize/internal/modules/guardrail"
-	"memorize/internal/modules/memory"
-	"memorize/internal/modules/progress"
-	"memorize/internal/modules/rulepack"
-	thttp "memorize/internal/transport/http"
+	"praxis/internal/domain"
+	"praxis/internal/inference/localmodel"
+	"praxis/internal/modules/guardrail"
+	"praxis/internal/modules/memory"
+	"praxis/internal/modules/progress"
+	"praxis/internal/modules/rulepack"
+	thttp "praxis/internal/transport/http"
 )
 
 //go:embed templates/*.html assets/styles.css assets/ui.js assets/theme.js assets/vendor/*
@@ -65,7 +65,7 @@ func NewHandler(d Deps) http.Handler {
 }
 
 func isDevHotReloadEnabled() bool {
-	return strings.TrimSpace(os.Getenv("MEMORIZE_DEV_HOTRELOAD")) == "1"
+	return strings.TrimSpace(os.Getenv("PRAXIS_DEV_HOTRELOAD")) == "1"
 }
 
 func currentBinModTime(hooks thttp.DashboardHooks) int64 {

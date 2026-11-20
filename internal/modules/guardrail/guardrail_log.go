@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 func redactGuardrailText(raw string, maxRunes int) string {

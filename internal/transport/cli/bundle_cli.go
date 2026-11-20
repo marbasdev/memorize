@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/config"
-	"memorize/internal/modules/memory"
-	thttp "memorize/internal/transport/http"
+	"praxis/internal/domain"
+	"praxis/internal/infra/config"
+	"praxis/internal/modules/memory"
+	thttp "praxis/internal/transport/http"
 )
 
 func resolveCLIUploadTarget(dataDir, explicitURL, explicitToken, profileName, repoPath string) (domain.RemoteTargetConfig, error) {
@@ -40,7 +40,7 @@ func resolveCLIUploadTarget(dataDir, explicitURL, explicitToken, profileName, re
 	}
 	t, ok := config.ResolveRemoteTarget(dataDir, searchDir)
 	if !ok {
-		return domain.RemoteTargetConfig{}, fmt.Errorf("no remote team server configured (run `memorize connect` or pass --url/--token)")
+		return domain.RemoteTargetConfig{}, fmt.Errorf("no remote team server configured (run `praxis connect` or pass --url/--token)")
 	}
 	return t, nil
 }
@@ -78,7 +78,7 @@ func runPushCLI(args []string, dbPath string) int {
 	targetScope := fs.String("target-scope", "", "optional scope override on destination server")
 	modeFlag := fs.String("mode", "exact", "import mode on server: 'exact' (1:1 faithful migration) or 'merge' (AI dedup/conflict merge)")
 	dryRun := fs.Bool("dry-run", false, "preview changes without writing to remote server")
-	toProfile := fs.String("to", "", "saved account profile name from `memorize switch`")
+	toProfile := fs.String("to", "", "saved account profile name from `praxis switch`")
 	urlFlag := fs.String("url", "", "explicit remote server URL")
 	tokenFlag := fs.String("token", "", "explicit remote access token")
 	repoFlag := fs.String("repo", "", "local repo path for resolving per-repo remote binding")
@@ -299,7 +299,7 @@ func runImportCLI(args []string, dbPath, modelsDir string, hooks RuntimeHooks) i
 
 	pos := fs.Args()
 	if len(pos) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: memorize import <bundle.json|-> [--scope <target>] [--mode merge|exact] [--dry-run] [--profile <account>]")
+		fmt.Fprintln(os.Stderr, "usage: praxis import <bundle.json|-> [--scope <target>] [--mode merge|exact] [--dry-run] [--profile <account>]")
 		return 2
 	}
 

@@ -1,8 +1,8 @@
-# memorize
+# praxis
 
 [한국어 (README.ko.md)](./README.ko.md) · [Team Guide](./TEAM.md) · [Architecture Reference](./ARCHITECTURE.md) · [AI Setup Guide](./guides/AI_SETUP.md)
 
-**Stateful memory plugin for AI coding agents — retire stale instructions immediately and enforce only your latest rules.**
+**Stateful memory & execution harness for AI coding agents — retire stale instructions immediately and enforce only your latest rules.**
 
 *Ships as a **single binary** with a **Web Console** for **Claude Code**, **Antigravity**, and any standard **MCP client**.*
 
@@ -25,16 +25,16 @@ You do not have to maintain rule files by hand or type "remember this" on every 
 | **Agent Plugin** *(MCP + Hooks)* | **Claude Code** · **Antigravity** | Automatic zero-touch turn delta injection, pre-edit rule refresh gate, instant shell blocking, and turn-end batch auto-fix / Git pre-commit guardrails |
 | **Standalone MCP Server** | **Cursor** · **Windsurf** · **Claude Desktop** · any MCP client | Connects via `stdio` or Streamable HTTP (`/mcp`) using the same Web Console, System 1 evaluation, and MCP tool protocol |
 
-![Old way vs memorize real-world timeline comparison](./assets/overview.svg)
+![Old way vs praxis real-world timeline comparison](./assets/overview.svg)
 
 ---
 
-## Why `memorize`?
+## Why `praxis`?
 
 > [!IMPORTANT]
 > **Passive recall alone cannot stop coding agents from regressing to stale rules or drifting out of compliance.**
 
-While most AI agent memory tools stop at summarizing past conversations and logs for later **recall**, `memorize` combines three capabilities in a **single local Go binary** with **no external vector store, graph DB, or Node/Python runtime**:
+While most AI agent memory tools stop at summarizing past conversations and logs for later **recall**, `praxis` combines three capabilities in a **single local Go binary** with **no external vector store, graph DB, or Node/Python runtime**:
 
 - **Up-to-Date Rule State**: **`1:N` atomic overwrites and `[REVOKED]` notices** prevent obsolete instructions from lingering or regressing, rather than piling up append-only summaries
 - **Execution-Time Enforcement**: Moves beyond passive guidance (`CLAUDE.md`, `MEMORY.md`, plain RAG) with **pre-command blocking, turn-end batch self-correction, and `git pre-commit` guardrails**
@@ -44,7 +44,7 @@ While most AI agent memory tools stop at summarizing past conversations and logs
 
 Comparing item by item against static instruction files, vector RAG, and append-only summary memories shows where the structural difference lies:
 
-| Dimension | Old Way (`CLAUDE.md` · Vector RAG · Log Summary) | `memorize` |
+| Dimension | Old Way (`CLAUDE.md` · Vector RAG · Log Summary) | `praxis` |
 | :--- | :--- | :--- |
 | **State Integrity** | Old and new rules mix and cause regressions | **Atomic `1:N` overwrite & revocation** keep only the latest rule |
 | **Full Eval & Cache** | Full re-injection every turn or `TOP-K` misses | **0-call repeat turns** · **100% parallel eval** · **static prefix KV cache** |
@@ -75,9 +75,9 @@ Comparing item by item against static instruction files, vector RAG, and append-
 </table>
 
 > [!TIP]
-> **AI-First One-Line Setup**: Paste this into your agent chat (Claude Code, Antigravity, Cursor) to install, run `memorize doctor`, and onboard automatically:
+> **AI-First One-Line Setup**: Paste this into your agent chat (Claude Code, Antigravity, Cursor) to install, run `praxis doctor`, and onboard automatically:
 > ```text
-> Please set up and configure memorize for this project following guides/AI_SETUP.md. Run memorize doctor to verify health, confirm the inference engine, and guide me through initial onboarding.
+> Please set up and configure praxis for this project following guides/AI_SETUP.md. Run praxis doctor to verify health, confirm the inference engine, and guide me through initial onboarding.
 > ```
 
 ### 1. Install
@@ -85,28 +85,28 @@ Comparing item by item against static instruction files, vector RAG, and append-
 **Claude Code** *(macOS · Linux plugin launcher)*
 
 ```bash
-/plugin marketplace add https://github.com/marbasdev/memorize.git
-/plugin install memorize@memorize-marketplace
+/plugin marketplace add https://github.com/marbasdev/praxis.git
+/plugin install praxis@praxis-marketplace
 ```
 
 **Antigravity (`agy`)** *(macOS · Linux plugin launcher)*
 
 ```bash
-git clone https://github.com/marbasdev/memorize.git && cd memorize
-agy plugin install ./plugins/memorize
+git clone https://github.com/marbasdev/praxis.git && cd praxis
+agy plugin install ./plugins/praxis
 ```
 
 **Standalone CLI / Windows / Other MCP Clients** (Cursor · Windsurf · Claude Desktop)
 
 ```bash
-CGO_ENABLED=0 go build -trimpath -o bin/memorize ./cmd/memorize
+CGO_ENABLED=0 go build -trimpath -o bin/praxis ./cmd/praxis
 ```
 
-Register `./plugins/memorize/scripts/run-memorize.sh` (`macOS`/`Linux` plugin `stdio`), `bin/memorize` / `memorize.exe` (standalone `stdio`, plus `memorize.exe -hook <event>` on Windows), or `http://127.0.0.1:18095/mcp` in your client config.
+Register `./plugins/praxis/scripts/run-praxis.sh` (`macOS`/`Linux` plugin `stdio`), `bin/praxis` / `praxis.exe` (standalone `stdio`, plus `praxis.exe -hook <event>` on Windows), or `http://127.0.0.1:18095/mcp` in your client config.
 
 Verify installation and daemon readiness anytime with the built-in self-diagnosis tool:
 ```bash
-memorize doctor
+praxis doctor
 ```
 
 ### 2. Connect an Inference Engine (Required)
@@ -119,14 +119,14 @@ The local daemon and Web Console (**`http://127.0.0.1:18095`**) start automatica
 
 - **macOS · Linux**: Download a recommended **Local GGUF** model in 1 click *(or connect `Gemini`, `System 1`, or `Custom Local URL`)*
 - **Windows**: Built-in GGUF is disabled → connect a **Custom Local URL** (`Ollama` · `LM Studio` · `vLLM`), `System 1`, or a `Gemini API key`
-- **Team Thin Client *(Optional)***: Connecting to an existing team server (`memorize connect` or Web Console **`Remote Servers`**) requires no local database or inference engine—see [Team Collaboration Guide](./TEAM.md)
+- **Team Thin Client *(Optional)***: Connecting to an existing team server (`praxis connect` or Web Console **`Remote Servers`**) requires no local database or inference engine—see [Team Collaboration Guide](./TEAM.md)
 
 ### 3. Onboarding an Existing Project *(First Run on a Repo)*
 
-You do not need to write every rule by hand when dropping `memorize` into an **existing Git codebase**. Once an inference engine is ready and you start your first chat in a cold `project:<repo>` with `0` stored memories (**Claude Code** · **Antigravity** hooks), `memorize` **automatically offers initial rule onboarding**:
+You do not need to write every rule by hand when dropping `praxis` into an **existing Git codebase**. Once an inference engine is ready and you start your first chat in a cold `project:<repo>` with `0` stored memories (**Claude Code** · **Antigravity** hooks), `praxis` **automatically offers initial rule onboarding**:
 
 - **Inspect Key Files & Resolve Conflicts First**: If you accept, the agent inspects core repository files and manifests; **when conflicting legacy and newer patterns coexist, it asks you which pattern takes priority before saving rules**, commits the confirmed decisions, and offers to clean up violating files.
-- **Skip / Re-Run & Optional Git Baseline Sync**: Decline anytime (`skip_onboarding`) or restart onboarding later (`reset_onboarding`). Setting `MEMORY_GIT_SYNC=1` also lets you anchor a `HEAD` baseline without replaying ancient commit noise and sync incremental rule changes going forward. *(In hookless MCP clients, simply ask the agent in chat to onboard via `memorize://playbook/memory-curator`.)*
+- **Skip / Re-Run & Optional Git Baseline Sync**: Decline anytime (`skip_onboarding`) or restart onboarding later (`reset_onboarding`). Setting `PRAXIS_GIT_SYNC=1` also lets you anchor a `HEAD` baseline without replaying ancient commit noise and sync incremental rule changes going forward. *(In hookless MCP clients, simply ask the agent in chat to onboard via `praxis://playbook/memory-curator`.)*
 
 ---
 
@@ -169,7 +169,7 @@ Preview the main **Memories** tab below and click any other tab to expand its UI
 
 </details>
 
-*(Shared repository rules in `.memorize/TEAM_RULES.md` and optional shared **Team Server** collaboration—with per-user isolation, thin-client remote connections, and shared KV prefix caching—are documented in the [Team Collaboration Guide](./TEAM.md).)*
+*(Shared repository rules in `.praxis/TEAM_RULES.md` and optional shared **Team Server** collaboration—with per-user isolation, thin-client remote connections, and shared KV prefix caching—are documented in the [Team Collaboration Guide](./TEAM.md).)*
 
 ### Memory Organization & Lifecycle
 
@@ -178,7 +178,7 @@ As sessions accumulate rules over time, the **Memories** tab provides safe curat
 - **2D Treemap Distribution & Non-Destructive Re-Categorization**: The **Category & Sub-Category Distribution** map surfaces `unclassified` entries and `Cross-category sub` overlaps at a glance. Manage preset taxonomies and autocomplete labels via **`Categories...`**, then run **`AI Categorize...`** to clean up category and sub-category tags **without rewriting or altering any memory wording**.
 - **AI Duplicate Merge & Manual Consolidation (`Consolidate...`)**: Merge overlapping memories across sessions using **AI Merge Recommendations** or manual multi-select, compressing redundant entries into one canonical rule while keeping `Replaces` lineage intact.
 - **Core Rules (Pinned) & Reversible Lifecycle**: Promote critical rules to **`Core Rule (Pinned)`** via inline edit so they stay injected regardless of scoring, and retire outdated entries safely with **`Forget`** -> **`Undo / Restore`** -> **`Purge Tombstones`** *(active `Replaces` lineage remains preserved after purging)*.
-- **Per-Project Isolation via Git Repositories**: Designed around **Git repository (`.git`) detection**, `memorize` automatically resolves the repository root into an isolated `project:<repo>` scope so rules and progress never bleed across repositories. Cross-project dev rules (`global`) and non-dev personal notes (`personal`) stay cleanly separated—with per-account isolation in **Team Server Mode** and an **`Include personal`** toggle when you want personal notes overlaid during project lookups.
+- **Per-Project Isolation via Git Repositories**: Designed around **Git repository (`.git`) detection**, `praxis` automatically resolves the repository root into an isolated `project:<repo>` scope so rules and progress never bleed across repositories. Cross-project dev rules (`global`) and non-dev personal notes (`personal`) stay cleanly separated—with per-account isolation in **Team Server Mode** and an **`Include personal`** toggle when you want personal notes overlaid during project lookups.
 
 ---
 
@@ -193,20 +193,20 @@ As sessions accumulate rules over time, the **Memories** tab provides safe curat
 
 ## Daemon Control, Paths & Maintenance
 
-### Shared Data Directory (`~/.memorize`)
+### Shared Data Directory (`~/.praxis`)
 
-Regardless of which client you use (**Claude Code**, **Antigravity**, or any **MCP client**), `memorize` keeps its own binary, database, local models, and daemon state in a single agent-neutral directory: **`~/.memorize`** (`%USERPROFILE%\.memorize` on Windows), completely separate from host configs (`~/.claude`, `~/.gemini`, `~/.cursor`). Set `MEMORY_DATA_DIR` (or `MEMORY_DB_PATH`) to relocate it.
+Regardless of which client you use (**Claude Code**, **Antigravity**, or any **MCP client**), `praxis` keeps its own binary, database, local models, and daemon state in a single agent-neutral directory: **`~/.praxis`** (`%USERPROFILE%\.praxis` on Windows), completely separate from host configs (`~/.claude`, `~/.gemini`, `~/.cursor`). Set `PRAXIS_DATA_DIR` (or `PRAXIS_DB_PATH`) to relocate it.
 
 ### Daemon Control & Custom Ports
 
-Both the Daemon / Web Console port (default `18095`) and the built-in Local GGUF `llama-server` port (default `18088`) can be customized via the CLI or the Web Console top-bar port badge (`memorize :18095`). If a configured port is already occupied, `memorize` **automatically falls back to a free loopback port**, and CLI commands, hooks, and open MCP `stdio` bridges follow the active port via `daemon.json` automatically.
+Both the Daemon / Web Console port (default `18095`) and the built-in Local GGUF `llama-server` port (default `18088`) can be customized via the CLI or the Web Console top-bar port badge (`praxis :18095`). If a configured port is already occupied, `praxis` **automatically falls back to a free loopback port**, and CLI commands, hooks, and open MCP `stdio` bridges follow the active port via `daemon.json` automatically.
 
 ```bash
-~/.memorize/bin/memorize daemon status                 # status | start | stop | restart | logs (or ./bin/memorize for source builds)
-~/.memorize/bin/memorize daemon port                   # Inspect configured & active ports
-~/.memorize/bin/memorize daemon port 19095 19088       # Set Daemon & GGUF ports (or --daemon N --gguf N)
-~/.memorize/bin/memorize daemon port reset             # Reset both ports to defaults (18095 / 18088)
-~/.memorize/bin/memorize serve --addr 0.0.0.0:18095    # Start shared Team Server (see TEAM.md for user/connect commands)
+~/.praxis/bin/praxis daemon status                 # status | start | stop | restart | logs (or ./bin/praxis for source builds)
+~/.praxis/bin/praxis daemon port                   # Inspect configured & active ports
+~/.praxis/bin/praxis daemon port 19095 19088       # Set Daemon & GGUF ports (or --daemon N --gguf N)
+~/.praxis/bin/praxis daemon port reset             # Reset both ports to defaults (18095 / 18088)
+~/.praxis/bin/praxis serve --addr 0.0.0.0:18095    # Start shared Team Server (see TEAM.md for user/connect commands)
 ```
 
 ### Upgrade (`memories.db` Preserved & Migrated Automatically)
@@ -216,43 +216,43 @@ Both the Daemon / Web Console port (default `18095`) and the built-in Local GGUF
 /plugin update
 
 # Antigravity
-git pull && agy plugin install ./plugins/memorize
+git pull && agy plugin install ./plugins/praxis
 
 # Source builds
-git pull && CGO_ENABLED=0 go build -trimpath -o bin/memorize ./cmd/memorize
-./plugins/memorize/scripts/run-memorize.sh daemon restart
+git pull && CGO_ENABLED=0 go build -trimpath -o bin/praxis ./cmd/praxis
+./plugins/praxis/scripts/run-praxis.sh daemon restart
 ```
 
 ### Backup, Restore & Portable Transfer
 
 ```bash
 # Consistent SQLite hot backup (includes WAL checkpoint)
-sqlite3 ~/.memorize/memories.db ".backup './memories-backup.db'"
+sqlite3 ~/.praxis/memories.db ".backup './memories-backup.db'"
 
 # Restore full SQLite DB safely (stop daemon and clear stale WAL/SHM sidecars first)
-~/.memorize/bin/memorize daemon stop
-mkdir -p ~/.memorize && rm -f ~/.memorize/memories.db-wal ~/.memorize/memories.db-shm
-cp ./memories-backup.db ~/.memorize/memories.db
-~/.memorize/bin/memorize daemon start
+~/.praxis/bin/praxis daemon stop
+mkdir -p ~/.praxis && rm -f ~/.praxis/memories.db-wal ~/.praxis/memories.db-shm
+cp ./memories-backup.db ~/.praxis/memories.db
+~/.praxis/bin/praxis daemon start
 
 # Scoped portable JSON export, AI smart merge import, or local-to-server push (also in Web Console -> Memories)
-~/.memorize/bin/memorize export --scope global -o global.json
-~/.memorize/bin/memorize import global.json --mode merge --dry-run
-~/.memorize/bin/memorize push --scope global --mode exact
+~/.praxis/bin/praxis export --scope global -o global.json
+~/.praxis/bin/praxis import global.json --mode merge --dry-run
+~/.praxis/bin/praxis push --scope global --mode exact
 ```
 
 ### Uninstall
 
 ```bash
-# 1. Remove client plugin / MCP / Git hook integration (keeps ~/.memorize/memories.db)
-/plugin uninstall memorize                    # Claude Code
-agy plugin uninstall memorize                 # Antigravity
-# Other MCP clients (Cursor / Windsurf / Claude Desktop): remove the "memorize" entry from your MCP config
-# Repos with `memorize -install git-hook`: rm -f .git/hooks/pre-commit
+# 1. Remove client plugin / MCP / Git hook integration (keeps ~/.praxis/memories.db)
+/plugin uninstall praxis                    # Claude Code
+agy plugin uninstall praxis                 # Antigravity
+# Other MCP clients (Cursor / Windsurf / Claude Desktop): remove the "praxis" entry from your MCP config
+# Repos with `praxis -install git-hook`: rm -f .git/hooks/pre-commit
 
 # 2. Stop daemon and delete shared binary, models, and local database
-~/.memorize/bin/memorize daemon stop
-rm -rf ~/.memorize                            # Or $MEMORY_DATA_DIR if overridden (Windows: Remove-Item -Recurse "$env:USERPROFILE\.memorize")
+~/.praxis/bin/praxis daemon stop
+rm -rf ~/.praxis                            # Or $PRAXIS_DATA_DIR if overridden (Windows: Remove-Item -Recurse "$env:USERPROFILE\.praxis")
 ```
 
 ---
@@ -261,5 +261,5 @@ rm -rf ~/.memorize                            # Or $MEMORY_DATA_DIR if overridde
 
 - **Roadmap**
   - Automatic P2P/cloud cross-device sync is on hold; **Shared Team Server Mode** (`serve` / `connect` / multi-account `switch`) and **portable bundle migration** (`push` / `export` / `import`) are supported — see [Team Collaboration Guide](./TEAM.md).
-- **Feedback & Issues**: External code pull requests are not accepted at this time, but suggestions, bug reports, and questions are welcome via [GitHub Issues](https://github.com/marbasdev/memorize/issues)—any issue or report is reviewed and addressed immediately once seen *(do not post vulnerability exploit details publicly; see [SECURITY.md](./SECURITY.md))*.
+- **Feedback & Issues**: External code pull requests are not accepted at this time, but suggestions, bug reports, and questions are welcome via [GitHub Issues](https://github.com/marbasdev/praxis/issues)—any issue or report is reviewed and addressed immediately once seen *(do not post vulnerability exploit details publicly; see [SECURITY.md](./SECURITY.md))*.
 - **Docs & License**: [Team Collaboration](./TEAM.md) · [Architecture & Env Reference](./ARCHITECTURE.md) · [Feedback Policy](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [MIT License](./LICENSE)

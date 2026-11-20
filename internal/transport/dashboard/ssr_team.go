@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/modules/rulepack"
+	"praxis/internal/domain"
+	"praxis/internal/modules/rulepack"
 )
 
 type ssrTeamCategoryGroup struct {

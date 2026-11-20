@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 type hookToolCall struct {
@@ -217,7 +217,7 @@ func formatContextBody(isStart, compacted bool, scopeNames, bodyParts []string) 
 		headerTag = " · Post-Compact Restored"
 	}
 
-	sections := []string{fmt.Sprintf("[MEMORIZE SSOT (%s)%s%s]", scopeHeader, headerTag, multiHint)}
+	sections := []string{fmt.Sprintf("[PRAXIS SSOT (%s)%s%s]", scopeHeader, headerTag, multiHint)}
 	if len(bodyParts) > 0 {
 		sections = append(sections, strings.Join(bodyParts, "\n"))
 	} else if isStart {

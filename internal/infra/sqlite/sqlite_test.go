@@ -12,8 +12,8 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/config"
+	"praxis/internal/domain"
+	"praxis/internal/infra/config"
 )
 
 func TestInitSchemaDropsLegacyProgressStatusColumn(t *testing.T) {
@@ -217,7 +217,7 @@ func TestUsersCRUDTokenRotationCookiesAndLastAdminGuard(t *testing.T) {
 		t.Fatalf("expected legacy blank-account global progress claimed by hostadmin, got %q (err=%v)", claimedProgAcc, err)
 	}
 
-	SetStoredRepoPath(ctx, db, "project:memorize", "/tmp/local-repo")
+	SetStoredRepoPath(ctx, db, "project:praxis", "/tmp/local-repo")
 	srvCtx := domain.WithAuthPrincipal(ctx, domain.AuthPrincipal{
 		Account:       "hostadmin",
 		Role:          domain.RoleAdmin,
@@ -225,16 +225,16 @@ func TestUsersCRUDTokenRotationCookiesAndLastAdminGuard(t *testing.T) {
 		Authenticated: true,
 	})
 	SetStoredRepoPath(srvCtx, db, "project:other", "/tmp/other-repo")
-	if resolved := GetStoredRepoPath(srvCtx, db, "project:memorize"); resolved != "" {
+	if resolved := GetStoredRepoPath(srvCtx, db, "project:praxis"); resolved != "" {
 		t.Fatalf("expected empty GetStoredRepoPath in ServerMode, got %q", resolved)
 	}
 	if other := GetStoredRepoPath(ctx, db, "project:other"); other != "" {
 		t.Fatalf("expected SetStoredRepoPath in ServerMode to be ignored, got %q", other)
 	}
-	if adminIssue.User.Account != "hostadmin" || adminIssue.User.Role != domain.RoleAdmin || !strings.HasPrefix(adminIssue.PlainToken, "mem_") {
+	if adminIssue.User.Account != "hostadmin" || adminIssue.User.Role != domain.RoleAdmin || !strings.HasPrefix(adminIssue.PlainToken, "prx_") {
 		t.Fatalf("unexpected bootstrap admin: %+v", adminIssue)
 	}
-	if _, created2, err := EnsureBootstrapAdmin(ctx, db, "other", "mem_should_ignore"); err != nil || created2 {
+	if _, created2, err := EnsureBootstrapAdmin(ctx, db, "other", "prx_should_ignore"); err != nil || created2 {
 		t.Fatalf("expected second EnsureBootstrapAdmin to be no-op, got created=%v err=%v", created2, err)
 	}
 

@@ -6,7 +6,7 @@ import (
 	"math"
 	"strings"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 var jsonSyntaxOrSchemaKeys = map[string]bool{

@@ -23,13 +23,13 @@ import (
 	"testing"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/config"
-	"memorize/internal/modules/guardrail"
-	"memorize/internal/modules/memory"
-	"memorize/internal/modules/progress"
-	"memorize/internal/transport/dashboard"
-	thttp "memorize/internal/transport/http"
+	"praxis/internal/domain"
+	"praxis/internal/infra/config"
+	"praxis/internal/modules/guardrail"
+	"praxis/internal/modules/memory"
+	"praxis/internal/modules/progress"
+	"praxis/internal/transport/dashboard"
+	thttp "praxis/internal/transport/http"
 )
 
 func freeLoopbackAddr(t *testing.T) string {
@@ -49,14 +49,14 @@ func TestUnifiedDaemonAutoSpawnHotRestartAndStop(t *testing.T) {
 		t.Fatal(err)
 	}
 	tmp := t.TempDir()
-	binPath := filepath.Join(tmp, "memorize")
+	binPath := filepath.Join(tmp, "praxis")
 	if runtime.GOOS == "windows" {
 		binPath += ".exe"
 	}
-	buildCmd := exec.Command("go", "build", "-ldflags=-X main.version=1.5.0-daemon-test", "-o", binPath, "./cmd/memorize")
+	buildCmd := exec.Command("go", "build", "-ldflags=-X main.version=1.5.0-daemon-test", "-o", binPath, "./cmd/praxis")
 	buildCmd.Dir = repoRoot
 	if out, err := buildCmd.CombinedOutput(); err != nil {
-		t.Fatalf("build memorize failed: %v\n%s", err, string(out))
+		t.Fatalf("build praxis failed: %v\n%s", err, string(out))
 	}
 
 	addr := freeLoopbackAddr(t)
@@ -65,13 +65,13 @@ func TestUnifiedDaemonAutoSpawnHotRestartAndStop(t *testing.T) {
 	logPath := filepath.Join(tmp, "data", "daemon.log")
 
 	baseEnv := append(os.Environ(),
-		"MEMORY_DAEMON_ADDR="+addr,
-		"MEMORY_DB_PATH="+dbPath,
-		"MEMORY_MODELS_DIR="+modelsDir,
-		"MEMORY_DAEMON_LOG="+logPath,
-		"MEMORY_DAEMON_BIN="+binPath,
-		"MEMORY_DISABLE_BG_DASHBOARD=",
-		"MEMORY_INLINE_STDIO=",
+		"PRAXIS_DAEMON_ADDR="+addr,
+		"PRAXIS_DB_PATH="+dbPath,
+		"PRAXIS_MODELS_DIR="+modelsDir,
+		"PRAXIS_DAEMON_LOG="+logPath,
+		"PRAXIS_DAEMON_BIN="+binPath,
+		"PRAXIS_DISABLE_BG_DASHBOARD=",
+		"PRAXIS_INLINE_STDIO=",
 	)
 
 	t.Cleanup(func() {
@@ -131,9 +131,9 @@ func TestUnifiedDaemonAutoSpawnHotRestartAndStop(t *testing.T) {
 	if !strings.Contains(rootsReq, `"roots/list"`) {
 		t.Fatalf("expected roots/list inquiry from bridge, got: %s", rootsReq)
 	}
-	_, _ = stdin.Write([]byte(`{"jsonrpc":"2.0","id":"memorize-bridge-roots","result":{"roots":[{"uri":"file:///tmp/demo-workspace"}]}}` + "\n"))
+	_, _ = stdin.Write([]byte(`{"jsonrpc":"2.0","id":"praxis-bridge-roots","result":{"roots":[{"uri":"file:///tmp/demo-workspace"}]}}` + "\n"))
 
-	resLine := sendAndRead(`{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"memorize://playbook/memory-curator"}}`)
+	resLine := sendAndRead(`{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"praxis://playbook/memory-curator"}}`)
 	if !strings.Contains(resLine, "Golden Filter") {
 		t.Fatalf("expected resources/read via daemon bridge to succeed, got: %s", resLine)
 	}
@@ -243,26 +243,26 @@ func TestUnifiedDaemonAutoSpawnHotRestartAndStop(t *testing.T) {
 }
 
 func TestWatchedBinaryCandidatesAndDevHotReloadGate(t *testing.T) {
-	t.Setenv("MEMORY_DAEMON_BIN", "")
-	t.Setenv("MEMORIZE_DEV_HOTRELOAD", "")
+	t.Setenv("PRAXIS_DAEMON_BIN", "")
+	t.Setenv("PRAXIS_DEV_HOTRELOAD", "")
 
 	repoRoot, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}
-	binName := "memorize"
+	binName := "praxis"
 	if runtime.GOOS == "windows" {
-		binName = "memorize.exe"
+		binName = "praxis.exe"
 	}
 	repoBin := filepath.Join(repoRoot, "bin", binName)
 
 	for _, cand := range WatchedBinaryCandidates() {
 		if config.SamePathClean(cand, repoBin) {
-			t.Fatalf("did not expect repo binary %s in WatchedBinaryCandidates when MEMORIZE_DEV_HOTRELOAD is unset; got %v", repoBin, WatchedBinaryCandidates())
+			t.Fatalf("did not expect repo binary %s in WatchedBinaryCandidates when PRAXIS_DEV_HOTRELOAD is unset; got %v", repoBin, WatchedBinaryCandidates())
 		}
 	}
 
-	t.Setenv("MEMORIZE_DEV_HOTRELOAD", "1")
+	t.Setenv("PRAXIS_DEV_HOTRELOAD", "1")
 	foundRepoBin := false
 	for _, cand := range WatchedBinaryCandidates() {
 		if config.SamePathClean(cand, repoBin) {
@@ -271,21 +271,21 @@ func TestWatchedBinaryCandidatesAndDevHotReloadGate(t *testing.T) {
 		}
 	}
 	if !foundRepoBin {
-		t.Fatalf("expected %s in WatchedBinaryCandidates when MEMORIZE_DEV_HOTRELOAD=1; got %v", repoBin, WatchedBinaryCandidates())
+		t.Fatalf("expected %s in WatchedBinaryCandidates when PRAXIS_DEV_HOTRELOAD=1; got %v", repoBin, WatchedBinaryCandidates())
 	}
 
-	custom := filepath.Join(t.TempDir(), "custom-memorize")
-	t.Setenv("MEMORY_DAEMON_BIN", custom)
+	custom := filepath.Join(t.TempDir(), "custom-praxis")
+	t.Setenv("PRAXIS_DAEMON_BIN", custom)
 	cands := WatchedBinaryCandidates()
-	if len(cands) == 0 || !strings.HasSuffix(cands[0], "custom-memorize") {
-		t.Fatalf("expected MEMORY_DAEMON_BIN override, got %v", cands)
+	if len(cands) == 0 || !strings.HasSuffix(cands[0], "custom-praxis") {
+		t.Fatalf("expected PRAXIS_DAEMON_BIN override, got %v", cands)
 	}
 }
 
 func TestDaemonLogPathAndStartBackgroundServerHandover(t *testing.T) {
 	tmp := t.TempDir()
 	customDB := filepath.Join(tmp, "memories.db")
-	t.Setenv("MEMORY_DAEMON_LOG", "")
+	t.Setenv("PRAXIS_DAEMON_LOG", "")
 	if got := config.DaemonLogPath(customDB); got != filepath.Join(tmp, "daemon.log") {
 		t.Fatalf("DaemonLogPath = %q, want %q", got, filepath.Join(tmp, "daemon.log"))
 	}
@@ -388,12 +388,12 @@ func TestDaemonPortChangeFallbackAndAutoDiscovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	tmp := t.TempDir()
-	binName := "memorize-port-test"
+	binName := "praxis-port-test"
 	if runtime.GOOS == "windows" {
 		binName += ".exe"
 	}
 	binPath := filepath.Join(tmp, binName)
-	buildCmd := exec.Command("go", "build", "-ldflags", "-X main.version=1.5.0-port-test", "-o", binPath, "./cmd/memorize")
+	buildCmd := exec.Command("go", "build", "-ldflags", "-X main.version=1.5.0-port-test", "-o", binPath, "./cmd/praxis")
 	buildCmd.Dir = repoRoot
 	if out, err := buildCmd.CombinedOutput(); err != nil {
 		t.Fatalf("failed to build test binary: %v\n%s", err, string(out))
@@ -407,13 +407,13 @@ func TestDaemonPortChangeFallbackAndAutoDiscovery(t *testing.T) {
 	}
 
 	baseEnv := envWithoutKeys(os.Environ(),
-		"MEMORY_DAEMON_ADDR", "MEMORY_DASHBOARD_ADDR",
-		"MEMORY_DB_PATH", "MEMORY_MODELS_DIR", "MEMORY_DATA_DIR", "MEMORY_INLINE",
+		"PRAXIS_DAEMON_ADDR", "PRAXIS_DASHBOARD_ADDR",
+		"PRAXIS_DB_PATH", "PRAXIS_MODELS_DIR", "PRAXIS_DATA_DIR", "PRAXIS_INLINE",
 	)
 	baseEnv = append(baseEnv,
-		"MEMORY_DATA_DIR="+dataDir,
-		"MEMORY_DB_PATH="+dbPath,
-		"MEMORY_MODELS_DIR="+modelsDir,
+		"PRAXIS_DATA_DIR="+dataDir,
+		"PRAXIS_DB_PATH="+dbPath,
+		"PRAXIS_MODELS_DIR="+modelsDir,
 	)
 
 	occupantLn, err := net.Listen("tcp", "127.0.0.1:0")
@@ -545,7 +545,7 @@ func TestDaemonPortChangeFallbackAndAutoDiscovery(t *testing.T) {
 	if !strings.Contains(rootsReq, `"roots/list"`) {
 		t.Fatalf("expected roots/list request after notifications/initialized, got: %s", rootsReq)
 	}
-	_, _ = stdin.Write([]byte(`{"jsonrpc":"2.0","id":"memorize-bridge-roots","result":{"roots":[{"uri":"file:///tmp/port-discovery-ws"}]}}` + "\n"))
+	_, _ = stdin.Write([]byte(`{"jsonrpc":"2.0","id":"praxis-bridge-roots","result":{"roots":[{"uri":"file:///tmp/port-discovery-ws"}]}}` + "\n"))
 
 	_ = occupantLn.Close()
 	nextDaemonPort, nextGGUFPort := freeTwoDistinctLoopbackPorts(t)
@@ -597,7 +597,7 @@ func TestDaemonPortChangeFallbackAndAutoDiscovery(t *testing.T) {
 	_ = hxResp.Body.Close()
 	wantRedirect := "http://127.0.0.1:" + strconv.Itoa(uiPort3)
 	if hxResp.StatusCode != http.StatusOK || !strings.Contains(hxResp.Header.Get("HX-Trigger"), wantRedirect) {
-		t.Fatalf("expected 200 with memorizePortRedirect to %s, got code=%d trigger=%q", wantRedirect, hxResp.StatusCode, hxResp.Header.Get("HX-Trigger"))
+		t.Fatalf("expected 200 with praxisPortRedirect to %s, got code=%d trigger=%q", wantRedirect, hxResp.StatusCode, hxResp.Header.Get("HX-Trigger"))
 	}
 
 	uiAddr3 := fmt.Sprintf("127.0.0.1:%d", uiPort3)
@@ -684,37 +684,37 @@ func TestArchitectureBoundaries(t *testing.T) {
 
 		forbiddenFor := func(pkg string) []string {
 			switch {
-			case pkg == "memorize/internal/domain":
-				return []string{"memorize/internal/"}
-			case pkg == "memorize/internal/infra/sqlite":
+			case pkg == "praxis/internal/domain":
+				return []string{"praxis/internal/"}
+			case pkg == "praxis/internal/infra/sqlite":
 				return []string{
-					"memorize/internal/infra/git",
-					"memorize/internal/inference/",
-					"memorize/internal/modules/",
-					"memorize/internal/transport/",
-					"memorize/internal/app/",
+					"praxis/internal/infra/git",
+					"praxis/internal/inference/",
+					"praxis/internal/modules/",
+					"praxis/internal/transport/",
+					"praxis/internal/app/",
 				}
-			case strings.HasPrefix(pkg, "memorize/internal/infra/"):
+			case strings.HasPrefix(pkg, "praxis/internal/infra/"):
 				return []string{
-					"memorize/internal/inference/",
-					"memorize/internal/modules/",
-					"memorize/internal/transport/",
-					"memorize/internal/app/",
+					"praxis/internal/inference/",
+					"praxis/internal/modules/",
+					"praxis/internal/transport/",
+					"praxis/internal/app/",
 				}
-			case strings.HasPrefix(pkg, "memorize/internal/inference/"):
+			case strings.HasPrefix(pkg, "praxis/internal/inference/"):
 				return []string{
-					"memorize/internal/modules/",
-					"memorize/internal/transport/",
-					"memorize/internal/app/",
+					"praxis/internal/modules/",
+					"praxis/internal/transport/",
+					"praxis/internal/app/",
 				}
-			case strings.HasPrefix(pkg, "memorize/internal/modules/"):
+			case strings.HasPrefix(pkg, "praxis/internal/modules/"):
 				return []string{
-					"memorize/internal/transport/",
-					"memorize/internal/app/",
+					"praxis/internal/transport/",
+					"praxis/internal/app/",
 				}
-			case strings.HasPrefix(pkg, "memorize/internal/transport/"):
+			case strings.HasPrefix(pkg, "praxis/internal/transport/"):
 				return []string{
-					"memorize/internal/app/",
+					"praxis/internal/app/",
 				}
 			default:
 				return nil

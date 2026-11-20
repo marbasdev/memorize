@@ -12,7 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 type RemoteBindingsFile struct {
@@ -51,7 +51,7 @@ func LoadRemoteBindings(dataDir string) RemoteBindingsFile {
 func saveRemoteBindings(dataDir string, f RemoteBindingsFile) error {
 	p := RemotesFilePath(dataDir)
 	if p == "" {
-		return fmt.Errorf("cannot resolve memorize data directory")
+		return fmt.Errorf("cannot resolve praxis data directory")
 	}
 	b, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
@@ -160,10 +160,10 @@ func RemoveRemoteBinding(dataDir, repoRoot string, global bool) (bool, error) {
 }
 
 func ResolveRemoteTarget(dataDir, cwd string) (domain.RemoteTargetConfig, bool) {
-	if envURL := NormalizeRemoteURL(os.Getenv("MEMORY_REMOTE_URL")); envURL != "" {
+	if envURL := NormalizeRemoteURL(os.Getenv("PRAXIS_REMOTE_URL")); envURL != "" {
 		return domain.RemoteTargetConfig{
 			URL:   envURL,
-			Token: strings.TrimSpace(os.Getenv("MEMORY_REMOTE_TOKEN")),
+			Token: strings.TrimSpace(os.Getenv("PRAXIS_REMOTE_TOKEN")),
 		}, true
 	}
 	bindings := LoadRemoteBindings(dataDir)

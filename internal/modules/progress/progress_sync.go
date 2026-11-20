@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/git"
+	"praxis/internal/domain"
+	"praxis/internal/infra/git"
 )
 
 func (s *Service) RememberRepoPath(ctx context.Context, rawScope, repoDir string) {

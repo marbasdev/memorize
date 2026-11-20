@@ -1,4 +1,4 @@
-module memorize
+module praxis
 
 go 1.26.0
 

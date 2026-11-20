@@ -16,10 +16,10 @@ import (
 	"syscall"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/config"
-	"memorize/internal/transport/dashboard"
-	thttp "memorize/internal/transport/http"
+	"praxis/internal/domain"
+	"praxis/internal/infra/config"
+	"praxis/internal/transport/dashboard"
+	thttp "praxis/internal/transport/http"
 )
 
 type reexecSpec struct {
@@ -389,24 +389,24 @@ func (d *daemonLifecycle) serve(ln net.Listener) int {
 	if d.serverMode {
 		kind = "team server"
 	}
-	log.Printf("memorize %s v%s listening on http://%s (pid=%d, db=%s, provider=%s)",
+	log.Printf("praxis %s v%s listening on http://%s (pid=%d, db=%s, provider=%s)",
 		kind, d.version, d.boundAddr, os.Getpid(), d.absDB, d.bundle.mem.ProviderName())
 
 	if err := d.srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Printf("memorize daemon serve error: %v", err)
+		log.Printf("praxis daemon serve error: %v", err)
 		return 1
 	}
 
 	select {
 	case <-d.stopRequested:
-		log.Printf("memorize daemon (pid=%d) stopped cleanly.", os.Getpid())
+		log.Printf("praxis daemon (pid=%d) stopped cleanly.", os.Getpid())
 		return 0
 	case spec := <-d.reexecCh:
-		log.Printf("memorize daemon restarting into %s (%s)...", spec.bin, spec.addr)
+		log.Printf("praxis daemon restarting into %s (%s)...", spec.bin, spec.addr)
 		d.bundle.close()
 		reexecArgs := []string{spec.bin, "-daemon", "-addr", spec.addr}
 		if err := execInPlace(spec.bin, reexecArgs, filterDaemonEnv(os.Environ(), d.absDB, d.absModels, "")); err != nil {
-			log.Printf("memorize daemon re-exec error: %v", err)
+			log.Printf("praxis daemon re-exec error: %v", err)
 			return 1
 		}
 	default:

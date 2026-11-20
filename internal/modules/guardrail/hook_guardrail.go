@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/git"
+	"praxis/internal/domain"
+	"praxis/internal/infra/git"
 )
 
 func (s *Service) activeOverrideTurnInput(ctx context.Context, ev NormalizedHookEvent, scopeKey string) string {
@@ -137,7 +137,7 @@ func (s *Service) runGuardrailHook(ctx context.Context, ev NormalizedHookEvent, 
 	}
 
 	var sb strings.Builder
-	sb.WriteString("[MEMORIZE GUARDRAIL BLOCKED] Proposed action violates active project rules:\n")
+	sb.WriteString("[PRAXIS GUARDRAIL BLOCKED] Proposed action violates active project rules:\n")
 	for _, v := range blocking {
 		fmt.Fprintf(&sb, "- [%s / %s %s] %s (violation prob: %.0f%%)\n",
 			v.Scope, v.Category, formatViolationRef(v.Fact), v.Content, v.Probability*100)
@@ -147,7 +147,7 @@ func (s *Service) runGuardrailHook(ctx context.Context, ev NormalizedHookEvent, 
 
 func (s *Service) recordVerifyOutcomeLog(ctx context.Context, scope, source, toolName string, ruleCount int, planSnippet string, blocking []domain.PlanViolation, verifyErr error, elapsedMs float64) bool {
 	if verifyErr != nil {
-		failClosed := os.Getenv("MEMORY_GUARDRAIL_FAIL_CLOSED") == "1"
+		failClosed := os.Getenv("PRAXIS_GUARDRAIL_FAIL_CLOSED") == "1"
 		_, _ = s.RecordGuardrailLog(ctx, domain.GuardrailLogInput{
 			Scope:       scope,
 			Source:      source,

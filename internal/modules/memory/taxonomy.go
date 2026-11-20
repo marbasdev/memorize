@@ -11,8 +11,8 @@ import (
 	"time"
 	"unicode"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/config"
+	"praxis/internal/domain"
+	"praxis/internal/infra/config"
 )
 
 func isValidTaxonomySlug(s string) bool {

@@ -6,26 +6,26 @@ import (
 	"strings"
 	"time"
 
-	"memorize/internal/infra/config"
-	thttp "memorize/internal/transport/http"
+	"praxis/internal/infra/config"
+	thttp "praxis/internal/transport/http"
 )
 
 func runDaemonControlCLI(action string, posArgs []string, addr, dbPath, modelsDir, version string, hooks RuntimeHooks) int {
 	act := strings.ToLower(strings.TrimSpace(action))
 	switch act {
 	case "port":
-		return runDaemonPortCLI(portCLIArgs(posArgs), addr, dbPath, modelsDir)
+		return runDaemonPortCLI(daemonSubArgs(posArgs, "port"), addr, dbPath, modelsDir)
 
 	case "status":
 		st, targetAddr, ok, authReq := thttp.ProbeLiveDaemonState(addr, dbPath)
 		if authReq {
-			fmt.Printf("memorize team server: running on http://%s (authentication required; manage via 'memorize user' or 'memorize connect')\n", targetAddr)
+			fmt.Printf("praxis team server: running on http://%s (authentication required; manage via 'praxis user' or 'praxis connect')\n", targetAddr)
 			return 0
 		}
 		if !ok || st == nil || !st.Running {
 			cfg := config.LoadPortConfig(dbPath)
 			cfgAddr, _ := thttp.ResolveDaemonTargetAddr(addr, dbPath)
-			fmt.Printf("memorize daemon: stopped (configured_daemon=%d, configured_gguf=%d, addr=http://%s, db=%s)\n",
+			fmt.Printf("praxis daemon: stopped (configured_daemon=%d, configured_gguf=%d, addr=http://%s, db=%s)\n",
 				cfg.DaemonPort, cfg.GGUFPort, cfgAddr, dbPath)
 			return 0
 		}
@@ -44,7 +44,7 @@ func runDaemonControlCLI(action string, posArgs []string, addr, dbPath, modelsDi
 			cfg := config.LoadPortConfig(dbPath)
 			ggufInfo = fmt.Sprintf(":%d (idle)", cfg.GGUFPort)
 		}
-		fmt.Printf("memorize daemon: running\n  PID:      %d\n  Version:  %s\n  Uptime:   %ds (since %s)\n  Console:  http://%s%s\n  MCP HTTP: http://%s/mcp\n  GGUF:     %s\n  DB:       %s\n  Provider: %s\n  Log:      %s\n",
+		fmt.Printf("praxis daemon: running\n  PID:      %d\n  Version:  %s\n  Uptime:   %ds (since %s)\n  Console:  http://%s%s\n  MCP HTTP: http://%s/mcp\n  GGUF:     %s\n  DB:       %s\n  Provider: %s\n  Log:      %s\n",
 			st.PID, st.Version, st.UptimeSec, st.StartedAt, targetAddr, daemonFBNote, targetAddr, ggufInfo, st.DBPath, st.Provider, st.LogPath)
 		return 0
 
@@ -56,10 +56,10 @@ func runDaemonControlCLI(action string, posArgs []string, addr, dbPath, modelsDi
 		st, ok := hooks.EnsureDaemonRunning(addr, dbPath, modelsDir)
 		if !ok || st == nil {
 			targetAddr, _ := thttp.ResolveDaemonTargetAddr(addr, dbPath)
-			fmt.Fprintf(os.Stderr, "failed to start memorize daemon on %s\n", targetAddr)
+			fmt.Fprintf(os.Stderr, "failed to start praxis daemon on %s\n", targetAddr)
 			return 1
 		}
-		fmt.Printf("memorize daemon started (pid=%d, version=%s, url=http://%s)\n", st.PID, st.Version, st.ListenAddr)
+		fmt.Printf("praxis daemon started (pid=%d, version=%s, url=http://%s)\n", st.PID, st.Version, st.ListenAddr)
 		return 0
 
 	case "stop":
@@ -67,10 +67,10 @@ func runDaemonControlCLI(action string, posArgs []string, addr, dbPath, modelsDi
 		if !ok || st == nil || !st.Running {
 			cfgAddr, _ := thttp.ResolveDaemonTargetAddr(addr, dbPath)
 			if thttp.RequestDashboardYield(cfgAddr) {
-				fmt.Printf("stopped legacy memorize dashboard on %s\n", cfgAddr)
+				fmt.Printf("stopped legacy praxis dashboard on %s\n", cfgAddr)
 				return 0
 			}
-			fmt.Printf("memorize daemon is already stopped (%s)\n", cfgAddr)
+			fmt.Printf("praxis daemon is already stopped (%s)\n", cfgAddr)
 			return 0
 		}
 		thttp.PostDaemonStop(targetAddr)
@@ -81,7 +81,7 @@ func runDaemonControlCLI(action string, posArgs []string, addr, dbPath, modelsDi
 			}
 		}
 		config.RemoveDaemonStateIfPID(dbPath, st.PID)
-		fmt.Printf("memorize daemon stopped (was pid=%d on %s)\n", st.PID, targetAddr)
+		fmt.Printf("praxis daemon stopped (was pid=%d on %s)\n", st.PID, targetAddr)
 		return 0
 
 	case "restart", "reload":
@@ -97,10 +97,10 @@ func runDaemonControlCLI(action string, posArgs []string, addr, dbPath, modelsDi
 		newSt, ok := hooks.EnsureDaemonRunning(addr, dbPath, modelsDir)
 		if !ok || newSt == nil {
 			cfgAddr, _ := thttp.ResolveDaemonTargetAddr(addr, dbPath)
-			fmt.Fprintf(os.Stderr, "failed to restart memorize daemon on %s\n", cfgAddr)
+			fmt.Fprintf(os.Stderr, "failed to restart praxis daemon on %s\n", cfgAddr)
 			return 1
 		}
-		fmt.Printf("memorize daemon restarted (pid=%d, version=%s, url=http://%s)\n", newSt.PID, newSt.Version, newSt.ListenAddr)
+		fmt.Printf("praxis daemon restarted (pid=%d, version=%s, url=http://%s)\n", newSt.PID, newSt.Version, newSt.ListenAddr)
 		return 0
 
 	case "logs", "log":
@@ -118,7 +118,7 @@ func runDaemonControlCLI(action string, posArgs []string, addr, dbPath, modelsDi
 		return 0
 
 	case "doctor":
-		return runDoctorCLI(portCLIArgs(posArgs), dbPath, modelsDir, version, hooks)
+		return runDoctorCLI(daemonSubArgs(posArgs, "doctor"), dbPath, modelsDir, version, hooks)
 
 	default:
 		fmt.Fprintf(os.Stderr, "unknown daemon command %q (expected: status, start, stop, restart, logs, port, doctor)\n", action)

@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"memorize/internal/infra/config"
-	"memorize/internal/infra/git"
+	"praxis/internal/infra/config"
+	"praxis/internal/infra/git"
 )
 
 func resolveSelfBinary() (string, error) {
@@ -51,11 +51,11 @@ func installGitHook(exePath, home string) error {
 	if root == "" {
 		return fmt.Errorf("not inside a Git repository: %s", wd)
 	}
-	dbPath := strings.TrimSpace(os.Getenv("MEMORY_DB_PATH"))
+	dbPath := strings.TrimSpace(os.Getenv("PRAXIS_DB_PATH"))
 	if dbPath == "" {
 		dataDir := config.DefaultDataDir()
 		if dataDir == "" {
-			dataDir = filepath.Join(home, ".memorize")
+			dataDir = filepath.Join(home, ".praxis")
 		}
 		dbPath = filepath.Join(dataDir, "memories.db")
 	}
@@ -64,13 +64,13 @@ func installGitHook(exePath, home string) error {
 	if info, lerr := os.Lstat(hookPath); lerr == nil && (info.Mode()&os.ModeSymlink) != 0 {
 		return fmt.Errorf("refusing to overwrite symlink pre-commit hook at %s", hookPath)
 	}
-	if existing, err := os.ReadFile(hookPath); err == nil && !strings.Contains(string(existing), "memorize") {
-		return fmt.Errorf("existing pre-commit hook found at %s (refusing to overwrite non-memorize hook)", hookPath)
+	if existing, err := os.ReadFile(hookPath); err == nil && !strings.Contains(string(existing), "praxis") {
+		return fmt.Errorf("existing pre-commit hook found at %s (refusing to overwrite non-praxis hook)", hookPath)
 	}
 	if err := os.MkdirAll(filepath.Dir(hookPath), 0o755); err != nil {
 		return err
 	}
-	script := fmt.Sprintf("#!/usr/bin/env bash\n# Managed by memorize\nexport MEMORY_DB_PATH=%s\nexec %s -hook git-precommit\n",
+	script := fmt.Sprintf("#!/usr/bin/env bash\n# Managed by praxis\nexport PRAXIS_DB_PATH=%s\nexec %s -hook git-precommit\n",
 		shellSingleQuote(dbPath),
 		shellSingleQuote(exePath),
 	)

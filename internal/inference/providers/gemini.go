@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 var geminiQuotaFallbacks = []string{

@@ -10,11 +10,11 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
-	"memorize/internal/domain"
-	"memorize/internal/modules/guardrail"
-	"memorize/internal/modules/memory"
-	"memorize/internal/modules/progress"
-	"memorize/internal/modules/rulepack"
+	"praxis/internal/domain"
+	"praxis/internal/modules/guardrail"
+	"praxis/internal/modules/memory"
+	"praxis/internal/modules/progress"
+	"praxis/internal/modules/rulepack"
 )
 
 type stubMCPEval struct {

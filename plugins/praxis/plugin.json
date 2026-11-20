@@ -1,10 +1,10 @@
 {
-  "name": "memorize",
-  "displayName": "Memorize",
+  "name": "praxis",
+  "displayName": "Praxis",
   "version": "1.2.0",
   "license": "MIT",
-  "repository": "https://github.com/marbasdev/memorize",
-  "description": "State-evaluated MCP memory server backed by SQLite with lifecycle context injection, Git rule sync, hybrid PreToolUse/Stop guardrails, and web console.",
+  "repository": "https://github.com/marbasdev/praxis",
+  "description": "Stateful memory and execution harness backed by SQLite with lifecycle delta injection, Git rule sync, hybrid PreToolUse/Stop guardrails, and web console.",
   "suggestedPrompts": [
     "Query active architectural rules and memories stored for this project",
     "Commit the lasting project rules we agreed on in this conversation to memory",

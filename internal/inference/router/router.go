@@ -7,10 +7,10 @@ import (
 	"strings"
 	"sync"
 
-	"memorize/internal/domain"
-	"memorize/internal/inference/localmodel"
-	"memorize/internal/inference/providers"
-	"memorize/internal/infra/config"
+	"praxis/internal/domain"
+	"praxis/internal/inference/localmodel"
+	"praxis/internal/inference/providers"
+	"praxis/internal/infra/config"
 )
 
 type Router struct {
@@ -309,7 +309,7 @@ func CheckConfiguredEngineReadiness(ctx context.Context, cfg map[string]string, 
 }
 
 func SelectStartupEvaluator(mgr *localmodel.Manager) domain.Evaluator {
-	rawProv := strings.ToLower(strings.TrimSpace(os.Getenv("MEMORY_PROVIDER")))
+	rawProv := strings.ToLower(strings.TrimSpace(os.Getenv("PRAXIS_PROVIDER")))
 	if rawProv == "" {
 		rawProv = domain.ResolveExplicitEnvProvider()
 	}

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 func TestDecodeHookEventAndCodecs(t *testing.T) {
@@ -478,9 +478,9 @@ func TestStopDeadlinePartialVerificationFailOpenNoticeAndFailClosed(t *testing.T
 	setupAndRun := func(t *testing.T, failClosed bool) (string, *testStack, string) {
 		t.Helper()
 		if failClosed {
-			t.Setenv("MEMORY_GUARDRAIL_FAIL_CLOSED", "1")
+			t.Setenv("PRAXIS_GUARDRAIL_FAIL_CLOSED", "1")
 		} else {
-			t.Setenv("MEMORY_GUARDRAIL_FAIL_CLOSED", "0")
+			t.Setenv("PRAXIS_GUARDRAIL_FAIL_CLOSED", "0")
 		}
 
 		eval := &contextAwareVerifyEval{
@@ -545,11 +545,11 @@ func TestStopDeadlinePartialVerificationFailOpenNoticeAndFailClosed(t *testing.T
 
 	turnNext, _ := json.Marshal(map[string]any{"session_id": "sess-partial", "cwd": repoOpen, "prompt": "continue"})
 	turnOut1, _, _ := stOpen.gr.ExecuteHook(context.Background(), "claude-turn", turnNext, repoOpen)
-	if !strings.Contains(turnOut1, "[MEMORIZE GUARDRAIL NOTICE]") || !strings.Contains(turnOut1, "second.go") {
+	if !strings.Contains(turnOut1, "[PRAXIS GUARDRAIL NOTICE]") || !strings.Contains(turnOut1, "second.go") {
 		t.Fatalf("expected next turn to receive one-shot partial verification notice, got %q", turnOut1)
 	}
 	turnOut2, _, _ := stOpen.gr.ExecuteHook(context.Background(), "claude-turn", turnNext, repoOpen)
-	if strings.Contains(turnOut2, "[MEMORIZE GUARDRAIL NOTICE]") {
+	if strings.Contains(turnOut2, "[PRAXIS GUARDRAIL NOTICE]") {
 		t.Fatalf("expected partial notice to clear after first delivery, got %q", turnOut2)
 	}
 
@@ -1021,7 +1021,7 @@ func TestStopReverifyCapYieldsAndWarnsNextTurn(t *testing.T) {
 
 	nextTurn, _ := json.Marshal(map[string]any{"session_id": "sess-cap", "cwd": repo, "prompt": "next task"})
 	turnOut, _, _ := st.gr.ExecuteHook(ctx, "claude-turn", nextTurn, repo)
-	if !strings.Contains(turnOut, "[MEMORIZE GUARDRAIL NOTICE]") || !strings.Contains(turnOut, "PERSISTENT_VIOLATION") {
+	if !strings.Contains(turnOut, "[PRAXIS GUARDRAIL NOTICE]") || !strings.Contains(turnOut, "PERSISTENT_VIOLATION") {
 		t.Fatalf("expected next turn to receive unresolved Stop retry cap warning, got %q", turnOut)
 	}
 }

@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 func resolveConsolidateScope(ctx context.Context, d Deps, q url.Values, scopes []string) string {

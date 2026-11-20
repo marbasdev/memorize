@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"memorize/internal/domain"
-	"memorize/internal/inference/providers"
+	"praxis/internal/domain"
+	"praxis/internal/inference/providers"
 )
 
 func NormalizePresetCategoriesJSON(raw string) string {
@@ -119,7 +119,7 @@ func PublicConfigWithGGUFPort(raw map[string]string, providerName string, ggufPo
 		"local_model_url":             EnvOrDefault(raw["local_model_url"], "LOCAL_MODEL_URL", "http://127.0.0.1:11434/v1"),
 		"local_model_name":            EnvOrDefault(raw["local_model_name"], "LOCAL_MODEL_NAME", "qwen3:4b"),
 		"local_key_status":            MaskSecret(raw["local_api_key"], "LOCAL_API_KEY"),
-		"include_personal_in_project": EnvOrDefault(raw["include_personal_in_project"], "MEMORY_INCLUDE_PERSONAL", "0"),
+		"include_personal_in_project": EnvOrDefault(raw["include_personal_in_project"], "PRAXIS_INCLUDE_PERSONAL", "0"),
 		"preset_categories":           NormalizePresetCategoriesJSON(raw["preset_categories"]),
 	}
 	for _, spec := range domain.AllEvalTasks() {

@@ -1,7 +1,7 @@
-# AI 자율 설정 가이드 (`memorize`)
+# AI 자율 설정 가이드 (`praxis`)
 
 > **AI 코딩 에이전트(Claude Code, Antigravity, Cursor, Windsurf 등) 전용**
-> 개발자가 "이 프로젝트에 memorize를 설치하고 설정해 줘"라고 요청하면, 이 가이드에 명시된 자율 실행 절차를 따르세요.
+> 개발자가 "이 프로젝트에 praxis를 설치하고 설정해 줘"라고 요청하면, 이 가이드에 명시된 자율 실행 절차를 따르세요.
 
 ---
 
@@ -10,10 +10,10 @@
 개발자는 아래 프롬프트 중 하나를 복사하여 에이전트 채팅에 붙여넣을 수 있습니다:
 
 ```text
-guides/AI_SETUP.ko.md 가이드를 따라 이 프로젝트에 memorize를 설치 및 설정해 줘. memorize doctor로 상태를 점검하고, 추론 엔진 상태를 확인한 뒤 초기 프로젝트 온보딩을 진행해 줘.
+guides/AI_SETUP.ko.md 가이드를 따라 이 프로젝트에 praxis를 설치 및 설정해 줘. praxis doctor로 상태를 점검하고, 추론 엔진 상태를 확인한 뒤 초기 프로젝트 온보딩을 진행해 줘.
 ```
 
-*(또는 웹 저장소 URL 지정: `https://github.com/marbasdev/memorize/blob/main/guides/AI_SETUP.ko.md`)*
+*(또는 웹 저장소 URL 지정: `https://github.com/marbasdev/praxis/blob/main/guides/AI_SETUP.ko.md`)*
 
 ---
 
@@ -38,7 +38,7 @@ guides/AI_SETUP.ko.md 가이드를 따라 이 프로젝트에 memorize를 설치
 터미널에서 아래 명령을 실행합니다:
 ```bash
 # 로컬 저장소 기준 플러그인 설치:
-agy plugin install ./plugins/memorize
+agy plugin install ./plugins/praxis
 ```
 플러그인 설치 확인:
 ```bash
@@ -48,40 +48,40 @@ agy plugin list
 #### 방법 B: Claude Code
 Claude 세션에서 플러그인 마켓플레이스 명령을 실행합니다:
 ```bash
-/plugin marketplace add https://github.com/marbasdev/memorize.git
-/plugin install memorize@memorize-marketplace
+/plugin marketplace add https://github.com/marbasdev/praxis.git
+/plugin install praxis@praxis-marketplace
 ```
 
 #### 방법 C: 단독 바이너리 / Windows / 범용 MCP
 CGO 없는 순수 Go 정적 바이너리를 빌드합니다:
 ```bash
-CGO_ENABLED=0 go build -trimpath -o bin/memorize ./cmd/memorize
+CGO_ENABLED=0 go build -trimpath -o bin/praxis ./cmd/praxis
 ```
 클라이언트 MCP 설정 파일(`claude_desktop_config.json`, `.cursor/mcp.json` 등)에 등록합니다:
 ```json
 {
   "mcpServers": {
-    "memorize": {
-      "command": "/절대경로/memorize/bin/memorize"
+    "praxis": {
+      "command": "/절대경로/praxis/bin/praxis"
     }
   }
 }
 ```
-*(macOS/Linux의 경우 자동 갱신 래퍼인 `./plugins/memorize/scripts/run-memorize.sh` 등록 권장).*
+*(macOS/Linux의 경우 자동 갱신 래퍼인 `./plugins/praxis/scripts/run-praxis.sh` 등록 권장).*
 
 ---
 
-### 3단계: 자가 진단 (`memorize doctor`)
+### 3단계: 자가 진단 (`praxis doctor`)
 
 자가 진단 명령을 실행합니다:
 ```bash
-memorize doctor
+praxis doctor
 # 또는
-./bin/memorize doctor
+./bin/praxis doctor
 ```
 기계 판독용 JSON 출력이 필요한 경우:
 ```bash
-memorize doctor --json
+praxis doctor --json
 ```
 
 **진단 점검 항목**:
@@ -92,14 +92,14 @@ memorize doctor --json
 5. `Inference Engine`: 활성 추론 프로바이더(Local GGUF, Gemini, 로컬 URL, JEV 등) 설정 여부 확인.
 6. `Team Remote`: 원격 팀 서버 연결 여부 확인(솔로 모드 시 선택 사항).
 
-경고(`[WARN]`)나 실패(`[FAIL]`) 항목이 있다면 `memorize doctor`가 출력하는 해결 안내를 따르세요.
+경고(`[WARN]`)나 실패(`[FAIL]`) 항목이 있다면 `praxis doctor`가 출력하는 해결 안내를 따르세요.
 
 ---
 
 ### 4단계: 추론 엔진 확인 및 안내
 
 추론 모델 설정 상태를 확인합니다:
-- `memorize doctor`에서 `[WARN] Inference Engine`이 보고되는 경우:
+- `praxis doctor`에서 `[WARN] Inference Engine`이 보고되는 경우:
   - 기억 커밋 및 검색 등 핵심 동작에 추론 엔진이 필수임을 개발자에게 알립니다.
   - 웹 콘솔(**`http://127.0.0.1:18095`**, 추론 엔진 탭)에서 **로컬 GGUF 모델을 1클릭 다운로드**(macOS/Linux)하거나 API 키를 입력하도록 안내합니다.
   - 또는 환경 변수를 통해 Gemini API 키를 직접 설정할 수도 있습니다:
@@ -114,7 +114,7 @@ memorize doctor --json
 1. `team_rules` 또는 `query_project_memory`를 조회하여 현재 저장소의 규칙 상태를 파악합니다.
 2. 현재 프로젝트의 활성 기억 수를 확인합니다:
    - 기억이 `0`개인 경우, 개발자에게 다음을 묻습니다:
-     > *"이 저장소에 등록된 기억이 없습니다. 코드베이스의 핵심 파일을 분석하여 프로젝트 아키텍처 및 코딩 규칙을 memorize에 온보딩할까요?"*
+     > *"이 저장소에 등록된 기억이 없습니다. 코드베이스의 핵심 파일을 분석하여 프로젝트 아키텍처 및 코딩 규칙을 praxis에 온보딩할까요?"*
 3. 개발자가 수락하면:
    - 핵심 파일(`README.md`, `go.mod` / `package.json`, 아키텍처 문서, 설정 파일 등)을 검토합니다.
    - 레거시 패턴과 신규 패턴이 상충하는 경우, 규칙 저장 전에 **어느 기준이 우선인지 개발자에게 먼저 확인**합니다.

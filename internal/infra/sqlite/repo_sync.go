@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"strings"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 func GetSyncedCommit(ctx context.Context, db *sql.DB, rawScope string) string {

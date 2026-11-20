@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 func IsPersistentDBPath(dbPath string) bool {
@@ -29,17 +29,17 @@ func DataDirForDBPath(dbPath string) string {
 }
 
 func DefaultDataDir() string {
-	if v := strings.TrimSpace(os.Getenv("MEMORY_DATA_DIR")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("PRAXIS_DATA_DIR")); v != "" {
 		return filepath.Clean(v)
 	}
-	if db := strings.TrimSpace(os.Getenv("MEMORY_DB_PATH")); IsPersistentDBPath(db) {
+	if db := strings.TrimSpace(os.Getenv("PRAXIS_DB_PATH")); IsPersistentDBPath(db) {
 		return filepath.Dir(filepath.Clean(db))
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
 		return ""
 	}
-	return filepath.Join(home, ".memorize")
+	return filepath.Join(home, ".praxis")
 }
 
 func PortsFilePath(dbPath string) string {
@@ -59,7 +59,7 @@ func DaemonStateFilePath(dbPath string) string {
 }
 
 func DaemonLogPath(dbPath string) string {
-	if p := strings.TrimSpace(os.Getenv("MEMORY_DAEMON_LOG")); p != "" {
+	if p := strings.TrimSpace(os.Getenv("PRAXIS_DAEMON_LOG")); p != "" {
 		return p
 	}
 	if IsPersistentDBPath(dbPath) {
@@ -70,7 +70,7 @@ func DaemonLogPath(dbPath string) string {
 	if dir := DefaultDataDir(); dir != "" {
 		return filepath.Join(dir, "daemon.log")
 	}
-	return filepath.Join(os.TempDir(), fmt.Sprintf("memorize-daemon-%d.log", os.Getuid()))
+	return filepath.Join(os.TempDir(), fmt.Sprintf("praxis-daemon-%d.log", os.Getuid()))
 }
 
 func LoadPortConfigDir(dataDir string) domain.PortConfig {

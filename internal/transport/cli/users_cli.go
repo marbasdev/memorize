@@ -11,11 +11,11 @@ import (
 	"sort"
 	"strings"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/config"
-	"memorize/internal/infra/git"
-	"memorize/internal/infra/sqlite"
-	thttp "memorize/internal/transport/http"
+	"praxis/internal/domain"
+	"praxis/internal/infra/config"
+	"praxis/internal/infra/git"
+	"praxis/internal/infra/sqlite"
+	thttp "praxis/internal/transport/http"
 )
 
 func runServeCLI(args []string, dbPath, modelsDir string, hooks RuntimeHooks) int {
@@ -103,7 +103,7 @@ func runUserCLI(args []string, dbPath string) int {
 			return 0
 		}
 		if len(users) == 0 {
-			fmt.Println("No team server accounts yet. Create an admin with: memorize user add admin --role admin")
+			fmt.Println("No team server accounts yet. Create an admin with: praxis user add admin --role admin")
 			return 0
 		}
 		for _, u := range users {
@@ -122,7 +122,7 @@ func runUserCLI(args []string, dbPath string) int {
 
 	case "add", "create":
 		if len(pos) < 1 || strings.TrimSpace(pos[0]) == "" {
-			fmt.Fprintln(os.Stderr, "usage: memorize user add <account> [--role member|admin] [--json]")
+			fmt.Fprintln(os.Stderr, "usage: praxis user add <account> [--role member|admin] [--json]")
 			return 2
 		}
 		issued, err := sqlite.CreateUser(ctx, db, pos[0], *roleFlag)
@@ -134,7 +134,7 @@ func runUserCLI(args []string, dbPath string) int {
 
 	case "rotate":
 		if len(pos) < 1 || strings.TrimSpace(pos[0]) == "" {
-			fmt.Fprintln(os.Stderr, "usage: memorize user rotate <account> [--json]")
+			fmt.Fprintln(os.Stderr, "usage: praxis user rotate <account> [--json]")
 			return 2
 		}
 		issued, err := sqlite.RotateUserToken(ctx, db, pos[0])
@@ -146,7 +146,7 @@ func runUserCLI(args []string, dbPath string) int {
 
 	case "enable", "activate":
 		if len(pos) < 1 || strings.TrimSpace(pos[0]) == "" {
-			fmt.Fprintln(os.Stderr, "usage: memorize user enable <account>")
+			fmt.Fprintln(os.Stderr, "usage: praxis user enable <account>")
 			return 2
 		}
 		if err := sqlite.SetUserActive(ctx, db, pos[0], true); err != nil {
@@ -163,7 +163,7 @@ func runUserCLI(args []string, dbPath string) int {
 
 	case "disable", "suspend":
 		if len(pos) < 1 || strings.TrimSpace(pos[0]) == "" {
-			fmt.Fprintln(os.Stderr, "usage: memorize user disable <account>")
+			fmt.Fprintln(os.Stderr, "usage: praxis user disable <account>")
 			return 2
 		}
 		if err := sqlite.SetUserActive(ctx, db, pos[0], false); err != nil {
@@ -180,7 +180,7 @@ func runUserCLI(args []string, dbPath string) int {
 
 	case "role":
 		if len(pos) < 1 || strings.TrimSpace(pos[0]) == "" {
-			fmt.Fprintln(os.Stderr, "usage: memorize user role <account> --role <member|admin>")
+			fmt.Fprintln(os.Stderr, "usage: praxis user role <account> --role <member|admin>")
 			return 2
 		}
 		roleArg := *roleFlag
@@ -201,7 +201,7 @@ func runUserCLI(args []string, dbPath string) int {
 
 	case "remove", "rm", "delete":
 		if len(pos) < 1 || strings.TrimSpace(pos[0]) == "" {
-			fmt.Fprintln(os.Stderr, "usage: memorize user remove <account>")
+			fmt.Fprintln(os.Stderr, "usage: praxis user remove <account>")
 			return 2
 		}
 		if err := sqlite.DeleteUser(ctx, db, pos[0]); err != nil {
@@ -229,12 +229,12 @@ func printIssuedToken(issued domain.UserTokenIssue, asJSON bool, verb string) in
 	}
 	fmt.Printf("%s: @%s (role=%s, hint=%s...)\n", verb, issued.User.Account, issued.User.Role, issued.User.TokenHint)
 	fmt.Printf("Access Token (shown once — save now): %s\n", issued.PlainToken)
-	fmt.Printf("Client connect command:\n  memorize connect --url http://<host>:18095 --token %s\n", issued.PlainToken)
+	fmt.Printf("Client connect command:\n  praxis connect --url http://<host>:18095 --token %s\n", issued.PlainToken)
 	return 0
 }
 
 func printUserCLIUsage() {
-	fmt.Fprintln(os.Stderr, `usage: memorize user <command> [args]
+	fmt.Fprintln(os.Stderr, `usage: praxis user <command> [args]
   add <account> [--role member|admin] [--json]
   list [--json]
   rotate <account> [--json]
@@ -264,7 +264,7 @@ func resolveBindingRepoRoot(repoFlag string) string {
 
 func runConnectCLI(args []string, dbPath string) int {
 	fs := flag.NewFlagSet("connect", flag.ContinueOnError)
-	urlFlag := fs.String("url", "", "team server URL (e.g. https://memorize.team:18095)")
+	urlFlag := fs.String("url", "", "team server URL (e.g. https://praxis.team:18095)")
 	tokenFlag := fs.String("token", "", "team access token (mmz_...)")
 	repoFlag := fs.String("repo", "", "local repository path to bind (default: current repository)")
 	globalFlag := fs.Bool("global", false, "bind as default server for all repositories without per-repo overrides")
@@ -281,14 +281,14 @@ func runConnectCLI(args []string, dbPath string) int {
 		return 2
 	}
 
-	rawURL := domain.FirstNonEmpty(*urlFlag, os.Getenv("MEMORY_REMOTE_URL"))
+	rawURL := domain.FirstNonEmpty(*urlFlag, os.Getenv("PRAXIS_REMOTE_URL"))
 	if rawURL == "" && len(fs.Args()) > 0 {
 		rawURL = fs.Args()[0]
 	}
 	normURL := config.NormalizeRemoteURL(rawURL)
-	tok := strings.TrimSpace(domain.FirstNonEmpty(*tokenFlag, os.Getenv("MEMORY_REMOTE_TOKEN")))
+	tok := strings.TrimSpace(domain.FirstNonEmpty(*tokenFlag, os.Getenv("PRAXIS_REMOTE_TOKEN")))
 	if normURL == "" || tok == "" {
-		fmt.Fprintln(os.Stderr, "usage: memorize connect --url <server-url> --token <token> [--global] [--repo <path>]")
+		fmt.Fprintln(os.Stderr, "usage: praxis connect --url <server-url> --token <token> [--global] [--repo <path>]")
 		return 2
 	}
 
@@ -460,9 +460,9 @@ func runSwitchCLI(args []string, dbPath string) int {
 		}
 		if len(names) == 0 {
 			if hasActive {
-				fmt.Printf("Active: @%s -> %s (no named profiles saved yet; re-run `memorize connect` to save)\n", active.Account, active.URL)
+				fmt.Printf("Active: @%s -> %s (no named profiles saved yet; re-run `praxis connect` to save)\n", active.Account, active.URL)
 			} else {
-				fmt.Println("No saved account profiles. Run `memorize connect --url <url> --token <token>` first.")
+				fmt.Println("No saved account profiles. Run `praxis connect --url <url> --token <token>` first.")
 			}
 			return 0
 		}
@@ -484,7 +484,7 @@ func runSwitchCLI(args []string, dbPath string) int {
 	targetName := domain.NormalizeAccount(pos[0])
 	target, ok := config.LookupRemoteProfile(dataDir, targetName)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "saved profile %q not found (run `memorize switch` to list profiles or `memorize connect` to add a token)\n", targetName)
+		fmt.Fprintf(os.Stderr, "saved profile %q not found (run `praxis switch` to list profiles or `praxis connect` to add a token)\n", targetName)
 		return 1
 	}
 	if !*skipVerify {

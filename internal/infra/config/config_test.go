@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/config"
-	"memorize/internal/infra/sqlite"
+	"praxis/internal/domain"
+	"praxis/internal/infra/config"
+	"praxis/internal/infra/sqlite"
 )
 
 func TestPortConfigValidationPersistenceAndIsolation(t *testing.T) {
@@ -136,24 +136,24 @@ func TestDefaultDataDirUsesNeutralHomeDirectory(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	t.Setenv("MEMORY_DATA_DIR", "")
-	t.Setenv("MEMORY_DB_PATH", "")
+	t.Setenv("PRAXIS_DATA_DIR", "")
+	t.Setenv("PRAXIS_DB_PATH", "")
 
-	wantDefault := filepath.Join(home, ".memorize")
+	wantDefault := filepath.Join(home, ".praxis")
 	if got := config.DefaultDataDir(); got != wantDefault {
 		t.Fatalf("DefaultDataDir() = %q, want %q", got, wantDefault)
 	}
 
 	customDB := filepath.Join(home, "custom-db-dir", "memories.db")
-	t.Setenv("MEMORY_DB_PATH", customDB)
+	t.Setenv("PRAXIS_DB_PATH", customDB)
 	if got := config.DefaultDataDir(); got != filepath.Join(home, "custom-db-dir") {
-		t.Fatalf("DefaultDataDir() with MEMORY_DB_PATH = %q, want %q", got, filepath.Join(home, "custom-db-dir"))
+		t.Fatalf("DefaultDataDir() with PRAXIS_DB_PATH = %q, want %q", got, filepath.Join(home, "custom-db-dir"))
 	}
 
 	customRoot := filepath.Join(home, "explicit-data-dir")
-	t.Setenv("MEMORY_DATA_DIR", customRoot)
+	t.Setenv("PRAXIS_DATA_DIR", customRoot)
 	if got := config.DefaultDataDir(); got != customRoot {
-		t.Fatalf("DefaultDataDir() with MEMORY_DATA_DIR = %q, want %q", got, customRoot)
+		t.Fatalf("DefaultDataDir() with PRAXIS_DATA_DIR = %q, want %q", got, customRoot)
 	}
 }
 
@@ -259,22 +259,22 @@ func TestClientTurnBaselinesAndDiffSections(t *testing.T) {
 func TestRemoteProfilesLookupAndRemove(t *testing.T) {
 	dataDir := t.TempDir()
 	if err := config.SaveRemoteBinding(dataDir, "", true, domain.RemoteTargetConfig{
-		URL: "https://home.example:18095", Token: "mem_home_tok", Account: "Home", Role: "admin",
+		URL: "https://home.example:18095", Token: "prx_home_tok", Account: "Home", Role: "admin",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := config.SaveRemoteBinding(dataDir, "", true, domain.RemoteTargetConfig{
-		URL: "https://home.example:18095", Token: "mem_work_tok", Account: "work", Role: "member",
+		URL: "https://home.example:18095", Token: "prx_work_tok", Account: "work", Role: "member",
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	pHome, ok := config.LookupRemoteProfile(dataDir, "home")
-	if !ok || pHome.Token != "mem_home_tok" || pHome.Account != "home" {
+	if !ok || pHome.Token != "prx_home_tok" || pHome.Account != "home" {
 		t.Fatalf("LookupRemoteProfile(home) = %+v ok=%v", pHome, ok)
 	}
 	pWork, ok := config.LookupRemoteProfile(dataDir, "WORK")
-	if !ok || pWork.Token != "mem_work_tok" {
+	if !ok || pWork.Token != "prx_work_tok" {
 		t.Fatalf("LookupRemoteProfile(WORK) = %+v ok=%v", pWork, ok)
 	}
 	if removed, err := config.RemoveRemoteProfile(dataDir, "home"); err != nil || !removed {

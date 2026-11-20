@@ -13,13 +13,13 @@ const (
 	RoleMember = "member"
 
 	DefaultServeAddr          = "0.0.0.0:18095"
-	SessionCookieName         = "memorize_session"
-	AccountsCookieName        = "memorize_accounts"
+	SessionCookieName         = "praxis_session"
+	AccountsCookieName        = "praxis_accounts"
 	MaxSwitcherAccounts       = 10
 	DefaultSessionTTL         = 7 * 24 * time.Hour
-	LangCookieName            = "memorize_lang"
+	LangCookieName            = "praxis_lang"
 	LangCookieMaxAge          = 365 * 24 * time.Hour
-	AuthTokenPrefix           = "mem_"
+	AuthTokenPrefix           = "prx_"
 	MaxRemoteRulePackDocBytes = 256 * 1024
 )
 

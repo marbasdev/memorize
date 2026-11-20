@@ -16,11 +16,11 @@ import (
 	"strings"
 	"testing"
 
-	"memorize/internal/domain"
-	"memorize/internal/inference/discovery"
-	"memorize/internal/infra/config"
-	"memorize/internal/modules/rulepack"
-	thttp "memorize/internal/transport/http"
+	"praxis/internal/domain"
+	"praxis/internal/inference/discovery"
+	"praxis/internal/infra/config"
+	"praxis/internal/modules/rulepack"
+	thttp "praxis/internal/transport/http"
 )
 
 func TestGeminiDecisionsCatalogAndFeatureRoutingUI(t *testing.T) {
@@ -151,7 +151,7 @@ func TestGeminiDecisionsCatalogAndFeatureRoutingUI(t *testing.T) {
 
 func TestTopEngineSetupWarningBannerAndOOBClearing(t *testing.T) {
 	t.Setenv("GEMINI_API_KEY", "")
-	t.Setenv("MEMORY_PROVIDER", "")
+	t.Setenv("PRAXIS_PROVIDER", "")
 	t.Setenv("TYPESAFE_API_KEY", "")
 	t.Setenv("LOCAL_MODEL_URL", "")
 
@@ -164,7 +164,7 @@ func TestTopEngineSetupWarningBannerAndOOBClearing(t *testing.T) {
 	getRoot := func(lang string) string {
 		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/", nil)
 		if lang != "" {
-			req.AddCookie(&http.Cookie{Name: "memorize_lang", Value: lang})
+			req.AddCookie(&http.Cookie{Name: "praxis_lang", Value: lang})
 		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -255,8 +255,8 @@ func TestPortModalSaveResetCSRFAndDaemonHooks(t *testing.T) {
 	}
 	jsBytes, _ := io.ReadAll(jsResp.Body)
 	_ = jsResp.Body.Close()
-	if !strings.Contains(string(jsBytes), "memorizePortRedirect") {
-		t.Fatalf("expected ui.js to handle memorizePortRedirect event")
+	if !strings.Contains(string(jsBytes), "praxisPortRedirect") {
+		t.Fatalf("expected ui.js to handle praxisPortRedirect event")
 	}
 
 	code, modalHTML := doHX(t, http.MethodGet, ts.URL+"/ui/modal/ports", nil)
@@ -298,9 +298,9 @@ func TestPortModalSaveResetCSRFAndDaemonHooks(t *testing.T) {
 	if err := json.Unmarshal([]byte(saveResp.Header.Get("HX-Trigger")), &trig); err != nil {
 		t.Fatalf("parse HX-Trigger %q: %v", saveResp.Header.Get("HX-Trigger"), err)
 	}
-	redir, _ := trig["memorizePortRedirect"].(map[string]any)
+	redir, _ := trig["praxisPortRedirect"].(map[string]any)
 	if redir["url"] != "http://127.0.0.1:19195" {
-		t.Fatalf("expected memorizePortRedirect url http://127.0.0.1:19195, got %+v", trig)
+		t.Fatalf("expected praxisPortRedirect url http://127.0.0.1:19195, got %+v", trig)
 	}
 
 	resetCode, _ := doHX(t, http.MethodPost, ts.URL+"/ui/ports/save", url.Values{"reset": {"1"}})
@@ -366,7 +366,7 @@ func TestLocalInferenceProbeAndSetupLanding(t *testing.T) {
 	}
 
 	for _, k := range []string{
-		"MEMORY_PROVIDER", "GEMINI_API_KEY", "TYPESAFE_API_KEY",
+		"PRAXIS_PROVIDER", "GEMINI_API_KEY", "TYPESAFE_API_KEY",
 		"FLIDE_API_KEY", "JEV_API_URL", "LOCAL_MODEL_URL", "LOCAL_GGUF_URL",
 	} {
 		t.Setenv(k, "")
@@ -659,7 +659,7 @@ func TestDashboardTeamRulesHTMXWorkflowAndLineBudget(t *testing.T) {
 	_ = pubResp.Body.Close()
 	pubHTML := pubBuf.String()
 	hxTrig := pubResp.Header.Get("HX-Trigger")
-	if pubResp.StatusCode != http.StatusOK || !strings.Contains(pubHTML, raceTitle) || !strings.Contains(hxTrig, "memorizeCloseModal") {
+	if pubResp.StatusCode != http.StatusOK || !strings.Contains(pubHTML, raceTitle) || !strings.Contains(hxTrig, "praxisCloseModal") {
 		t.Fatalf("POST /ui/team/publish failed status=%d HX-Trigger=%q:\n%s", pubResp.StatusCode, hxTrig, pubHTML)
 	}
 	if strings.Contains(pubHTML, `class="team-rule-key"`) || strings.Contains(pubHTML, "[invariant]") || strings.Contains(pubHTML, "[rule]") || !strings.Contains(pubHTML, `hx-target="#modalHost"`) {
@@ -817,7 +817,7 @@ func TestDashboardTeamRulesHTMXWorkflowAndLineBudget(t *testing.T) {
 	_ = updResp.Body.Close()
 	updHTML := updBuf.String()
 	updTrig := updResp.Header.Get("HX-Trigger")
-	if updResp.StatusCode != http.StatusOK || !strings.Contains(updHTML, updatedRaceTitle) || !strings.Contains(updTrig, "memorizeCloseModal") {
+	if updResp.StatusCode != http.StatusOK || !strings.Contains(updHTML, updatedRaceTitle) || !strings.Contains(updTrig, "praxisCloseModal") {
 		t.Fatalf("POST /ui/team/update failed status=%d HX-Trigger=%q:\n%s", updResp.StatusCode, updTrig, updHTML)
 	}
 

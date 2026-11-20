@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/config"
-	thttp "memorize/internal/transport/http"
+	"praxis/internal/domain"
+	"praxis/internal/infra/config"
+	thttp "praxis/internal/transport/http"
 )
 
 type RuntimeHooks struct {
@@ -27,7 +27,7 @@ type RuntimeHooks struct {
 }
 
 func resolveClientDataDir(dbPath string) string {
-	if envDir := strings.TrimSpace(os.Getenv("MEMORY_DATA_DIR")); envDir != "" {
+	if envDir := strings.TrimSpace(os.Getenv("PRAXIS_DATA_DIR")); envDir != "" {
 		return envDir
 	}
 	if dbPath != "" && dbPath != ":memory:" && !strings.HasPrefix(dbPath, "file::memory:") {
@@ -45,7 +45,7 @@ func readHookStdin() []byte {
 }
 
 func effectiveProcStart(goStart time.Time) time.Time {
-	if raw := strings.TrimSpace(os.Getenv("MEMORY_LAUNCHER_START_SEC")); raw != "" {
+	if raw := strings.TrimSpace(os.Getenv("PRAXIS_LAUNCHER_START_SEC")); raw != "" {
 		if sec, err := strconv.ParseInt(raw, 10, 64); err == nil && sec > 0 {
 			// Use end-of-second upper bound so integer second rounding never overstates elapsed time,
 			// while still capturing multi-second shell bootstrap/codesign work.
@@ -59,14 +59,14 @@ func effectiveProcStart(goStart time.Time) time.Time {
 }
 
 func isInlineModeForced(dbPath string) bool {
-	return os.Getenv("MEMORY_DISABLE_BG_DASHBOARD") == "1" ||
-		os.Getenv("MEMORY_INLINE_STDIO") == "1" ||
+	return os.Getenv("PRAXIS_DISABLE_BG_DASHBOARD") == "1" ||
+		os.Getenv("PRAXIS_INLINE_STDIO") == "1" ||
 		dbPath == ":memory:" ||
 		strings.HasPrefix(dbPath, "file::memory:")
 }
 
 func resolveStoragePaths() (dbPath, modelsDir string) {
-	dbPath = strings.TrimSpace(os.Getenv("MEMORY_DB_PATH"))
+	dbPath = strings.TrimSpace(os.Getenv("PRAXIS_DB_PATH"))
 	if dbPath == "" {
 		if dataDir := config.DefaultDataDir(); dataDir != "" {
 			_ = os.MkdirAll(dataDir, 0o700)
@@ -75,7 +75,7 @@ func resolveStoragePaths() (dbPath, modelsDir string) {
 			dbPath = "memories.db"
 		}
 	}
-	modelsDir = strings.TrimSpace(os.Getenv("MEMORY_MODELS_DIR"))
+	modelsDir = strings.TrimSpace(os.Getenv("PRAXIS_MODELS_DIR"))
 	if modelsDir == "" && dbPath != ":memory:" {
 		if absDB, err := filepath.Abs(dbPath); err == nil {
 			modelsDir = filepath.Join(filepath.Dir(absDB), "models")
@@ -174,8 +174,8 @@ func executeArgs(args []string, version string, hooks RuntimeHooks) int {
 		}
 	}
 
-	fs := flag.NewFlagSet("memorize", flag.ContinueOnError)
-	showVersion := fs.Bool("version", false, "print memorize version and exit")
+	fs := flag.NewFlagSet("praxis", flag.ContinueOnError)
+	showVersion := fs.Bool("version", false, "print praxis version and exit")
 	installMode := fs.String("install", "", "install Git pre-commit guardrail hook ('git-hook')")
 	daemonMode := fs.Bool("daemon", false, "run single unified background daemon (SQLite + Dashboard + MCP + Hooks)")
 	serveMode := fs.Bool("serve", false, "run authenticated team server mode (default 0.0.0.0:18095)")
@@ -191,7 +191,7 @@ func executeArgs(args []string, version string, hooks RuntimeHooks) int {
 	}
 
 	if *showVersion {
-		fmt.Printf("memorize %s\n", version)
+		fmt.Printf("praxis %s\n", version)
 		return 0
 	}
 	if target := strings.TrimSpace(*installMode); target != "" {
@@ -249,8 +249,8 @@ func executeArgs(args []string, version string, hooks RuntimeHooks) int {
 		fmt.Fprintln(os.Stderr, "inline stdio handler not configured")
 		return 1
 	}
-	withDash := os.Getenv("MEMORY_DISABLE_BG_DASHBOARD") != "1"
-	return hooks.ServeInlineStdio(dbPath, modelsDir, withDash, os.Getenv("MEMORY_DASHBOARD_ADDR"))
+	withDash := os.Getenv("PRAXIS_DISABLE_BG_DASHBOARD") != "1"
+	return hooks.ServeInlineStdio(dbPath, modelsDir, withDash, os.Getenv("PRAXIS_DASHBOARD_ADDR"))
 }
 
 func Execute(version string, hooks RuntimeHooks) int {

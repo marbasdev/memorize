@@ -14,19 +14,19 @@ import (
 
 	"github.com/mark3labs/mcp-go/server"
 
-	"memorize/internal/domain"
-	"memorize/internal/inference/localmodel"
-	"memorize/internal/inference/router"
-	"memorize/internal/infra/config"
-	"memorize/internal/infra/sqlite"
-	"memorize/internal/modules/guardrail"
-	"memorize/internal/modules/memory"
-	"memorize/internal/modules/progress"
-	"memorize/internal/modules/rulepack"
-	"memorize/internal/transport/cli"
-	"memorize/internal/transport/dashboard"
-	thttp "memorize/internal/transport/http"
-	transportmcp "memorize/internal/transport/mcp"
+	"praxis/internal/domain"
+	"praxis/internal/inference/localmodel"
+	"praxis/internal/inference/router"
+	"praxis/internal/infra/config"
+	"praxis/internal/infra/sqlite"
+	"praxis/internal/modules/guardrail"
+	"praxis/internal/modules/memory"
+	"praxis/internal/modules/progress"
+	"praxis/internal/modules/rulepack"
+	"praxis/internal/transport/cli"
+	"praxis/internal/transport/dashboard"
+	thttp "praxis/internal/transport/http"
+	transportmcp "praxis/internal/transport/mcp"
 )
 
 type runtimeBundle struct {
@@ -49,7 +49,7 @@ func openRuntime(dbPath, modelsDir string, autoBootstrap bool) (*runtimeBundle, 
 	if err != nil {
 		return nil, err
 	}
-	mem.SetAutoGitSync(os.Getenv("MEMORY_AUTO_GIT_SYNC") == "1")
+	mem.SetAutoGitSync(os.Getenv("PRAXIS_AUTO_GIT_SYNC") == "1")
 	mem.Router().AttachLocalManager(mgr)
 	prog := progress.New(mem)
 	rp := rulepack.New(mem)
@@ -68,13 +68,13 @@ func maybeAutoBootstrap(ctx context.Context, mem *memory.Service, mgr *localmode
 	}
 	cfg := mem.GetConfigMap(ctx)
 	if strings.TrimSpace(cfg[config.CfgActiveProvider]) != "" ||
-		strings.TrimSpace(os.Getenv("MEMORY_PROVIDER")) != "" ||
+		strings.TrimSpace(os.Getenv("PRAXIS_PROVIDER")) != "" ||
 		strings.TrimSpace(os.Getenv("GEMINI_API_KEY")) != "" ||
 		strings.TrimSpace(os.Getenv("TYPESAFE_API_KEY")) != "" {
 		return
 	}
 	st := mgr.Status(0)
-	if len(st.Installed) == 0 && os.Getenv("MEMORY_AUTO_BOOTSTRAP") != "1" {
+	if len(st.Installed) == 0 && os.Getenv("PRAXIS_AUTO_BOOTSTRAP") != "1" {
 		return
 	}
 	_, _, _ = mgr.AutoBootstrap(ctx, 0, func(ep, model string) {
@@ -98,10 +98,10 @@ func buildMCPServer(version string, b *runtimeBundle) *server.MCPServer {
 
 func filterDaemonEnv(base []string, dbPath, modelsDir, explicitAddr string) []string {
 	skip := map[string]bool{
-		"MEMORY_DB_PATH":        true,
-		"MEMORY_MODELS_DIR":     true,
-		"MEMORY_DAEMON_ADDR":    true,
-		"MEMORY_DASHBOARD_ADDR": true,
+		"PRAXIS_DB_PATH":        true,
+		"PRAXIS_MODELS_DIR":     true,
+		"PRAXIS_DAEMON_ADDR":    true,
+		"PRAXIS_DASHBOARD_ADDR": true,
 	}
 	out := make([]string, 0, len(base)+4)
 	for _, entry := range base {
@@ -115,11 +115,11 @@ func filterDaemonEnv(base []string, dbPath, modelsDir, explicitAddr string) []st
 		out = append(out, entry)
 	}
 	out = append(out,
-		"MEMORY_DB_PATH="+dbPath,
-		"MEMORY_MODELS_DIR="+modelsDir,
+		"PRAXIS_DB_PATH="+dbPath,
+		"PRAXIS_MODELS_DIR="+modelsDir,
 	)
 	if strings.TrimSpace(explicitAddr) != "" {
-		out = append(out, "MEMORY_DAEMON_ADDR="+strings.TrimSpace(explicitAddr))
+		out = append(out, "PRAXIS_DAEMON_ADDR="+strings.TrimSpace(explicitAddr))
 	}
 	return out
 }
@@ -152,7 +152,7 @@ func listenDaemonWithFallback(targetAddr string, excludePorts ...int) (net.Liste
 			}
 			candAddr := net.JoinHostPort(host, strconv.Itoa(cand))
 			if fbLn, ferr := net.Listen("tcp", candAddr); ferr == nil {
-				log.Printf("[memorize daemon] port %s busy (%v); auto-fallback bound to %s", targetAddr, err, fbLn.Addr().String())
+				log.Printf("[praxis daemon] port %s busy (%v); auto-fallback bound to %s", targetAddr, err, fbLn.Addr().String())
 				return fbLn, nil
 			}
 		}
@@ -167,7 +167,7 @@ func listenDaemonWithFallback(targetAddr string, excludePorts ...int) (net.Liste
 			_ = fbLn.Close()
 			continue
 		}
-		log.Printf("[memorize daemon] port %s busy (%v); auto-fallback bound to %s", targetAddr, err, fbLn.Addr().String())
+		log.Printf("[praxis daemon] port %s busy (%v); auto-fallback bound to %s", targetAddr, err, fbLn.Addr().String())
 		return fbLn, nil
 	}
 	return nil, err
@@ -214,7 +214,7 @@ func EnsureRunning(addr, dbPath, modelsDir string) (*thttp.DaemonStatus, bool) {
 	if st, _, ok, authReq := thttp.ProbeLiveDaemonState(addr, dbPath); ok {
 		return st, true
 	} else if authReq {
-		log.Printf("memorize team server already running with authentication on %s; skipping unauthenticated daemon spawn", st.ListenAddr)
+		log.Printf("praxis team server already running with authentication on %s; skipping unauthenticated daemon spawn", st.ListenAddr)
 		return st, false
 	}
 
@@ -284,7 +284,7 @@ func RunDaemonWithBundle(version, addr, dbPath, modelsDir string, b *runtimeBund
 	portCfg := config.LoadPortConfig(dbPath)
 	ln, err := listenDaemonWithFallback(targetAddr, portCfg.GGUFPort)
 	if err != nil {
-		log.Printf("memorize daemon listen error on %s: %v", targetAddr, err)
+		log.Printf("praxis daemon listen error on %s: %v", targetAddr, err)
 		return 1
 	}
 
@@ -321,16 +321,16 @@ func RunTeamServer(version, explicitAddr, dbPath, modelsDir string) int {
 	}
 	ln, err := net.Listen("tcp", listenAddr)
 	if err != nil {
-		log.Printf("memorize team server listen error on %s: %v", listenAddr, err)
+		log.Printf("praxis team server listen error on %s: %v", listenAddr, err)
 		return 1
 	}
 
-	bootstrapAccount := domain.FirstNonEmpty(os.Getenv("MEMORY_BOOTSTRAP_ACCOUNT"), b.mem.CurrentAccount(context.Background()))
+	bootstrapAccount := domain.FirstNonEmpty(os.Getenv("PRAXIS_BOOTSTRAP_ACCOUNT"), b.mem.CurrentAccount(context.Background()))
 	issued, created, err := sqlite.EnsureBootstrapAdmin(
 		context.Background(),
 		b.mem.DB(),
 		bootstrapAccount,
-		os.Getenv("MEMORY_BOOTSTRAP_TOKEN"),
+		os.Getenv("PRAXIS_BOOTSTRAP_TOKEN"),
 	)
 	if err != nil {
 		_ = ln.Close()
@@ -363,11 +363,11 @@ func RunTeamServer(version, explicitAddr, dbPath, modelsDir string) int {
 			hintHost = net.JoinHostPort("<server-host>", strconv.Itoa(p))
 		}
 		fmt.Fprintf(os.Stderr, "\n====================================================================\n")
-		fmt.Fprintf(os.Stderr, "[memorize team server] Initial admin account created: @%s\n", issued.User.Account)
+		fmt.Fprintf(os.Stderr, "[praxis team server] Initial admin account created: @%s\n", issued.User.Account)
 		fmt.Fprintf(os.Stderr, "Access Token (shown ONCE — save now): %s\n", issued.PlainToken)
 		fmt.Fprintf(os.Stderr, "Web Console:  http://%s/login\n", hintHost)
-		fmt.Fprintf(os.Stderr, "Client Bind:  memorize connect --url http://%s --token %s\n", hintHost, issued.PlainToken)
-		fmt.Fprintf(os.Stderr, "Add Users:    memorize user add <account> --role member\n")
+		fmt.Fprintf(os.Stderr, "Client Bind:  praxis connect --url http://%s --token %s\n", hintHost, issued.PlainToken)
+		fmt.Fprintf(os.Stderr, "Add Users:    praxis user add <account> --role member\n")
 		fmt.Fprintf(os.Stderr, "====================================================================\n\n")
 	}
 

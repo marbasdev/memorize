@@ -9,10 +9,10 @@ import (
 	"strings"
 	"unicode/utf16"
 
-	"memorize/internal/domain"
-	"memorize/internal/inference/discovery"
-	"memorize/internal/infra/config"
-	thttp "memorize/internal/transport/http"
+	"praxis/internal/domain"
+	"praxis/internal/inference/discovery"
+	"praxis/internal/infra/config"
+	thttp "praxis/internal/transport/http"
 )
 
 // postHX enforces local Origin/Host/Sec-Fetch-Site checks AND requires the custom HX-Request header,
@@ -71,13 +71,13 @@ func escapeJSONASCII(raw []byte) string {
 func setHXTriggers(w http.ResponseWriter, toast string, closeModal, clearSel bool) {
 	ev := map[string]any{}
 	if strings.TrimSpace(toast) != "" {
-		ev["memorizeToast"] = toast
+		ev["praxisToast"] = toast
 	}
 	if closeModal {
-		ev["memorizeCloseModal"] = true
+		ev["praxisCloseModal"] = true
 	}
 	if clearSel {
-		ev["memorizeClearSel"] = true
+		ev["praxisClearSel"] = true
 	}
 	if len(ev) > 0 {
 		if b, err := json.Marshal(ev); err == nil {
@@ -223,7 +223,7 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("/ui/lang", postHX(func(w http.ResponseWriter, r *http.Request) {
 		lang := normalizeLang(r.FormValue("lang"))
 		http.SetCookie(w, &http.Cookie{
-			Name:     "memorize_lang",
+			Name:     "praxis_lang",
 			Value:    lang,
 			Path:     "/",
 			MaxAge:   365 * 24 * 3600,
@@ -406,7 +406,7 @@ func registerSSRRoutes(mux *http.ServeMux, d Deps) {
 		lang := requestLang(r)
 		view := buildEnginesView(r.Context(), d, lang, r.URL.Query(), "", "")
 		if !view.LocalModels.Download.Active {
-			if b, err := json.Marshal(map[string]any{"memorizeRefreshEngines": true}); err == nil {
+			if b, err := json.Marshal(map[string]any{"praxisRefreshEngines": true}); err == nil {
 				w.Header().Set("HX-Trigger", escapeJSONASCII(b))
 			}
 		}

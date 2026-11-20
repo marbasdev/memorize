@@ -10,16 +10,16 @@ import (
 	"strings"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/inference/localmodel"
-	"memorize/internal/infra/config"
-	"memorize/internal/infra/sqlite"
-	thttp "memorize/internal/transport/http"
+	"praxis/internal/domain"
+	"praxis/internal/inference/localmodel"
+	"praxis/internal/infra/config"
+	"praxis/internal/infra/sqlite"
+	thttp "praxis/internal/transport/http"
 )
 
-func portCLIArgs(rest []string) []string {
+func daemonSubArgs(rest []string, sub string) []string {
 	for i, a := range rest {
-		if strings.EqualFold(strings.TrimSpace(a), "port") {
+		if strings.EqualFold(strings.TrimSpace(a), sub) {
 			if i+1 < len(rest) {
 				return rest[i+1:]
 			}
@@ -78,7 +78,7 @@ func runDaemonPortCLI(args []string, explicitAddr, dbPath, modelsDir string) int
 			fmt.Println(string(b))
 			return 0
 		}
-		fmt.Printf("memorize port configuration:\n")
+		fmt.Printf("praxis port configuration:\n")
 		if running {
 			fbNote := ""
 			if daemonFB {
@@ -136,13 +136,13 @@ func runDaemonPortCLI(args []string, explicitAddr, dbPath, modelsDir string) int
 			nextCfg.GGUFPort = p
 		}
 		if len(pos) > 2 {
-			fmt.Fprintf(os.Stderr, "usage: memorize daemon port [<daemon_port> [<gguf_port>]] [--daemon N] [--gguf N] [--reset] [--json]\n")
+			fmt.Fprintf(os.Stderr, "usage: praxis daemon port [<daemon_port> [<gguf_port>]] [--daemon N] [--gguf N] [--reset] [--json]\n")
 			return 2
 		}
 	}
 
 	if err := domain.ValidatePortConfig(nextCfg.DaemonPort, nextCfg.GGUFPort); err != nil {
-		fmt.Fprintf(os.Stderr, "memorize port error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "praxis port error: %v\n", err)
 		return 2
 	}
 
@@ -153,7 +153,7 @@ func runDaemonPortCLI(args []string, explicitAddr, dbPath, modelsDir string) int
 			Reset:      *resetFlag,
 		})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "memorize daemon port error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "praxis daemon port error: %v\n", err)
 			return 1
 		}
 		if res.Restarting && res.NewURL != "" {
@@ -165,7 +165,7 @@ func runDaemonPortCLI(args []string, explicitAddr, dbPath, modelsDir string) int
 				}
 				res.NewURL = "http://" + newSt.ListenAddr
 			} else {
-				fmt.Fprintf(os.Stderr, "memorize daemon restart onto %s did not become healthy within timeout\n", res.NewURL)
+				fmt.Fprintf(os.Stderr, "praxis daemon restart onto %s did not become healthy within timeout\n", res.NewURL)
 				return 1
 			}
 		}
@@ -174,7 +174,7 @@ func runDaemonPortCLI(args []string, explicitAddr, dbPath, modelsDir string) int
 			fmt.Println(string(b))
 			return 0
 		}
-		fmt.Printf("memorize ports updated:\n")
+		fmt.Printf("praxis ports updated:\n")
 		fmt.Printf("  daemon: configured=%d  active=%d  url=%s\n", res.ConfiguredDaemon, res.ActiveDaemon, res.NewURL)
 		if res.DaemonFallback {
 			fmt.Printf("  note: configured daemon port %d was busy; using auto-fallback %d\n", res.ConfiguredDaemon, res.ActiveDaemon)
@@ -185,7 +185,7 @@ func runDaemonPortCLI(args []string, explicitAddr, dbPath, modelsDir string) int
 	}
 
 	if err := config.SavePortConfig(dbPath, nextCfg); err != nil {
-		fmt.Fprintf(os.Stderr, "memorize port save error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "praxis port save error: %v\n", err)
 		return 1
 	}
 
@@ -233,7 +233,7 @@ func runDaemonPortCLI(args []string, explicitAddr, dbPath, modelsDir string) int
 		fmt.Println(string(b))
 		return 0
 	}
-	fmt.Printf("memorize ports saved (daemon currently idle):\n")
+	fmt.Printf("praxis ports saved (daemon currently idle):\n")
 	fmt.Printf("  daemon: configured=%d (takes effect on next start)\n", nextCfg.DaemonPort)
 	fmt.Printf("  gguf:   configured=%d  endpoint=%s  running=%v\n", nextCfg.GGUFPort, effGGUFEP, ggufRunning)
 	return 0

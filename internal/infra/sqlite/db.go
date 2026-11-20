@@ -8,8 +8,8 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/config"
+	"praxis/internal/domain"
+	"praxis/internal/infra/config"
 )
 
 func dropProgressStatusColumnIfPresent(db *sql.DB) {
@@ -80,7 +80,7 @@ func Open(dbPath string) (*sql.DB, error) {
 	return db, nil
 }
 
-// InitSchema applies WAL/busy_timeout pragmas, creates all memorize tables/indexes, and runs idempotent migrations.
+// InitSchema applies WAL/busy_timeout pragmas, creates all praxis tables/indexes, and runs idempotent migrations.
 func InitSchema(db *sql.DB) error {
 	if _, err := db.Exec(`
 		PRAGMA journal_mode=WAL;

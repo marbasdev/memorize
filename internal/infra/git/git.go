@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 var BaselineManifests = []string{

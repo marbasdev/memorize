@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
-const DefaultDocumentPreamble = `# Team Rules (` + "`memorize`" + `)
+const DefaultDocumentPreamble = `# Team Rules (` + "`praxis`" + `)
 
-> Shared repository rules managed via Git. Mirrored read-only into local ` + "`memorize`" + ` daemons.`
+> Shared repository rules managed via Git. Mirrored read-only into local ` + "`praxis`" + ` daemons.`
 
 var (
 	ErrRuleKeyExists = errors.New("rule already exists in rule pack")
@@ -28,9 +28,9 @@ type ParseError struct {
 
 func (e *ParseError) Error() string {
 	if e.Line > 0 {
-		return fmt.Sprintf(".memorize/TEAM_RULES.md line %d: %s", e.Line, e.Message)
+		return fmt.Sprintf(".praxis/TEAM_RULES.md line %d: %s", e.Line, e.Message)
 	}
-	return ".memorize/TEAM_RULES.md: " + e.Message
+	return ".praxis/TEAM_RULES.md: " + e.Message
 }
 
 type DocumentRule struct {

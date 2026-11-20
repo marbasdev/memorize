@@ -9,7 +9,7 @@ import (
 	"time"
 	"unicode"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 func (s *Service) TopActiveScope(ctx context.Context) string {

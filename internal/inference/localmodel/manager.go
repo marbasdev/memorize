@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/config"
+	"praxis/internal/domain"
+	"praxis/internal/infra/config"
 )
 
 // IsSupportedPlatform reports whether built-in llama-server GGUF management is supported on the current OS.
@@ -117,7 +117,7 @@ type StatusSnapshot struct {
 }
 
 func SelectManagedContextSize(hw HardwareSpec, modelSizeBytes int64) int {
-	if raw := strings.TrimSpace(os.Getenv("MEMORY_GGUF_CTX")); raw != "" {
+	if raw := strings.TrimSpace(os.Getenv("PRAXIS_GGUF_CTX")); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n >= 2048 && n <= 65536 {
 			return n
 		}
@@ -145,7 +145,7 @@ type Manager struct {
 func NewManager(modelsDir string) *Manager {
 	d := strings.TrimSpace(modelsDir)
 	if d == "" {
-		d = strings.TrimSpace(os.Getenv("MEMORY_MODELS_DIR"))
+		d = strings.TrimSpace(os.Getenv("PRAXIS_MODELS_DIR"))
 	}
 	if d == "" {
 		d = "models"

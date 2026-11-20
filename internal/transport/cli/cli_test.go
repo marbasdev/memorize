@@ -21,14 +21,14 @@ import (
 	"testing"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/config"
-	"memorize/internal/infra/sqlite"
-	"memorize/internal/modules/guardrail"
-	"memorize/internal/modules/memory"
-	"memorize/internal/modules/progress"
-	"memorize/internal/transport/dashboard"
-	thttp "memorize/internal/transport/http"
+	"praxis/internal/domain"
+	"praxis/internal/infra/config"
+	"praxis/internal/infra/sqlite"
+	"praxis/internal/modules/guardrail"
+	"praxis/internal/modules/memory"
+	"praxis/internal/modules/progress"
+	"praxis/internal/transport/dashboard"
+	thttp "praxis/internal/transport/http"
 )
 
 func TestHookTimeoutParsingAndBudgets(t *testing.T) {
@@ -43,13 +43,13 @@ func TestHookTimeoutParsingAndBudgets(t *testing.T) {
 	}
 
 	pluginDir := t.TempDir()
-	hooksJSON := `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"memorize -hook claude-pretool","timeout":8}]}]}}`
+	hooksJSON := `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"praxis -hook claude-pretool","timeout":8}]}]}}`
 	if err := os.WriteFile(filepath.Join(pluginDir, "hooks.json"), []byte(hooksJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("MEMORY_HOOK_TIMEOUT", "")
-	os.Unsetenv("MEMORY_HOOK_TIMEOUT")
-	t.Setenv("MEMORY_PLUGIN_DIR", pluginDir)
+	t.Setenv("PRAXIS_HOOK_TIMEOUT", "")
+	os.Unsetenv("PRAXIS_HOOK_TIMEOUT")
+	t.Setenv("PRAXIS_PLUGIN_DIR", pluginDir)
 
 	if d, ok := resolveConfiguredHookTimeout("claude-pretool"); !ok || d != 8*time.Second {
 		t.Fatalf("resolveConfiguredHookTimeout = (%v, %v), want 8s", d, ok)
@@ -58,13 +58,13 @@ func TestHookTimeoutParsingAndBudgets(t *testing.T) {
 		t.Fatalf("expected no cap for git-precommit, got d=%v ok=%v", d, ok)
 	}
 
-	t.Setenv("MEMORY_HOOK_TIMEOUT", "4s")
+	t.Setenv("PRAXIS_HOOK_TIMEOUT", "4s")
 	if d, ok := resolveConfiguredHookTimeout("claude-pretool"); !ok || d != 4*time.Second {
-		t.Fatalf("MEMORY_HOOK_TIMEOUT override = (%v, %v), want 4s", d, ok)
+		t.Fatalf("PRAXIS_HOOK_TIMEOUT override = (%v, %v), want 4s", d, ok)
 	}
-	t.Setenv("MEMORY_HOOK_TIMEOUT", "0")
+	t.Setenv("PRAXIS_HOOK_TIMEOUT", "0")
 	if _, ok := resolveConfiguredHookTimeout("claude-pretool"); ok {
-		t.Fatalf("expected MEMORY_HOOK_TIMEOUT=0 to disable deadline")
+		t.Fatalf("expected PRAXIS_HOOK_TIMEOUT=0 to disable deadline")
 	}
 
 	srv, cliB, alive := remainingHookBudgets(time.Now().Add(-500*time.Millisecond), 5*time.Second)
@@ -79,8 +79,8 @@ func TestHookTimeoutParsingAndBudgets(t *testing.T) {
 func TestExecuteDispatchWithRuntimeHooksAndPortCLI(t *testing.T) {
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "memories.db")
-	t.Setenv("MEMORY_DB_PATH", dbPath)
-	t.Setenv("MEMORY_MODELS_DIR", filepath.Join(tmp, "models"))
+	t.Setenv("PRAXIS_DB_PATH", dbPath)
+	t.Setenv("PRAXIS_MODELS_DIR", filepath.Join(tmp, "models"))
 
 	if code := executeArgs([]string{"-version"}, "9.9.9-unit", RuntimeHooks{}); code != 0 {
 		t.Fatalf("-version exited %d", code)
@@ -96,7 +96,7 @@ func TestExecuteDispatchWithRuntimeHooksAndPortCLI(t *testing.T) {
 		t.Fatalf("daemon port status exited %d", code)
 	}
 
-	t.Setenv("MEMORY_DISABLE_BG_DASHBOARD", "1")
+	t.Setenv("PRAXIS_DISABLE_BG_DASHBOARD", "1")
 	var hookCalled bool
 	var gotHookMode string
 	code := executeArgs([]string{"-hook", "claude-start"}, "9.9.9-unit", RuntimeHooks{
@@ -212,8 +212,8 @@ func TestCLIUserConnectAndThinClientEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Setenv("MEMORY_DATA_DIR", "")
-	t.Setenv("MEMORY_DB_PATH", srvDBPath)
+	t.Setenv("PRAXIS_DATA_DIR", "")
+	t.Setenv("PRAXIS_DB_PATH", srvDBPath)
 
 	code, out := captureStdout(t, func() int {
 		return executeArgs([]string{"user", "add", "hostadmin", "--role", "admin", "--json"}, "test", RuntimeHooks{})
@@ -266,7 +266,7 @@ func TestCLIUserConnectAndThinClientEndToEnd(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	t.Setenv("MEMORY_DB_PATH", cliDBPath)
+	t.Setenv("PRAXIS_DB_PATH", cliDBPath)
 	code, connOut := captureStdout(t, func() int {
 		return executeArgs([]string{"connect", "--url", srv.URL, "--token", aliceIssue.PlainToken, "--repo", teamRepo, "--json"}, "test", RuntimeHooks{})
 	})
@@ -352,18 +352,18 @@ func TestSingleBinaryInstallersAndEmbeddedMCPResource(t *testing.T) {
 		t.Fatal(err)
 	}
 	tmp := t.TempDir()
-	binPath := filepath.Join(tmp, "memorize")
+	binPath := filepath.Join(tmp, "praxis")
 	if runtime.GOOS == "windows" {
 		binPath += ".exe"
 	}
-	buildCmd := exec.Command("go", "build", "-ldflags=-X main.version=1.5.0-test", "-o", binPath, "./cmd/memorize")
+	buildCmd := exec.Command("go", "build", "-ldflags=-X main.version=1.5.0-test", "-o", binPath, "./cmd/praxis")
 	buildCmd.Dir = repoRoot
 	if out, err := buildCmd.CombinedOutput(); err != nil {
-		t.Fatalf("build memorize failed: %v\n%s", err, string(out))
+		t.Fatalf("build praxis failed: %v\n%s", err, string(out))
 	}
 
 	verOut, err := exec.Command(binPath, "-version").CombinedOutput()
-	if err != nil || strings.TrimSpace(string(verOut)) != "memorize 1.5.0-test" {
+	if err != nil || strings.TrimSpace(string(verOut)) != "praxis 1.5.0-test" {
 		t.Fatalf("unexpected -version output: %q (%v)", string(verOut), err)
 	}
 
@@ -374,7 +374,7 @@ func TestSingleBinaryInstallersAndEmbeddedMCPResource(t *testing.T) {
 	}
 	instGit := exec.Command(binPath, "-install", "git-hook")
 	instGit.Dir = repoDir
-	instGit.Env = append(os.Environ(), "MEMORY_DATA_DIR="+dataDir)
+	instGit.Env = append(os.Environ(), "PRAXIS_DATA_DIR="+dataDir)
 	if out, err := instGit.CombinedOutput(); err != nil {
 		t.Fatalf("-install git-hook failed: %v\n%s", err, string(out))
 	}
@@ -405,7 +405,7 @@ func TestSingleBinaryInstallersAndEmbeddedMCPResource(t *testing.T) {
 		}
 		symCmd := exec.Command(binPath, "-install", "git-hook")
 		symCmd.Dir = symRepo
-		symCmd.Env = append(os.Environ(), "MEMORY_DATA_DIR="+dataDir)
+		symCmd.Env = append(os.Environ(), "PRAXIS_DATA_DIR="+dataDir)
 		if out, err := symCmd.CombinedOutput(); err == nil {
 			t.Fatalf("expected -install git-hook to refuse symlink pre-commit hook, output:\n%s", string(out))
 		}
@@ -416,8 +416,8 @@ func TestSingleBinaryInstallersAndEmbeddedMCPResource(t *testing.T) {
 
 	srvCmd := exec.Command(binPath)
 	srvCmd.Env = append(os.Environ(),
-		"MEMORY_DB_PATH="+filepath.Join(tmp, "stdio.db"),
-		"MEMORY_DISABLE_BG_DASHBOARD=1",
+		"PRAXIS_DB_PATH="+filepath.Join(tmp, "stdio.db"),
+		"PRAXIS_DISABLE_BG_DASHBOARD=1",
 	)
 	stdin, err := srvCmd.StdinPipe()
 	if err != nil {
@@ -456,7 +456,7 @@ func TestSingleBinaryInstallersAndEmbeddedMCPResource(t *testing.T) {
 		}
 	}
 
-	resLine := sendRPC(`{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"memorize://playbook/memory-curator"}}`)
+	resLine := sendRPC(`{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"praxis://playbook/memory-curator"}}`)
 	var resPayload struct {
 		Result struct {
 			Contents []struct {
@@ -484,7 +484,7 @@ func packageBinaryTarGz(t *testing.T, binBytes []byte) ([]byte, string) {
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
 	hdr := &tar.Header{
-		Name: "memorize",
+		Name: "praxis",
 		Mode: 0o755,
 		Size: int64(len(binBytes)),
 	}
@@ -534,17 +534,17 @@ func TestPluginManifestsAndAutoUpdateBootstrapper(t *testing.T) {
 		return ""
 	}
 
-	agyVer := readManifestVersion("plugins/memorize/plugin.json")
-	claudeVer := readManifestVersion("plugins/memorize/.claude-plugin/plugin.json")
+	agyVer := readManifestVersion("plugins/praxis/plugin.json")
+	claudeVer := readManifestVersion("plugins/praxis/.claude-plugin/plugin.json")
 	mpVer := readManifestVersion(".claude-plugin/marketplace.json")
 	if agyVer == "" || agyVer != claudeVer || agyVer != mpVer {
 		t.Fatalf("version mismatch across manifests: agy=%q claude=%q marketplace=%q", agyVer, claudeVer, mpVer)
 	}
 
 	for _, rel := range []string{
-		"plugins/memorize/mcp_config.json",
-		"plugins/memorize/hooks.json",
-		"plugins/memorize/.claude-plugin/plugin.json",
+		"plugins/praxis/mcp_config.json",
+		"plugins/praxis/hooks.json",
+		"plugins/praxis/.claude-plugin/plugin.json",
 	} {
 		raw, err := os.ReadFile(filepath.Join(repoRoot, rel))
 		if err != nil {
@@ -556,26 +556,26 @@ func TestPluginManifestsAndAutoUpdateBootstrapper(t *testing.T) {
 		}
 	}
 
-	if _, err := os.Stat(filepath.Join(repoRoot, "plugins/memorize/rules/AGENTS.md")); !os.IsNotExist(err) {
-		t.Fatalf("plugins/memorize/rules/AGENTS.md must not exist (memorize replaces static AGENTS.md rule files via MCP instructions & DB rules); stat err=%v", err)
+	if _, err := os.Stat(filepath.Join(repoRoot, "plugins/praxis/rules/AGENTS.md")); !os.IsNotExist(err) {
+		t.Fatalf("plugins/praxis/rules/AGENTS.md must not exist (praxis replaces static AGENTS.md rule files via MCP instructions & DB rules); stat err=%v", err)
 	}
 
-	skillBytes, err := os.ReadFile(filepath.Join(repoRoot, "plugins/memorize/skills/memory-curator/SKILL.md"))
+	skillBytes, err := os.ReadFile(filepath.Join(repoRoot, "plugins/praxis/skills/memory-curator/SKILL.md"))
 	if err != nil {
 		t.Fatalf("read plugin SKILL.md: %v", err)
 	}
 	if string(skillBytes) != memory.PlaybookSkillMD {
-		t.Fatalf("plugins/memorize/skills/memory-curator/SKILL.md is out of sync with internal/modules/memory/playbook/SKILL.md")
+		t.Fatalf("plugins/praxis/skills/memory-curator/SKILL.md is out of sync with internal/modules/memory/playbook/SKILL.md")
 	}
 
 	if runtime.GOOS == "windows" {
 		return
 	}
 	tmp := t.TempDir()
-	bin100Path := filepath.Join(tmp, "memorize-1.0.0-bin")
-	bin110Path := filepath.Join(tmp, "memorize-1.1.0-bin")
+	bin100Path := filepath.Join(tmp, "praxis-1.0.0-bin")
+	bin110Path := filepath.Join(tmp, "praxis-1.1.0-bin")
 	for ver, outPath := range map[string]string{"1.0.0": bin100Path, "1.1.0": bin110Path} {
-		cmd := exec.Command("go", "build", "-ldflags=-X main.version="+ver, "-o", outPath, "./cmd/memorize")
+		cmd := exec.Command("go", "build", "-ldflags=-X main.version="+ver, "-o", outPath, "./cmd/praxis")
 		cmd.Dir = repoRoot
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("build %s failed: %v\n%s", ver, err, string(out))
@@ -590,23 +590,23 @@ func TestPluginManifestsAndAutoUpdateBootstrapper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	archiveName := fmt.Sprintf("memorize-%s-%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	archiveName := fmt.Sprintf("praxis-%s-%s.tar.gz", runtime.GOOS, runtime.GOARCH)
 	tgz100, sum100 := packageBinaryTarGz(t, b100)
 	tgz110, sum110 := packageBinaryTarGz(t, b110)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/org/memorize/-/releases/v1.0.0/downloads/" + archiveName,
-			"/github.com/org/memorize/releases/download/v1.0.0/" + archiveName:
+		case "/org/praxis/-/releases/v1.0.0/downloads/" + archiveName,
+			"/github.com/org/praxis/releases/download/v1.0.0/" + archiveName:
 			_, _ = w.Write(tgz100)
-		case "/org/memorize/-/releases/v1.0.0/downloads/SHA256SUMS",
-			"/github.com/org/memorize/releases/download/v1.0.0/SHA256SUMS":
+		case "/org/praxis/-/releases/v1.0.0/downloads/SHA256SUMS",
+			"/github.com/org/praxis/releases/download/v1.0.0/SHA256SUMS":
 			_, _ = fmt.Fprintf(w, "%s  ./%s\n", sum100, archiveName)
-		case "/org/memorize/-/releases/v1.1.0/downloads/" + archiveName,
-			"/github.com/org/memorize/releases/download/v1.1.0/" + archiveName:
+		case "/org/praxis/-/releases/v1.1.0/downloads/" + archiveName,
+			"/github.com/org/praxis/releases/download/v1.1.0/" + archiveName:
 			_, _ = w.Write(tgz110)
-		case "/org/memorize/-/releases/v1.1.0/downloads/SHA256SUMS",
-			"/github.com/org/memorize/releases/download/v1.1.0/SHA256SUMS":
+		case "/org/praxis/-/releases/v1.1.0/downloads/SHA256SUMS",
+			"/github.com/org/praxis/releases/download/v1.1.0/SHA256SUMS":
 			_, _ = fmt.Fprintf(w, "%s  ./%s\n", sum110, archiveName)
 		case "/org/nosums/-/releases/v1.0.0/downloads/" + archiveName:
 			_, _ = w.Write(tgz100)
@@ -616,15 +616,15 @@ func TestPluginManifestsAndAutoUpdateBootstrapper(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	isolatedPlugin := filepath.Join(tmp, "isolated-plugin", "memorize")
+	isolatedPlugin := filepath.Join(tmp, "isolated-plugin", "praxis")
 	if err := os.MkdirAll(filepath.Join(isolatedPlugin, "scripts"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	runnerBytes, err := os.ReadFile(filepath.Join(repoRoot, "plugins/memorize/scripts/run-memorize.sh"))
+	runnerBytes, err := os.ReadFile(filepath.Join(repoRoot, "plugins/praxis/scripts/run-praxis.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	runnerPath := filepath.Join(isolatedPlugin, "scripts", "run-memorize.sh")
+	runnerPath := filepath.Join(isolatedPlugin, "scripts", "run-praxis.sh")
 	if err := os.WriteFile(runnerPath, runnerBytes, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -640,7 +640,7 @@ func TestPluginManifestsAndAutoUpdateBootstrapper(t *testing.T) {
 
 	writePluginManifest := func(ver string) {
 		t.Helper()
-		manifest := fmt.Sprintf("{\n  \"name\": \"memorize\",\n  \"version\": %q,\n  \"repository\": %q\n}\n", ver, srv.URL+"/org/memorize")
+		manifest := fmt.Sprintf("{\n  \"name\": \"praxis\",\n  \"version\": %q,\n  \"repository\": %q\n}\n", ver, srv.URL+"/org/praxis")
 		if err := os.WriteFile(filepath.Join(isolatedPlugin, "plugin.json"), []byte(manifest), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -648,37 +648,37 @@ func TestPluginManifestsAndAutoUpdateBootstrapper(t *testing.T) {
 
 	writePluginManifest("1.0.0")
 	cmd100 := exec.Command("/bin/sh", runnerPath, "-version")
-	cmd100.Env = append(os.Environ(), "MEMORY_DATA_DIR="+dataDir)
+	cmd100.Env = append(os.Environ(), "PRAXIS_DATA_DIR="+dataDir)
 	var stdout100, stderr100 bytes.Buffer
 	cmd100.Stdout = &stdout100
 	cmd100.Stderr = &stderr100
 	if err := cmd100.Run(); err != nil {
-		t.Fatalf("run-memorize.sh v1.0.0 failed: %v\nstderr: %s", err, stderr100.String())
+		t.Fatalf("run-praxis.sh v1.0.0 failed: %v\nstderr: %s", err, stderr100.String())
 	}
-	if strings.TrimSpace(stdout100.String()) != "memorize 1.0.0" {
-		t.Fatalf("expected clean stdout 'memorize 1.0.0', got %q (stderr: %s)", stdout100.String(), stderr100.String())
+	if strings.TrimSpace(stdout100.String()) != "praxis 1.0.0" {
+		t.Fatalf("expected clean stdout 'praxis 1.0.0', got %q (stderr: %s)", stdout100.String(), stderr100.String())
 	}
-	if _, err := os.Stat(filepath.Join(dataDir, "bin", "memorize-1.0.0")); err != nil {
-		t.Fatalf("expected cached memorize-1.0.0 binary: %v", err)
+	if _, err := os.Stat(filepath.Join(dataDir, "bin", "praxis-1.0.0")); err != nil {
+		t.Fatalf("expected cached praxis-1.0.0 binary: %v", err)
 	}
 
 	writePluginManifest("1.1.0")
 	cmd110 := exec.Command("/bin/sh", runnerPath, "-version")
-	cmd110.Env = append(os.Environ(), "MEMORY_DATA_DIR="+dataDir)
+	cmd110.Env = append(os.Environ(), "PRAXIS_DATA_DIR="+dataDir)
 	var stdout110, stderr110 bytes.Buffer
 	cmd110.Stdout = &stdout110
 	cmd110.Stderr = &stderr110
 	if err := cmd110.Run(); err != nil {
-		t.Fatalf("run-memorize.sh v1.1.0 upgrade failed: %v\nstderr: %s", err, stderr110.String())
+		t.Fatalf("run-praxis.sh v1.1.0 upgrade failed: %v\nstderr: %s", err, stderr110.String())
 	}
-	if strings.TrimSpace(stdout110.String()) != "memorize 1.1.0" {
-		t.Fatalf("expected clean stdout 'memorize 1.1.0', got %q (stderr: %s)", stdout110.String(), stderr110.String())
+	if strings.TrimSpace(stdout110.String()) != "praxis 1.1.0" {
+		t.Fatalf("expected clean stdout 'praxis 1.1.0', got %q (stderr: %s)", stdout110.String(), stderr110.String())
 	}
-	if _, err := os.Stat(filepath.Join(dataDir, "bin", "memorize-1.1.0")); err != nil {
-		t.Fatalf("expected cached memorize-1.1.0 binary: %v", err)
+	if _, err := os.Stat(filepath.Join(dataDir, "bin", "praxis-1.1.0")); err != nil {
+		t.Fatalf("expected cached praxis-1.1.0 binary: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dataDir, "bin", "memorize-1.0.0")); !os.IsNotExist(err) {
-		t.Fatalf("expected outdated memorize-1.0.0 binary to be pruned, stat err=%v", err)
+	if _, err := os.Stat(filepath.Join(dataDir, "bin", "praxis-1.0.0")); !os.IsNotExist(err) {
+		t.Fatalf("expected outdated praxis-1.0.0 binary to be pruned, stat err=%v", err)
 	}
 	preservedDB, err := os.ReadFile(dbMarkerPath)
 	if err != nil || string(preservedDB) != "sqlite-state-preserved" {
@@ -686,44 +686,44 @@ func TestPluginManifestsAndAutoUpdateBootstrapper(t *testing.T) {
 	}
 
 	ghDataDir := filepath.Join(tmp, "gh-user-data")
-	ghManifest := fmt.Sprintf("{\n  \"name\": \"memorize\",\n  \"version\": \"1.1.0\",\n  \"repository\": %q\n}\n", srv.URL+"/github.com/org/memorize")
+	ghManifest := fmt.Sprintf("{\n  \"name\": \"praxis\",\n  \"version\": \"1.1.0\",\n  \"repository\": %q\n}\n", srv.URL+"/github.com/org/praxis")
 	if err := os.WriteFile(filepath.Join(isolatedPlugin, "plugin.json"), []byte(ghManifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cmdGH := exec.Command("/bin/sh", runnerPath, "-version")
-	cmdGH.Env = append(os.Environ(), "MEMORY_DATA_DIR="+ghDataDir)
+	cmdGH.Env = append(os.Environ(), "PRAXIS_DATA_DIR="+ghDataDir)
 	var stdoutGH, stderrGH bytes.Buffer
 	cmdGH.Stdout = &stdoutGH
 	cmdGH.Stderr = &stderrGH
 	if err := cmdGH.Run(); err != nil {
-		t.Fatalf("run-memorize.sh GitHub release bootstrap failed: %v\nstderr: %s", err, stderrGH.String())
+		t.Fatalf("run-praxis.sh GitHub release bootstrap failed: %v\nstderr: %s", err, stderrGH.String())
 	}
-	if strings.TrimSpace(stdoutGH.String()) != "memorize 1.1.0" {
-		t.Fatalf("expected clean stdout 'memorize 1.1.0' from GitHub release bootstrap, got %q", stdoutGH.String())
+	if strings.TrimSpace(stdoutGH.String()) != "praxis 1.1.0" {
+		t.Fatalf("expected clean stdout 'praxis 1.1.0' from GitHub release bootstrap, got %q", stdoutGH.String())
 	}
 
 	noSumsDataDir := filepath.Join(tmp, "nosums-data")
-	noSumsManifest := fmt.Sprintf("{\n  \"name\": \"memorize\",\n  \"version\": \"1.0.0\",\n  \"repository\": %q\n}\n", srv.URL+"/org/nosums")
+	noSumsManifest := fmt.Sprintf("{\n  \"name\": \"praxis\",\n  \"version\": \"1.0.0\",\n  \"repository\": %q\n}\n", srv.URL+"/org/nosums")
 	if err := os.WriteFile(filepath.Join(isolatedPlugin, "plugin.json"), []byte(noSumsManifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cmdNoSums := exec.Command("/bin/sh", runnerPath, "-version")
-	cmdNoSums.Env = append(os.Environ(), "MEMORY_DATA_DIR="+noSumsDataDir)
+	cmdNoSums.Env = append(os.Environ(), "PRAXIS_DATA_DIR="+noSumsDataDir)
 	if out, err := cmdNoSums.CombinedOutput(); err == nil {
-		t.Fatalf("expected run-memorize.sh to fail closed when SHA256SUMS is missing, output:\n%s", string(out))
+		t.Fatalf("expected run-praxis.sh to fail closed when SHA256SUMS is missing, output:\n%s", string(out))
 	}
-	if _, err := os.Stat(filepath.Join(noSumsDataDir, "bin", "memorize-1.0.0")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(noSumsDataDir, "bin", "praxis-1.0.0")); !os.IsNotExist(err) {
 		t.Fatalf("expected no binary installed when SHA256SUMS is missing, stat err=%v", err)
 	}
 
 	httpDataDir := filepath.Join(tmp, "insecure-http-data")
 	cmdInsecure := exec.Command("/bin/sh", runnerPath, "-version")
 	cmdInsecure.Env = append(os.Environ(),
-		"MEMORY_DATA_DIR="+httpDataDir,
-		"MEMORIZE_RELEASE_BASE_URL=http://evil.example.com/v{VERSION}",
+		"PRAXIS_DATA_DIR="+httpDataDir,
+		"PRAXIS_RELEASE_BASE_URL=http://evil.example.com/v{VERSION}",
 	)
 	if out, err := cmdInsecure.CombinedOutput(); err == nil {
-		t.Fatalf("expected run-memorize.sh to reject non-HTTPS MEMORIZE_RELEASE_BASE_URL, output:\n%s", string(out))
+		t.Fatalf("expected run-praxis.sh to reject non-HTTPS PRAXIS_RELEASE_BASE_URL, output:\n%s", string(out))
 	}
 }
 
@@ -778,10 +778,10 @@ func TestCLISwitchPushExportAndImportEndToEnd(t *testing.T) {
 	}
 	_ = locMem.Close()
 
-	t.Setenv("MEMORY_DATA_DIR", cliDataDir)
-	t.Setenv("MEMORY_DB_PATH", cliDBPath)
-	t.Setenv("MEMORY_REMOTE_URL", "")
-	t.Setenv("MEMORY_REMOTE_TOKEN", "")
+	t.Setenv("PRAXIS_DATA_DIR", cliDataDir)
+	t.Setenv("PRAXIS_DB_PATH", cliDBPath)
+	t.Setenv("PRAXIS_REMOTE_URL", "")
+	t.Setenv("PRAXIS_REMOTE_TOKEN", "")
 
 	// Connect both @home and @alice tokens (auto-saved into remotes.json profiles).
 	if code, out := captureStdout(t, func() int {
@@ -807,7 +807,7 @@ func TestCLISwitchPushExportAndImportEndToEnd(t *testing.T) {
 		t.Fatalf("switch list failed: %d %s", code, out)
 	}
 
-	// Safety check: `memorize push` without --scope or --all must refuse.
+	// Safety check: `praxis push` without --scope or --all must refuse.
 	if code, _ := captureStdout(t, func() int {
 		return executeArgs([]string{"push"}, "test", RuntimeHooks{})
 	}); code == 0 {
@@ -850,9 +850,9 @@ func TestCLISwitchPushExportAndImportEndToEnd(t *testing.T) {
 func TestDoctorCLIReportAndJSON(t *testing.T) {
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "memories.db")
-	t.Setenv("MEMORY_DB_PATH", dbPath)
-	t.Setenv("MEMORY_MODELS_DIR", filepath.Join(tmp, "models"))
-	t.Setenv("MEMORY_DISABLE_BG_DASHBOARD", "1")
+	t.Setenv("PRAXIS_DB_PATH", dbPath)
+	t.Setenv("PRAXIS_MODELS_DIR", filepath.Join(tmp, "models"))
+	t.Setenv("PRAXIS_DISABLE_BG_DASHBOARD", "1")
 
 	// 1. Test doctor with --json flag
 	var report DoctorReport
@@ -889,10 +889,15 @@ func TestDoctorCLIReportAndJSON(t *testing.T) {
 	if codeDaemon != 0 {
 		t.Fatalf("expected daemon doctor exit 0, got %d. Output: %s", codeDaemon, outDaemon)
 	}
-	if !strings.Contains(outDaemon, "[memorize doctor]") {
+	if !strings.Contains(outDaemon, "[praxis doctor]") {
 		t.Errorf("expected daemon doctor output to contain header, got: %s", outDaemon)
 	}
 	if !strings.Contains(outDaemon, "v1.2.0-test") {
 		t.Errorf("expected daemon doctor output to contain version, got: %s", outDaemon)
+	}
+	if codeDaemonJSON, outDaemonJSON := captureStdout(t, func() int {
+		return executeArgs([]string{"daemon", "doctor", "--json"}, "1.2.0-test", RuntimeHooks{})
+	}); codeDaemonJSON != 0 || !strings.Contains(outDaemonJSON, `"version":"1.2.0-test"`) {
+		t.Fatalf("expected daemon doctor --json to forward --json flag, code=%d out=%s", codeDaemonJSON, outDaemonJSON)
 	}
 }

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 func (d *Document) Outline() []domain.RuleOutlineEntry {

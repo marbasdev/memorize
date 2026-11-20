@@ -12,13 +12,13 @@ import (
 	"sync"
 	"time"
 
-	"memorize/internal/domain"
-	"memorize/internal/inference/router"
-	"memorize/internal/infra/config"
-	"memorize/internal/infra/eventbus"
-	"memorize/internal/infra/git"
-	"memorize/internal/infra/sqlite"
-	"memorize/internal/modules/memory"
+	"praxis/internal/domain"
+	"praxis/internal/inference/router"
+	"praxis/internal/infra/config"
+	"praxis/internal/infra/eventbus"
+	"praxis/internal/infra/git"
+	"praxis/internal/infra/sqlite"
+	"praxis/internal/modules/memory"
 )
 
 // TeamFactIDOffset separates in-memory projected TeamRule IDs from local SQLite memories.id (>= 1)
@@ -788,7 +788,7 @@ func (s *Service) ResolveConflict(ctx context.Context, rawScope, ruleKey, decisi
 		err = s.UpsertConflictState(ctx, sc, key, domain.RuleStateAdopted, localMemID, "", "", "")
 	case "local_override", "override", "keep_local":
 		if domain.IsServerMode(ctx) {
-			return errors.New("team rules take precedence in server mode; adopt the team rule or update .memorize/TEAM_RULES.md")
+			return errors.New("team rules take precedence in server mode; adopt the team rule or update .praxis/TEAM_RULES.md")
 		}
 		err = s.UpsertConflictState(ctx, sc, key, domain.RuleStateLocalOverride, localMemID, "", "", note)
 	case "mark_updated", "resolved", "draft_updated":

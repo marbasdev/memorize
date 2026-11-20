@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"memorize/internal/domain"
+	"praxis/internal/domain"
 )
 
 var (
@@ -250,7 +250,7 @@ type RulePackGitResult struct {
 }
 
 // IsolatedRulePackCommit executes buildFn inside a clean temporary git worktree (never touching workspace staged/dirty code),
-// commits only .memorize/TEAM_RULES.md, pushes directly to TargetBranch, and
+// commits only .praxis/TEAM_RULES.md, pushes directly to TargetBranch, and
 // fast-forwards the checked-out workspace only when safely on TargetBranch with no unpushed code commits.
 func IsolatedRulePackCommit(ctx context.Context, opts RulePackGitOptions, buildFn func(baseRaw []byte) ([]byte, bool, error)) (RulePackGitResult, error) {
 	root := ResolveRoot(opts.Root)
@@ -282,7 +282,7 @@ func IsolatedRulePackCommit(ctx context.Context, opts RulePackGitOptions, buildF
 		}
 	}
 
-	tmpDir, err := os.MkdirTemp("", "memorize-rulepack-*")
+	tmpDir, err := os.MkdirTemp("", "praxis-rulepack-*")
 	if err != nil {
 		return RulePackGitResult{}, err
 	}
@@ -326,7 +326,7 @@ func IsolatedRulePackCommit(ctx context.Context, opts RulePackGitOptions, buildF
 
 	commitMsg := strings.TrimSpace(opts.CommitMessage)
 	if commitMsg == "" {
-		commitMsg = "memorize(rulepack): update team rules"
+		commitMsg = "praxis(rulepack): update team rules"
 	}
 	commitArgs := []string{"commit", "--only", "-m", commitMsg, "--", relPath}
 	if _, err := runSafe(ctx, 5*time.Second, tmpDir, commitArgs...); err != nil {

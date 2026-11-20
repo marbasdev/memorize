@@ -8,16 +8,16 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"memorize/internal/domain"
-	"memorize/internal/modules/rulepack"
+	"praxis/internal/domain"
+	"praxis/internal/modules/rulepack"
 )
 
 func registerTeamRuleTool(srv *server.MCPServer, deps Deps, resolver *ScopeResolver) {
 	scopeDesc := "Project scope ('project:<name>', auto-detected from repo if omitted)."
-	accountDesc := "User account key fallback (defaults to MEMORY_ACCOUNT/AGY_ACCOUNT/OS user)."
+	accountDesc := "User account key fallback (defaults to PRAXIS_ACCOUNT/AGY_ACCOUNT/OS user)."
 
 	srv.AddTool(mcp.NewTool("team_rules",
-		mcp.WithDescription("Manage declarative Git Team Rule Pack (.memorize/TEAM_RULES.md): 'list', 'sync', 'add', 'promote', 'update', 'remove', 'resolve_conflict', 'duplicates', 'clean_duplicates', 'set_config'."),
+		mcp.WithDescription("Manage declarative Git Team Rule Pack (.praxis/TEAM_RULES.md): 'list', 'sync', 'add', 'promote', 'update', 'remove', 'resolve_conflict', 'duplicates', 'clean_duplicates', 'set_config'."),
 		mcp.WithString("action", mcp.Required(), mcp.Description("'list', 'sync', 'add', 'promote', 'update', 'remove', 'resolve_conflict', 'duplicates', 'clean_duplicates', or 'set_config'.")),
 		mcp.WithNumber("id", mcp.Description("1-based rule/conflict index from 'list' (for update/remove/resolve_conflict), or local memory ID (for promote/clean_duplicates).")),
 		mcp.WithArray("ids", mcp.WithNumberItems(), mcp.Description("Local memory IDs (for batch clean_duplicates).")),
@@ -399,7 +399,7 @@ func formatPublishResultMD(res rulepack.PublishResult) string {
 	}
 	sb.WriteByte(')')
 	if res.Status == "conflict_pending" {
-		sb.WriteString("\nPublish paused because latest remote `.memorize/TEAM_RULES.md` contains a conflicting rule. Discuss with user and adjust before retrying.")
+		sb.WriteString("\nPublish paused because latest remote `.praxis/TEAM_RULES.md` contains a conflicting rule. Discuss with user and adjust before retrying.")
 	}
 	return sb.String()
 }

@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"memorize/internal/domain"
-	"memorize/internal/infra/config"
+	"praxis/internal/domain"
+	"praxis/internal/infra/config"
 )
 
 func buildPortsModalData(r *http.Request, d Deps, lang string) ssrPortsModalData {
@@ -69,13 +69,13 @@ func buildPortsModalData(r *http.Request, d Deps, lang string) ssrPortsModalData
 
 func setHXPortTriggers(w http.ResponseWriter, toast, redirectURL string, closeModal bool) {
 	payload := map[string]any{
-		"memorizeToast": toast,
+		"praxisToast": toast,
 	}
 	if closeModal {
-		payload["memorizeCloseModal"] = true
+		payload["praxisCloseModal"] = true
 	}
 	if strings.TrimSpace(redirectURL) != "" {
-		payload["memorizePortRedirect"] = map[string]string{
+		payload["praxisPortRedirect"] = map[string]string{
 			"url": strings.TrimSpace(redirectURL),
 		}
 	}
@@ -93,7 +93,7 @@ func registerSSRPortRoutes(mux *http.ServeMux, d Deps) {
 
 	mux.HandleFunc("/ui/ports/save", postHX(requireAdminRoute(func(w http.ResponseWriter, r *http.Request) {
 		if domain.IsServerMode(r.Context()) && d.Hooks.ApplyDaemonPortFn == nil {
-			http.Error(w, "ports are configured via memorize serve --addr in team server mode", http.StatusBadRequest)
+			http.Error(w, "ports are configured via praxis serve --addr in team server mode", http.StatusBadRequest)
 			return
 		}
 		lang := requestLang(r)

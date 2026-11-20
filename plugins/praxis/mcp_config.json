@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "mcp": {
+      "command": "/bin/sh",
+      "args": [
+        "-c",
+        "if [ -f ./scripts/run-praxis.sh ]; then exec sh ./scripts/run-praxis.sh; elif [ -f \"$HOME/.gemini/config/plugins/praxis/scripts/run-praxis.sh\" ]; then exec sh \"$HOME/.gemini/config/plugins/praxis/scripts/run-praxis.sh\"; else exec \"$HOME/.praxis/bin/praxis\"; fi"
+      ]
+    }
+  }
+}
