@@ -56,7 +56,7 @@ flowchart LR
 | `praxis user <add\|list\|rotate\|disable>` | Create, list, rotate, or disable Team Server accounts (`--role admin\|member`) |
 | `praxis connect` / `disconnect` / `switch` | Attach to a Team Server (`--global` or `--repo .`), detach, or switch saved account profiles live |
 | `praxis push` / `export` / `import` | Migrate local rules to a server or export/import portable JSON bundles (`--scope`, `--all`, `--mode exact\|merge`, `--dry-run`) |
-| `praxis -install git-hook` | Install the `.git/hooks/pre-commit` guardrail hook in the current repository |
+| `praxis install\|uninstall <target>` | Non-destructively register/remove `cursor` (`--project`), `windsurf`, `claude-desktop`, `mcp --config <path>`, or `git-hook` |
 
 ### MCP Tools & Resources
 | Name | Purpose |

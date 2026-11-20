@@ -393,8 +393,11 @@ func (s *Service) evaluateGuardrailPlanChunks(
 		return out
 	}
 
-	turnInp := s.activeOverrideTurnInput(ctx, ev, scA)
-	if turnInp != "" {
+	var ovCtx memory.TurnOverrideContext
+	if s.mem != nil {
+		ovCtx = s.mem.ActiveTurnOverride(ctx, ev.SessionID, scA, ev.TurnPrompt)
+	}
+	if ovCtx.PromptContext != "" {
 		if dl, ok := ctx.Deadline(); !ok || time.Until(dl) >= 1200*time.Millisecond {
 			ovByID := make(map[int64]domain.PlanViolation)
 			ovAllOK := true
@@ -406,14 +409,27 @@ func (s *Service) evaluateGuardrailPlanChunks(
 			sort.Ints(chunkIndices)
 
 			for _, idx := range chunkIndices {
+				var eligible []domain.Fact
+				for _, f := range chunkFlagged[idx] {
+					if ovCtx.IsRuleMutatedInTurn(f) {
+						if orig, ok := flaggedByID[f.ID]; ok {
+							ovByID[f.ID] = orig
+						}
+						continue
+					}
+					eligible = append(eligible, f)
+				}
+				if len(eligible) == 0 {
+					continue
+				}
 				if dl, ok := ctx.Deadline(); ok && time.Until(dl) < 1200*time.Millisecond {
 					ovAllOK = false
 					break
 				}
-				overridePlan := chunks[idx].Plan + "\nTurn Context (User Prompt - check ONLY whether this instruction explicitly overrides the flagged rules): " + turnInp
+				overridePlan := chunks[idx].Plan + "\nTurn Context (User Prompt - check ONLY whether this instruction explicitly overrides the flagged rules): " + ovCtx.PromptContext
 				ovStart := time.Now()
-				ovViols, ovErr := eval.VerifyPlan(ctx, overridePlan, chunkFlagged[idx])
-				s.router.RecordTelemetry(ctx, domain.TaskVerify, eval, ovStart, len(chunkFlagged[idx]), ovErr)
+				ovViols, ovErr := eval.VerifyPlan(ctx, overridePlan, eligible)
+				s.router.RecordTelemetry(ctx, domain.TaskVerify, eval, ovStart, len(eligible), ovErr)
 				if ovErr != nil {
 					ovAllOK = false
 					break

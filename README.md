@@ -58,11 +58,10 @@ Generic memory MCPs only let an agent **recall** past notes when it remembers to
 - **Universal MCP Clients · Windows (Cursor · Windsurf · Claude Desktop — _shared DB + Web Console + MCP tools_)**
   ```bash
   CGO_ENABLED=0 go build -trimpath -o bin/praxis ./cmd/praxis
+  ./bin/praxis install cursor          # cursor (--project supported) | windsurf | claude-desktop | git-hook
+  ./bin/praxis doctor                  # Verify binary, daemon & engine health
   ```
-  Register `./plugins/praxis/scripts/run-praxis.sh` (auto-sync wrapper on macOS/Linux), `bin/praxis` (`praxis.exe`), or `http://127.0.0.1:18095/mcp` in your client's MCP config. Verify health anytime with:
-  ```bash
-  praxis doctor
-  ```
+  For any other MCP host, run `./bin/praxis install mcp --config /path/to/mcp.json` or connect via `http://127.0.0.1:18095/mcp`.
 
 ### 2. Connect an Inference Engine _(Required)_
 
@@ -160,9 +159,9 @@ cp ./memories-backup.db ~/.praxis/memories.db && ~/.praxis/bin/praxis daemon sta
 ### Uninstall
 ```bash
 # 1. Detach client integration only (preserves stored rules)
-/plugin uninstall praxis      # Claude Code
-agy plugin uninstall praxis   # Antigravity
-# Generic MCP clients: remove "praxis" from MCP config (and rm -f .git/hooks/pre-commit if installed)
+/plugin uninstall praxis                             # Claude Code
+agy plugin uninstall praxis                          # Antigravity
+~/.praxis/bin/praxis uninstall cursor                # cursor | windsurf | claude-desktop | git-hook
 
 # 2. Stop daemon and delete all local data
 ~/.praxis/bin/praxis daemon stop && rm -rf ~/.praxis

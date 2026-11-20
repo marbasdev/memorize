@@ -58,11 +58,10 @@ _외부 DB나 Python · Node 런타임 없이 **단일 로컬 Go 실행 파일**
 - **범용 MCP 클라이언트 · Windows (Cursor · Windsurf · Claude Desktop — _공유 DB + 웹 콘솔 + MCP 도구_)**
   ```bash
   CGO_ENABLED=0 go build -trimpath -o bin/praxis ./cmd/praxis
+  ./bin/praxis install cursor          # cursor (--project 지원) | windsurf | claude-desktop | git-hook
+  ./bin/praxis doctor                  # 설치·데몬·엔진 상태 점검
   ```
-  클라이언트 MCP 설정에 `./plugins/praxis/scripts/run-praxis.sh`(macOS/Linux 자동 갱신 래퍼), `bin/praxis`(`praxis.exe`), 또는 `http://127.0.0.1:18095/mcp`를 등록합니다. 설치 상태는 언제든 아래 명령으로 점검할 수 있습니다:
-  ```bash
-  praxis doctor
-  ```
+  기타 MCP 호스트는 `./bin/praxis install mcp --config /경로/mcp.json` 또는 `http://127.0.0.1:18095/mcp`로 연결할 수 있습니다.
 
 ### 2. 추론 엔진 연결 _(필수)_
 
@@ -160,9 +159,9 @@ cp ./memories-backup.db ~/.praxis/memories.db && ~/.praxis/bin/praxis daemon sta
 ### 삭제
 ```bash
 # 1. 클라이언트 연동만 해제 (기억 데이터 보존)
-/plugin uninstall praxis      # Claude Code
-agy plugin uninstall praxis   # Antigravity
-# 기타 MCP 클라이언트는 설정에서 "praxis" 제거 (Git 훅 설치 저장소는 rm -f .git/hooks/pre-commit)
+/plugin uninstall praxis                             # Claude Code
+agy plugin uninstall praxis                          # Antigravity
+~/.praxis/bin/praxis uninstall cursor                # cursor | windsurf | claude-desktop | git-hook
 
 # 2. 데몬 종료 및 로컬 데이터 완전 삭제
 ~/.praxis/bin/praxis daemon stop && rm -rf ~/.praxis

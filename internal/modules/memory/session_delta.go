@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -399,17 +400,62 @@ func (s *Service) RecordTurnState(ctx context.Context, sessionID, rawScope, user
 	}
 	sc := domain.NormalizeScope(rawScope)
 	now := time.Now().Unix()
+	var baseID int64
+	_ = s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM memories`).Scan(&baseID)
 	_, _ = s.db.ExecContext(ctx, `
-		INSERT INTO turn_state (session_id, scope, last_input, mutated, gate_checked, stop_retry, updated_at)
-		VALUES (?, ?, ?, 0, 0, 0, ?)
+		INSERT INTO turn_state (session_id, scope, prev_input, last_input, turn_base_id, mutated_ids, mutated, gate_checked, stop_retry, updated_at)
+		VALUES (?, ?, '', ?, ?, '', 0, 0, 0, ?)
 		ON CONFLICT(session_id, scope) DO UPDATE SET
+			prev_input = CASE WHEN turn_state.last_input = excluded.last_input OR turn_state.last_input = '' THEN turn_state.prev_input ELSE turn_state.last_input END,
+			turn_base_id = CASE WHEN turn_state.last_input = excluded.last_input THEN turn_state.turn_base_id ELSE excluded.turn_base_id END,
+			mutated_ids = CASE WHEN turn_state.last_input = excluded.last_input THEN turn_state.mutated_ids ELSE '' END,
 			mutated = CASE WHEN turn_state.last_input = excluded.last_input THEN turn_state.mutated ELSE 0 END,
 			gate_checked = CASE WHEN turn_state.last_input = excluded.last_input THEN turn_state.gate_checked ELSE 0 END,
 			stop_retry = CASE WHEN turn_state.last_input = excluded.last_input THEN turn_state.stop_retry ELSE 0 END,
 			last_input = excluded.last_input,
 			updated_at = excluded.updated_at
-	`, sid, sc, inp, now)
+	`, sid, sc, inp, baseID, now)
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM turn_state WHERE updated_at < ?`, now-7200)
+}
+
+func formatMutatedIDsFragment(ids []int64) string {
+	var parts []string
+	for _, id := range ids {
+		if id > 0 {
+			parts = append(parts, strconv.FormatInt(id, 10))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "," + strings.Join(parts, ",") + ","
+}
+
+func (s *Service) RecordTurnScopeMutatedIDsCtx(ctx context.Context, rawScope string, ids ...int64) {
+	s.MarkTurnScopeMutatedCtx(ctx, rawScope)
+	frag := formatMutatedIDsFragment(ids)
+	if frag == "" {
+		return
+	}
+	sc := domain.NormalizeScope(rawScope)
+	if p, ok := domain.AuthPrincipalFromContext(ctx); ok && p.ServerMode && p.Account != "" {
+		_, _ = s.db.ExecContext(ctx, `UPDATE turn_state SET mutated_ids = mutated_ids || ? WHERE (scope = ? OR ? IN ('global', 'personal')) AND session_id LIKE ?`, frag, sc, sc, "u:"+p.Account+":%")
+	} else {
+		_, _ = s.db.ExecContext(ctx, `UPDATE turn_state SET mutated_ids = mutated_ids || ? WHERE scope = ? OR ? IN ('global', 'personal')`, frag, sc, sc)
+	}
+}
+
+func (s *Service) RecordTurnMutatedIDsCtx(ctx context.Context, ids ...int64) {
+	s.MarkAllTurnsMutatedCtx(ctx)
+	frag := formatMutatedIDsFragment(ids)
+	if frag == "" {
+		return
+	}
+	if p, ok := domain.AuthPrincipalFromContext(ctx); ok && p.ServerMode && p.Account != "" {
+		_, _ = s.db.ExecContext(ctx, `UPDATE turn_state SET mutated_ids = mutated_ids || ? WHERE session_id LIKE ?`, frag, "u:"+p.Account+":%")
+	} else {
+		_, _ = s.db.ExecContext(ctx, `UPDATE turn_state SET mutated_ids = mutated_ids || ?`, frag)
+	}
 }
 
 func (s *Service) TouchTurnSession(ctx context.Context, sessionID, rawScope string) {
@@ -513,6 +559,84 @@ func (s *Service) ActiveTurnInput(ctx context.Context, sessionID, rawScope strin
 		return ""
 	}
 	return strings.TrimSpace(lastInput)
+}
+
+type TurnOverrideContext struct {
+	PromptContext string
+	HasTurnBase   bool
+	TurnBaseID    int64
+	MutatedIDs    map[int64]bool
+}
+
+func (o TurnOverrideContext) IsRuleMutatedInTurn(f domain.Fact) bool {
+	if f.IsTeam() || f.ID <= 0 {
+		return false
+	}
+	if o.MutatedIDs[f.ID] {
+		return true
+	}
+	return o.HasTurnBase && f.ID > o.TurnBaseID
+}
+
+func formatTwoTurnOverridePrompt(prevInput, lastInput string) string {
+	prev := strings.TrimSpace(prevInput)
+	last := strings.TrimSpace(lastInput)
+	if last == "" {
+		return ""
+	}
+	if prev == "" || prev == last {
+		if len(last) > 1200 {
+			return ""
+		}
+		return last
+	}
+	if len(last) > 1050 {
+		return domain.TruncateUTF8Bytes(last, 1200)
+	}
+	maxPrev := 1150 - len(last)
+	if maxPrev < 80 {
+		return last
+	}
+	return "Prior User Turn: " + domain.TruncateUTF8Bytes(prev, maxPrev) + "\nCurrent User Turn: " + last
+}
+
+func (s *Service) ActiveTurnOverride(ctx context.Context, sessionID, rawScope, fallbackPrompt string) TurnOverrideContext {
+	var out TurnOverrideContext
+	sid := domain.ScopedSessionID(ctx, sessionID)
+	if sid == "" {
+		fb := strings.TrimSpace(fallbackPrompt)
+		if len(fb) <= 1200 {
+			out.PromptContext = fb
+		}
+		return out
+	}
+	sc := domain.NormalizeScope(rawScope)
+	cutoff := time.Now().Add(-domain.TurnInputTTL).Unix()
+	var prevInput, lastInput, rawMutIDs string
+	var baseID int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT prev_input, last_input, turn_base_id, mutated_ids FROM turn_state WHERE session_id = ? AND scope = ? AND updated_at >= ?`,
+		sid, sc, cutoff).Scan(&prevInput, &lastInput, &baseID, &rawMutIDs)
+	if err != nil {
+		fb := strings.TrimSpace(fallbackPrompt)
+		if len(fb) <= 1200 {
+			out.PromptContext = fb
+		}
+		return out
+	}
+	out.HasTurnBase = strings.TrimSpace(lastInput) != ""
+	out.TurnBaseID = baseID
+	if rawMutIDs != "" {
+		out.MutatedIDs = make(map[int64]bool)
+		for _, tok := range strings.Split(rawMutIDs, ",") {
+			if id, perr := strconv.ParseInt(strings.TrimSpace(tok), 10, 64); perr == nil && id > 0 {
+				out.MutatedIDs[id] = true
+			}
+		}
+	}
+	effLast := domain.FirstNonEmpty(strings.TrimSpace(lastInput), strings.TrimSpace(fallbackPrompt))
+	out.PromptContext = formatTwoTurnOverridePrompt(prevInput, effLast)
+	return out
 }
 
 func (s *Service) SetTurnPartialNotice(ctx context.Context, sessionID, rawScope, notice string) {

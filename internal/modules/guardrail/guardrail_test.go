@@ -530,8 +530,9 @@ func TestReadOnlyShellPureGoEnvPrefixes(t *testing.T) {
 
 type lazyOverrideVerifyEval struct {
 	stubEval
-	capturedPlans  []string
-	capturedCounts []int
+	capturedPlans        []string
+	capturedCounts       []int
+	violateRuleSubstring string
 }
 
 func (e *lazyOverrideVerifyEval) VerifyPlan(_ context.Context, plan string, rules []domain.Fact) ([]domain.PlanViolation, error) {
@@ -539,6 +540,13 @@ func (e *lazyOverrideVerifyEval) VerifyPlan(_ context.Context, plan string, rule
 	e.capturedCounts = append(e.capturedCounts, len(rules))
 	if strings.Contains(plan, "Turn Context") && strings.Contains(plan, "allow explicit exception") {
 		return nil, nil
+	}
+	if e.violateRuleSubstring != "" {
+		for _, r := range rules {
+			if strings.Contains(r.Content, e.violateRuleSubstring) {
+				return []domain.PlanViolation{{Fact: r, Probability: 0.94, Confidence: 0.90}}, nil
+			}
+		}
 	}
 	if len(rules) > 0 {
 		return []domain.PlanViolation{{Fact: rules[0], Probability: 0.94, Confidence: 0.90}}, nil
@@ -599,15 +607,17 @@ func TestGuardrailOmitsStaleTurnPromptAfterMutation(t *testing.T) {
 		t.Fatalf("expected Phase 1 (clean) + Phase 2 (with prompt) before mutate, got %+v", eval.capturedPlans)
 	}
 
-	st.mem.MarkTurnScopeMutatedCtx(ctx, scope)
+	if err := st.mem.UpdateMemoryFull(ctx, 1, scope, "architecture", nil, "project_progress stores events without status column", nil); err != nil {
+		t.Fatalf("UpdateMemoryFull: %v", err)
+	}
 	if _, _, err := st.gr.ExecuteHook(ctx, "claude-pretool", buildPayload, repo); err != nil {
 		t.Fatalf("ExecuteHook pretool after mutate: %v", err)
 	}
 	if len(eval.capturedPlans) != 4 {
-		t.Fatalf("expected single Phase 1 call without Phase 2 after mutate, got %d plans", len(eval.capturedPlans))
+		t.Fatalf("expected single Phase 1 call without Phase 2 for mutated rule #1, got %d plans", len(eval.capturedPlans))
 	}
 	if strings.Contains(eval.capturedPlans[3], prompt) {
-		t.Fatalf("expected mutated turn NOT to re-attach stale rule-change prompt, got:\n%s", eval.capturedPlans[3])
+		t.Fatalf("expected mutated rule NOT to re-attach stale rule-change prompt, got:\n%s", eval.capturedPlans[3])
 	}
 }
 
@@ -656,6 +666,66 @@ func TestGuardrailLazyOverrideAllowsExplicitExceptionAcrossFlaggedRulesOnly(t *t
 	if len(eval.capturedCounts) != 2 || eval.capturedCounts[0] != 3 || eval.capturedCounts[1] != 1 {
 		t.Fatalf("expected Phase 1 (3 rules) -> Phase 2 (only 1 flagged rule), got counts=%v", eval.capturedCounts)
 	}
+
+	t.Run("UntouchedRuleStillReceivesOverrideAfterOtherRuleMutated", func(t *testing.T) {
+		eval.dec = domain.MutationDecision{
+			Category:    "architecture",
+			Tier:        "rule",
+			IsPermanent: 0.95,
+			Action:      "INSERT",
+			Confidence:  0.95,
+		}
+		if _, err := st.mem.CommitMemory(ctx, "Rule four newly added in this turn", "architecture", scope); err != nil {
+			t.Fatalf("CommitMemory rule four: %v", err)
+		}
+		eval.dec = domain.MutationDecision{Action: "IGNORE"}
+
+		eval.capturedPlans = nil
+		eval.capturedCounts = nil
+		out, code, err := st.gr.ExecuteHook(ctx, "antigravity-pretool", cmdPayload, repo)
+		if err != nil || code != 0 || !strings.Contains(out, `"decision":"allow"`) {
+			t.Fatalf("expected untouched rule #1 to still receive Phase 2 override after #4 commit, got code=%d err=%v out=%s", code, err, out)
+		}
+		if len(eval.capturedCounts) != 2 || eval.capturedCounts[0] != 4 || eval.capturedCounts[1] != 1 {
+			t.Fatalf("expected Phase 1 (4 rules) -> Phase 2 (1 untouched flagged rule), got counts=%v", eval.capturedCounts)
+		}
+	})
+
+	t.Run("NewlyCreatedRuleInSameTurnCannotBeOverriddenBySameTurnPrompt", func(t *testing.T) {
+		eval.violateRuleSubstring = "Rule four"
+		defer func() { eval.violateRuleSubstring = "" }()
+
+		eval.capturedPlans = nil
+		eval.capturedCounts = nil
+		out, code, err := st.gr.ExecuteHook(ctx, "antigravity-pretool", cmdPayload, repo)
+		if err != nil || code != 0 || !strings.Contains(out, `"decision":"deny"`) {
+			t.Fatalf("expected newly created rule #4 in same turn to deny without Phase 2 override, got code=%d err=%v out=%s", code, err, out)
+		}
+		if len(eval.capturedCounts) != 1 {
+			t.Fatalf("expected no Phase 2 call for rule mutated in same turn, got counts=%v", eval.capturedCounts)
+		}
+	})
+
+	t.Run("TwoTurnApprovalPreservesPriorTurnContext", func(t *testing.T) {
+		approvePayload, _ := json.Marshal(map[string]any{
+			"session_id": sessID,
+			"cwd":        repo,
+			"prompt":     "네",
+		})
+		_, _, _ = st.gr.ExecuteHook(ctx, "antigravity-turn", approvePayload, repo)
+
+		eval.capturedPlans = nil
+		eval.capturedCounts = nil
+		out, code, err := st.gr.ExecuteHook(ctx, "antigravity-pretool", cmdPayload, repo)
+		if err != nil || code != 0 || !strings.Contains(out, `"decision":"allow"`) {
+			t.Fatalf("expected 2-turn approval ('네') to retain prior turn context and allow, got code=%d err=%v out=%s", code, err, out)
+		}
+		if len(eval.capturedPlans) != 2 ||
+			!strings.Contains(eval.capturedPlans[1], "Prior User Turn: Please allow explicit exception to run tool once") ||
+			!strings.Contains(eval.capturedPlans[1], "Current User Turn: 네") {
+			t.Fatalf("expected Phase 2 plan to include both Prior and Current User Turn, got:\n%+v", eval.capturedPlans)
+		}
+	})
 }
 
 type teamVerifyEval struct {

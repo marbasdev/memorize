@@ -930,3 +930,221 @@ func TestDoctorCLIReportAndJSON(t *testing.T) {
 		t.Fatalf("expected ok once SKILL.md & MCP cache match, got: %+v", syncCheck)
 	}
 }
+
+func TestInstallAndUninstallCLI(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("PRAXIS_DB_PATH", filepath.Join(home, ".praxis", "memories.db"))
+
+	repoDir := filepath.Join(t.TempDir(), "projrepo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "init", repoDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init failed: %v\n%s", err, string(out))
+	}
+	subDir := filepath.Join(repoDir, "cmd", "api")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(subDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origWD) })
+
+	realRepoRoot, _ := filepath.EvalSymlinks(repoDir)
+	if realRepoRoot == "" {
+		realRepoRoot = repoDir
+	}
+
+	t.Run("ClaudeDesktopOSPaths", func(t *testing.T) {
+		envMap := map[string]string{
+			"APPDATA":         `/win/roaming`,
+			"XDG_CONFIG_HOME": `/xdg/cfg`,
+		}
+		getenv := func(k string) string { return envMap[k] }
+		if got := claudeDesktopConfigPath("darwin", "/Users/alice", getenv); got != filepath.Join("/Users/alice", "Library", "Application Support", "Claude", "claude_desktop_config.json") {
+			t.Fatalf("darwin path mismatch: %q", got)
+		}
+		if got := claudeDesktopConfigPath("windows", `C:\Users\alice`, getenv); got != filepath.Join(`/win/roaming`, "Claude", "claude_desktop_config.json") {
+			t.Fatalf("windows APPDATA path mismatch: %q", got)
+		}
+		if got := claudeDesktopConfigPath("linux", "/home/alice", getenv); got != filepath.Join(`/xdg/cfg`, "Claude", "claude_desktop_config.json") {
+			t.Fatalf("linux XDG path mismatch: %q", got)
+		}
+	})
+
+	t.Run("MCPTargetsMergePreserveAndUninstall", func(t *testing.T) {
+		windsurfCfg := filepath.Join(home, ".codeium", "windsurf", "mcp_config.json")
+		if err := os.MkdirAll(filepath.Dir(windsurfCfg), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		seedJSON := `{
+  "globalShortcut": "Ctrl+Shift+M",
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"]
+    },
+    "praxis": {
+      "command": "/stale/praxis-1.0.0",
+      "args": ["--old"],
+      "env": {
+        "PRAXIS_DB_PATH": "/custom/memories.db"
+      }
+    }
+  }
+}`
+		if err := os.WriteFile(windsurfCfg, []byte(seedJSON), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		cases := []struct {
+			name       string
+			installCmd []string
+			uninstCmd  []string
+			cfgPath    string
+		}{
+			{
+				name:       "cursor-global",
+				installCmd: []string{"install", "cursor"},
+				uninstCmd:  []string{"uninstall", "cursor"},
+				cfgPath:    filepath.Join(home, ".cursor", "mcp.json"),
+			},
+			{
+				name:       "cursor-project-from-subdir",
+				installCmd: []string{"install", "cursor", "--project"},
+				uninstCmd:  []string{"uninstall", "--project", "cursor"},
+				cfgPath:    filepath.Join(realRepoRoot, ".cursor", "mcp.json"),
+			},
+			{
+				name:       "windsurf-existing-siblings",
+				installCmd: []string{"install", "windsurf"},
+				uninstCmd:  []string{"uninstall", "windsurf"},
+				cfgPath:    windsurfCfg,
+			},
+			{
+				name:       "claude-desktop",
+				installCmd: []string{"install", "claude-desktop"},
+				uninstCmd:  []string{"uninstall", "claude-desktop"},
+				cfgPath:    claudeDesktopConfigPath(runtime.GOOS, home, os.Getenv),
+			},
+			{
+				name:       "generic-mcp-explicit-config",
+				installCmd: []string{"install", "mcp", "--config", filepath.Join(home, "custom-host", "mcp.json")},
+				uninstCmd:  []string{"uninstall", "mcp", "--config", filepath.Join(home, "custom-host", "mcp.json")},
+				cfgPath:    filepath.Join(home, "custom-host", "mcp.json"),
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				if code := executeArgs(tc.installCmd, "1.3.1-test", RuntimeHooks{}); code != 0 {
+					t.Fatalf("install %v exited %d", tc.installCmd, code)
+				}
+				raw, err := os.ReadFile(tc.cfgPath)
+				if err != nil {
+					t.Fatalf("read %s: %v", tc.cfgPath, err)
+				}
+				var parsed map[string]any
+				if err := json.Unmarshal(raw, &parsed); err != nil {
+					t.Fatalf("unmarshal %s: %v\n%s", tc.cfgPath, err, string(raw))
+				}
+				servers, _ := parsed["mcpServers"].(map[string]any)
+				praxisEntry, _ := servers["praxis"].(map[string]any)
+				if praxisEntry == nil || strings.TrimSpace(fmt.Sprint(praxisEntry["command"])) == "" {
+					t.Fatalf("expected praxis entry in %s, got: %+v", tc.cfgPath, parsed)
+				}
+				if tc.name == "windsurf-existing-siblings" {
+					if parsed["globalShortcut"] != "Ctrl+Shift+M" || servers["github"] == nil {
+						t.Fatalf("expected sibling keys and github server preserved, got: %+v", parsed)
+					}
+					envObj, _ := praxisEntry["env"].(map[string]any)
+					if envObj["PRAXIS_DB_PATH"] != "/custom/memories.db" {
+						t.Fatalf("expected custom env preserved inside praxis entry, got: %+v", praxisEntry)
+					}
+				}
+
+				if code := executeArgs(tc.uninstCmd, "1.3.1-test", RuntimeHooks{}); code != 0 {
+					t.Fatalf("uninstall %v exited %d", tc.uninstCmd, code)
+				}
+				rawAfter, err := os.ReadFile(tc.cfgPath)
+				if err != nil {
+					t.Fatalf("read after uninstall %s: %v", tc.cfgPath, err)
+				}
+				var after map[string]any
+				if err := json.Unmarshal(rawAfter, &after); err != nil {
+					t.Fatalf("unmarshal after uninstall %s: %v", tc.cfgPath, err)
+				}
+				afterServers, _ := after["mcpServers"].(map[string]any)
+				if _, exists := afterServers["praxis"]; exists {
+					t.Fatalf("expected praxis entry removed from %s, got: %+v", tc.cfgPath, after)
+				}
+				if tc.name == "windsurf-existing-siblings" && afterServers["github"] == nil {
+					t.Fatalf("expected github sibling preserved after praxis uninstall, got: %+v", after)
+				}
+				if code := executeArgs(tc.uninstCmd, "1.3.1-test", RuntimeHooks{}); code != 0 {
+					t.Fatalf("repeat idempotent uninstall %v exited %d", tc.uninstCmd, code)
+				}
+			})
+		}
+	})
+
+	t.Run("MalformedJSONNeverOverwritten", func(t *testing.T) {
+		badCfg := filepath.Join(home, "broken-mcp.json")
+		brokenBody := `{"mcpServers": { trailing-broken`
+		if err := os.WriteFile(badCfg, []byte(brokenBody), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if code := executeArgs([]string{"install", "cursor", "--config", badCfg}, "1.3.1-test", RuntimeHooks{}); code == 0 {
+			t.Fatalf("expected non-zero exit on malformed JSON install")
+		}
+		if code := executeArgs([]string{"uninstall", "cursor", "--config", badCfg}, "1.3.1-test", RuntimeHooks{}); code == 0 {
+			t.Fatalf("expected non-zero exit on malformed JSON uninstall")
+		}
+		got, _ := os.ReadFile(badCfg)
+		if string(got) != brokenBody {
+			t.Fatalf("expected malformed JSON file untouched, got: %q", string(got))
+		}
+	})
+
+	t.Run("GitHookInstallLegacyFlagAndSafeUninstall", func(t *testing.T) {
+		hookPath := filepath.Join(realRepoRoot, ".git", "hooks", "pre-commit")
+		if code := executeArgs([]string{"-install", "git-hook"}, "1.3.1-test", RuntimeHooks{}); code != 0 {
+			t.Fatalf("legacy -install git-hook exited %d", code)
+		}
+		body, err := os.ReadFile(hookPath)
+		if err != nil || !strings.Contains(string(body), "Managed by praxis") {
+			t.Fatalf("expected managed pre-commit hook at %s, err=%v body=%s", hookPath, err, string(body))
+		}
+		if code := executeArgs([]string{"uninstall", "git-hook"}, "1.3.1-test", RuntimeHooks{}); code != 0 {
+			t.Fatalf("uninstall git-hook exited %d", code)
+		}
+		if _, err := os.Stat(hookPath); !os.IsNotExist(err) {
+			t.Fatalf("expected managed pre-commit hook removed, stat err=%v", err)
+		}
+
+		foreignHook := "#!/bin/sh\necho custom-linter\n"
+		if err := os.WriteFile(hookPath, []byte(foreignHook), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if code := executeArgs([]string{"install", "git-hook"}, "1.3.1-test", RuntimeHooks{}); code == 0 {
+			t.Fatalf("expected install git-hook to refuse overwriting foreign pre-commit hook")
+		}
+		if code := executeArgs([]string{"uninstall", "git-hook"}, "1.3.1-test", RuntimeHooks{}); code == 0 {
+			t.Fatalf("expected uninstall git-hook to refuse deleting foreign pre-commit hook")
+		}
+		gotForeign, _ := os.ReadFile(hookPath)
+		if string(gotForeign) != foreignHook {
+			t.Fatalf("expected foreign hook untouched, got: %q", string(gotForeign))
+		}
+	})
+}

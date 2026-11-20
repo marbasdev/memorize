@@ -601,7 +601,7 @@ func (s *Service) applyEvaluatedCommit(ctx context.Context, targetScope, candida
 			}
 			return nil
 		})
-		s.MarkTurnScopeMutatedCtx(ctx, targetScope)
+		s.RecordTurnScopeMutatedIDsCtx(ctx, targetScope, targetIDs...)
 		return fmt.Sprintf("SKIPPED (duplicate confirmed in %s; boosted confidence of %v)", targetScope, targetIDs), nil
 	}
 
@@ -653,7 +653,7 @@ func (s *Service) applyEvaluatedCommit(ctx context.Context, targetScope, candida
 	}); err != nil {
 		return "", err
 	}
-	s.MarkTurnScopeMutatedCtx(ctx, targetScope)
+	s.RecordTurnScopeMutatedIDsCtx(ctx, targetScope, newID)
 	if dec.Action == "OVERWRITE" && len(targetIDs) > 0 {
 		// Keep SQLite session_sent rows intact so sessions that previously saw targetIDs get a 1-time (Replaces: ...) notice.
 		s.clearInMemorySessionIDs(targetIDs...)

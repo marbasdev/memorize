@@ -34,17 +34,9 @@ Please set up and configure praxis for this project following guides/AI_SETUP.md
 - **Standalone Binary · Windows · Generic MCP Clients**
   ```bash
   CGO_ENABLED=0 go build -trimpath -o bin/praxis ./cmd/praxis
+  ./bin/praxis install cursor          # cursor (--project supported) | windsurf | claude-desktop | git-hook
   ```
-  Register `praxis` in the client's MCP config (`.cursor/mcp.json`, `claude_desktop_config.json`, etc.; on macOS/Linux, prefer `./plugins/praxis/scripts/run-praxis.sh` for auto-syncing updates):
-  ```json
-  {
-    "mcpServers": {
-      "praxis": {
-        "command": "/absolute/path/to/praxis/bin/praxis"
-      }
-    }
-  }
-  ```
+  For any other MCP host, run `./bin/praxis install mcp --config /path/to/mcp.json` or connect via `http://127.0.0.1:18095/mcp`.
 
 ### Step 3: Run Self-Diagnosis (`praxis doctor`)
 ```bash

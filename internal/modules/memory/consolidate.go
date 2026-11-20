@@ -371,7 +371,7 @@ func (s *Service) ConsolidateMemories(ctx context.Context, rawScope, category st
 	}
 	// Keep SQLite session_sent rows intact so sessions that previously saw sourceIDs get a 1-time (Replaces: ...) notice.
 	s.clearInMemorySessionIDs(sourceIDs...)
-	s.MarkTurnScopeMutatedCtx(ctx, targetScope)
+	s.RecordTurnScopeMutatedIDsCtx(ctx, targetScope, newID)
 	s.RegisterTaxonomyAppendOnly(ctx, targetScope, cat, subCat)
 	s.emitMutation(ctx, MutationEvent{
 		Scope:       targetScope,

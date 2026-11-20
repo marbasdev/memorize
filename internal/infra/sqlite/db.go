@@ -141,7 +141,10 @@ func InitSchema(db *sql.DB) error {
 		CREATE TABLE IF NOT EXISTS turn_state (
 			session_id TEXT NOT NULL,
 			scope TEXT NOT NULL,
+			prev_input TEXT NOT NULL DEFAULT '',
 			last_input TEXT NOT NULL DEFAULT '',
+			turn_base_id INTEGER NOT NULL DEFAULT 0,
+			mutated_ids TEXT NOT NULL DEFAULT '',
 			mutated INTEGER NOT NULL DEFAULT 0,
 			gate_checked INTEGER NOT NULL DEFAULT 0,
 			partial_notice TEXT NOT NULL DEFAULT '',
@@ -298,6 +301,9 @@ func InitSchema(db *sql.DB) error {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_progress_scope_track ON project_progress(scope, track, id DESC)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_progress_updated_id ON project_progress(updated_at DESC, id DESC)`)
 	_, _ = db.Exec(`ALTER TABLE repo_sync ADD COLUMN repo_path TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE turn_state ADD COLUMN prev_input TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE turn_state ADD COLUMN turn_base_id INTEGER NOT NULL DEFAULT 0`)
+	_, _ = db.Exec(`ALTER TABLE turn_state ADD COLUMN mutated_ids TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE turn_state ADD COLUMN partial_notice TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE turn_state ADD COLUMN stop_retry INTEGER NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_turn_state_scope ON turn_state(scope, updated_at)`)

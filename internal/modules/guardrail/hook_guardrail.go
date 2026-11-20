@@ -11,17 +11,6 @@ import (
 	"praxis/internal/infra/git"
 )
 
-func (s *Service) activeOverrideTurnInput(ctx context.Context, ev NormalizedHookEvent, scopeKey string) string {
-	if ev.SessionID == "" || s.mem.IsTurnMutated(ctx, ev.SessionID, scopeKey) {
-		return ""
-	}
-	turnInp := strings.TrimSpace(domain.FirstNonEmpty(s.mem.ActiveTurnInput(ctx, ev.SessionID, scopeKey), ev.TurnPrompt))
-	if turnInp == "" || len(turnInp) > 1200 {
-		return ""
-	}
-	return turnInp
-}
-
 func (s *Service) evaluateGuardrailViolations(ctx context.Context, plan string, ev NormalizedHookEvent, scope string, minProb float64) (int, []domain.PlanViolation, error) {
 	res := s.evaluateGuardrailPlanChunks(ctx, func(budget int) []diffPlanChunk {
 		return packPlainTextChunks(plan, budget)

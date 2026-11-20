@@ -34,17 +34,9 @@ guides/AI_SETUP.ko.md 가이드를 따라 이 프로젝트에 praxis를 설치 �
 - **단독 바이너리 · Windows · 범용 MCP 클라이언트**
   ```bash
   CGO_ENABLED=0 go build -trimpath -o bin/praxis ./cmd/praxis
+  ./bin/praxis install cursor          # cursor (--project 지원) | windsurf | claude-desktop | git-hook
   ```
-  클라이언트 MCP 설정 파일(`.cursor/mcp.json`, `claude_desktop_config.json` 등)에 등록합니다 _(macOS/Linux는 자동 동기화 래퍼 `./plugins/praxis/scripts/run-praxis.sh` 권장)_:
-  ```json
-  {
-    "mcpServers": {
-      "praxis": {
-        "command": "/절대경로/praxis/bin/praxis"
-      }
-    }
-  }
-  ```
+  그 외 표준 MCP 클라이언트는 `./bin/praxis install mcp --config /경로/mcp.json` 또는 `http://127.0.0.1:18095/mcp`로 등록합니다.
 
 ### 3단계: 자가 진단 (`praxis doctor`)
 ```bash

@@ -169,6 +169,10 @@ func executeArgs(args []string, version string, hooks RuntimeHooks) int {
 			return runExportCLI(args[1:], dbPath)
 		case "import":
 			return runImportCLI(args[1:], dbPath, modelsDir, hooks)
+		case "install":
+			return runInstallCLI(args[1:], false)
+		case "uninstall":
+			return runInstallCLI(args[1:], true)
 		case "doctor":
 			return runDoctorCLI(args[1:], dbPath, modelsDir, version, hooks)
 		}
@@ -176,7 +180,7 @@ func executeArgs(args []string, version string, hooks RuntimeHooks) int {
 
 	fs := flag.NewFlagSet("praxis", flag.ContinueOnError)
 	showVersion := fs.Bool("version", false, "print praxis version and exit")
-	installMode := fs.String("install", "", "install Git pre-commit guardrail hook ('git-hook')")
+	installMode := fs.String("install", "", "install integration target (cursor, windsurf, claude-desktop, git-hook)")
 	daemonMode := fs.Bool("daemon", false, "run single unified background daemon (SQLite + Dashboard + MCP + Hooks)")
 	serveMode := fs.Bool("serve", false, "run authenticated team server mode (default 0.0.0.0:18095)")
 	daemonAddr := fs.String("addr", "", "daemon or team server listen address (default 127.0.0.1:18095 / 0.0.0.0:18095)")

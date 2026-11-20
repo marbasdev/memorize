@@ -6,6 +6,7 @@ import (
 )
 
 var secretPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`prx_[0-9a-fA-F]{24,}`),
 	regexp.MustCompile(`AIza[0-9A-Za-z_-]{20,}`),
 	regexp.MustCompile(`sk-[A-Za-z0-9_-]{20,}`),
 	regexp.MustCompile(`gh[pousr]_[A-Za-z0-9]{20,}`),

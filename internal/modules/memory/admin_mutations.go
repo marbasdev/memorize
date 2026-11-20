@@ -157,7 +157,7 @@ func (s *Service) UndoMemory(ctx context.Context, id int64) (string, error) {
 	} else {
 		s.clearSessionIDs(id)
 	}
-	s.MarkAllTurnsMutatedCtx(ctx)
+	s.RecordTurnMutatedIDsCtx(ctx, append(children, id)...)
 	return msg, nil
 }
 
@@ -225,7 +225,7 @@ func (s *Service) UpdateMemoryFull(ctx context.Context, id int64, rawScope, cate
 		`, id, curContent, id)
 	}
 	s.clearSessionIDs(id)
-	s.MarkAllTurnsMutatedCtx(ctx)
+	s.RecordTurnMutatedIDsCtx(ctx, id)
 	s.RegisterTaxonomyAppendOnly(ctx, scope, cat, sub)
 	if txt != curContent || cat != curCat || sub != curSub {
 		s.emitMutation(ctx, MutationEvent{

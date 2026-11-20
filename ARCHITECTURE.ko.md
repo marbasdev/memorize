@@ -56,7 +56,7 @@ flowchart LR
 | `praxis user <add\|list\|rotate\|disable>` | 팀 서버 계정 발급·목록·토큰 재발급·비활성화 (`--role admin\|member`) |
 | `praxis connect` / `disconnect` / `switch` | 원격 팀 서버 연결(`--global` 또는 `--repo .`), 해제, 다중 계정 프로필 즉시 전환 |
 | `praxis push` / `export` / `import` | 로컬→서버 이관 및 포터블 번들 입출력 (`--scope`, `--all`, `--mode exact\|merge`, `--dry-run`) |
-| `praxis -install git-hook` | 현재 저장소에 `.git/hooks/pre-commit` 가드레일 훅 설치 |
+| `praxis install\|uninstall <target>` | `cursor`(`--project`), `windsurf`, `claude-desktop`, `mcp --config <path>`, `git-hook` 비파괴 등록·해제 |
 
 ### MCP 도구 · 리소스
 | 이름 | 역할 |
