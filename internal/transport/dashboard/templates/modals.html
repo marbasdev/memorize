@@ -633,3 +633,116 @@
   <div style="font-size:0.76rem;color:var(--subtle);">{{t .Lang "import_preview_empty"}}</div>
 {{end}}
 {{end}}
+
+{{define "modal_guardrail_refine"}}
+<dialog id="grRefineDialog" aria-labelledby="grRefineTitle" style="width:min(700px, 94vw);"
+  x-init="$el.showModal()" @click="if ($event.target === $el) $el.close()">
+  <div class="dlg-head">
+    <strong><span id="grRefineTitle">{{t .Lang "gr_refine_title"}}</span></strong>
+    <button type="button" class="btn btn-sm" @click="$el.closest('dialog').close()">{{t .Lang "btn_close"}}</button>
+  </div>
+
+  <div style="padding:0.65rem 1.15rem 0;display:flex;flex-direction:column;gap:0.5rem;">
+    <div style="font-size:0.76rem;color:var(--muted);line-height:1.45;">{{t .Lang "gr_refine_desc"}}</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:0.55rem;flex-wrap:wrap;">
+      <div style="display:flex;align-items:center;gap:0.45rem;flex:1;min-width:210px;">
+        <label for="grRefineScope" style="font-size:0.76rem;font-weight:600;color:var(--muted);white-space:nowrap;">{{t .Lang "lbl_scope"}}</label>
+        <select id="grRefineScope" name="refine_scope" style="flex:1;max-width:260px;"
+          hx-post="/ui/guardrail-logs/refine/suggest" hx-include="#grRefineScope"
+          hx-target="#grRefinePlanHost" hx-swap="innerHTML" hx-indicator="#grRefineLoadingBox">
+          <option value="" {{if eq .Scope ""}}selected{{end}}>{{t .Lang "all_scopes"}}</option>
+          {{range .Scopes}}<option value="{{.}}" {{if eq $.Scope .}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+      </div>
+      <button type="button" class="btn btn-sm"
+        hx-post="/ui/guardrail-logs/refine/suggest" hx-include="#grRefineScope"
+        hx-target="#grRefinePlanHost" hx-swap="innerHTML" hx-indicator="#grRefineLoadingBox">{{t .Lang "btn_reanalyze"}}</button>
+    </div>
+  </div>
+
+  <div id="grRefineLoadingBox" class="htmx-indicator" style="padding:0.65rem 1.15rem 0;">
+    <div class="sub-panel" style="padding:0.7rem 0.9rem;text-align:center;color:var(--accent);font-weight:600;border-color:var(--accent);">
+      {{t .Lang "ai_analyzing"}}
+    </div>
+  </div>
+
+  <div id="grRefinePlanHost"
+    hx-post="/ui/guardrail-logs/refine/suggest" hx-trigger="load" hx-include="#grRefineScope" hx-swap="innerHTML">
+    <div class="dlg-body" style="padding-top:0.75rem;">
+      <div class="sub-panel" style="padding:1.1rem;text-align:center;color:var(--accent);font-weight:600;border-color:var(--accent);">
+        {{t .Lang "ai_analyzing"}}
+      </div>
+    </div>
+    <div class="dlg-foot">
+      <span style="font-size:0.75rem;color:var(--muted);">{{t .Lang "gr_refine_foot"}}</span>
+      <button type="button" class="btn btn-sm" @click="$el.closest('dialog').close()">{{t .Lang "btn_cancel"}}</button>
+    </div>
+  </div>
+</dialog>
+{{end}}
+
+{{define "guardrail_refine_plan"}}
+<form id="grRefineApplyForm" x-data="{ enabledCount: {{len .Items}} }"
+  hx-post="/ui/guardrail-logs/refine/apply" hx-include="#guardrailFilterForm"
+  hx-target="#guardrailLogsSection" hx-swap="outerHTML">
+  <div class="dlg-body" style="padding-top:0.65rem;">
+    {{if .Error}}
+      <div class="sub-panel" style="border-color:var(--danger);background:var(--danger-bg);color:var(--danger);font-size:0.8rem;">{{.Error}}</div>
+    {{else if not .Items}}
+      <div class="sub-panel" style="padding:1.2rem;text-align:center;color:var(--muted);">
+        {{t .Lang "gr_refine_empty"}}
+      </div>
+    {{else}}
+      <div style="display:flex;justify-content:flex-end;align-items:center;gap:0.5rem;">
+        {{if .SourceLabel}}<span class="badge b-muted" style="font-family:var(--mono);">{{.SourceLabel}}</span>{{end}}
+      </div>
+      <div style="max-height:375px;overflow-y:auto;display:flex;flex-direction:column;gap:0.6rem;padding-right:0.15rem;">
+        {{range $idx, $it := .Items}}
+          <div class="sub-panel" style="padding:0.65rem 0.8rem;gap:0.42rem;"
+            x-data='{ checked: true, txt: {{jsonAttr $it.RefinedContent}} }'
+            :style="checked ? '' : 'opacity:0.52'">
+            <input type="hidden" name="item_{{$idx}}_id" value="{{$it.ID}}">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:0.45rem;flex-wrap:wrap;">
+              <label style="display:inline-flex;align-items:center;gap:0.42rem;cursor:pointer;flex-wrap:wrap;">
+                <input type="checkbox" name="item_idx" value="{{$idx}}" checked x-model="checked"
+                  @change="enabledCount += ($event.target.checked ? 1 : -1)">
+                <code style="color:var(--accent);font-weight:700;">#{{$it.ID}}</code>
+                <span class="badge b-accent">{{$it.Scope}}</span>
+                <span class="badge b-muted">{{$it.Category}}{{if $it.SubCategory}}/{{$it.SubCategory}}{{end}}</span>
+                {{if $it.Pinned}}<span class="badge b-warn">PIN</span>{{end}}
+                <span class="badge b-danger">{{$it.HitCount}} {{t $.Lang "gr_refine_hits"}}</span>
+                {{if $it.Reason}}<span style="font-size:0.75rem;color:var(--muted);font-weight:600;">{{$it.Reason}}</span>{{end}}
+              </label>
+              <span style="font-family:var(--mono);font-size:0.71rem;" :style="txt.length > 220 ? 'color:var(--warn)' : 'color:var(--muted)'" x-text="txt.length + ' / 220'"></span>
+            </div>
+
+            <textarea name="item_{{$idx}}_content" rows="2" x-model="txt" :disabled="!checked" style="font-size:0.79rem;"></textarea>
+
+            <details class="prog-detail-fold">
+              <summary>{{t $.Lang "gr_refine_orig_snippets"}}</summary>
+              <div style="display:flex;flex-direction:column;gap:0.35rem;padding-top:0.3rem;font-size:0.74rem;color:var(--muted);">
+                <div><strong>#{{$it.ID}}:</strong> {{$it.OriginalContent}}</div>
+                {{range $it.SampleSnippets}}
+                  <pre class="gr-plan-pre" style="margin:0;">{{.}}</pre>
+                {{end}}
+              </div>
+            </details>
+          </div>
+        {{end}}
+      </div>
+    {{end}}
+  </div>
+
+  <div class="dlg-foot">
+    <span style="font-size:0.75rem;color:var(--muted);">{{t .Lang "gr_refine_foot"}}</span>
+    <div style="display:flex;gap:0.4rem;">
+      <button type="button" class="btn btn-sm" @click="$el.closest('dialog').close()">{{t .Lang "btn_cancel"}}</button>
+      {{if .Items}}
+      <button type="submit" class="btn btn-primary btn-sm" id="btnApplyGuardrailRefine" :disabled="enabledCount < 1">
+        {{t .Lang "btn_apply_gr_refine"}} (<span x-text="enabledCount">{{len .Items}}</span>)
+      </button>
+      {{end}}
+    </div>
+  </div>
+</form>
+{{end}}

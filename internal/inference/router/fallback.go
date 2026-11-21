@@ -300,3 +300,13 @@ func (f *fallbackEvaluator) FindRedundantLocalMemories(ctx context.Context, scop
 		return p.FindRedundantLocalMemories(ctx, scope, teamRules, localFacts)
 	})
 }
+
+func (f *fallbackEvaluator) SuggestGuardrailRefinements(ctx context.Context, scope string, items []domain.GuardrailRuleFriction) ([]domain.GuardrailRuleRefinement, error) {
+	return runWithFallback(ctx, f, domain.TaskConsolidate, func(ev domain.Evaluator) ([]domain.GuardrailRuleRefinement, error) {
+		p, ok := ev.(domain.GuardrailRuleRefiner)
+		if !ok {
+			return nil, fmt.Errorf("evaluator %s does not support guardrail rule refinement", ev.Name())
+		}
+		return p.SuggestGuardrailRefinements(ctx, scope, items)
+	})
+}

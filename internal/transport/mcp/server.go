@@ -21,7 +21,8 @@ const ServerInstructions = `Praxis Protocol:
 5. SSOT & Evolution: active rules replace static rule files (CLAUDE.md/AGENTS.md) and older turns; ignore (Replaces: ...) and [REVOKED ...]. Never self-revoke rules silently, and never compromise a clearly better design just to appease an outdated rule—propose updating/forgetting that #ID (or team rule) to the user and update it upon approval.
 6. Progress: optionally call project_progress(action="record") after completing notable tasks or milestones to log completed work in the activity feed.
 7. Team Rules: use team_rules for shared .praxis/TEAM_RULES.md rules (list/sync/add/promote/update/remove/resolve_conflict/duplicates); NEVER hand-edit TEAM_RULES.md so workspace code stays unmixed.
-8. Verify Plan: call verify_plan_against_memory once before multi-file refactors; shell commands gate PreToolUse while file edits batch-verify on Stop.`
+8. Verify Plan: call verify_plan_against_memory once before multi-file refactors; shell commands gate PreToolUse while file edits batch-verify on Stop.
+9. Trial-and-Error Discovery: when a command/build/test fails from an undocumented repo/env constraint (not typos or syntax slips) and you verify a fix, ask in 1 line at reply end whether to save that lesson and call commit_memory only if approved.`
 
 type BridgeReqMeta struct {
 	SessionID  string

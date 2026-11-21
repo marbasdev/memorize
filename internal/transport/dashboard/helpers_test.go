@@ -72,6 +72,24 @@ func (noopEval) SynthesizeConsolidation(_ context.Context, _ string, _ string, f
 	}
 	return "", nil
 }
+func (noopEval) SuggestGuardrailRefinements(_ context.Context, _ string, items []domain.GuardrailRuleFriction) ([]domain.GuardrailRuleRefinement, error) {
+	out := make([]domain.GuardrailRuleRefinement, 0, len(items))
+	for _, it := range items {
+		out = append(out, domain.GuardrailRuleRefinement{
+			ID:              it.Rule.ID,
+			Scope:           it.Rule.Scope,
+			Category:        it.Rule.Category,
+			SubCategory:     it.Rule.SubCategory,
+			Pinned:          it.Rule.Pinned,
+			HitCount:        it.HitCount,
+			OriginalContent: it.Rule.Content,
+			RefinedContent:  it.Rule.Content + " — refined via dashboard",
+			Reason:          "clarify alternative",
+			SampleSnippets:  it.Snippets,
+		})
+	}
+	return out, nil
+}
 
 type noopMutEval struct{ noopEval }
 

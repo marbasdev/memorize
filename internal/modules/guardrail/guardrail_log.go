@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"praxis/internal/domain"
 )
@@ -281,4 +282,184 @@ func (s *Service) QueryGuardrailLogsPage(ctx context.Context, q domain.Guardrail
 		return domain.GuardrailLogPage{}, err
 	}
 	return out, nil
+}
+
+func (s *Service) SuggestRuleRefinements(ctx context.Context, rawScope string) ([]domain.GuardrailRuleRefinement, string, error) {
+	if s == nil || s.db == nil || s.mem == nil {
+		return nil, "none", fmt.Errorf("guardrail service unavailable")
+	}
+	sc := strings.TrimSpace(rawScope)
+	if sc != "" {
+		sc = domain.NormalizeScope(sc)
+	}
+	curAcc := s.mem.CurrentAccount(ctx)
+	visSQL, visArgs := guardrailVisibilitySQL(ctx, curAcc)
+	qArgs := append([]any{sc, sc}, visArgs...)
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, violated_ids, COALESCE(plan_snippet, ''), COALESCE(created_at, '')
+		FROM guardrail_logs
+		WHERE blocked = 1 AND COALESCE(violated_ids, '') != '' AND (? = '' OR scope = ?) AND `+visSQL+`
+		ORDER BY id DESC
+		LIMIT 300`, qArgs...)
+	if err != nil {
+		return nil, "none", err
+	}
+	defer rows.Close()
+
+	type frictionAgg struct {
+		hitCount    int
+		lastLogID   int64
+		lastBlocked string
+		snippets    []string
+		seenSnip    map[string]bool
+	}
+	aggByID := make(map[int64]*frictionAgg)
+	for rows.Next() {
+		var logID int64
+		var rawIDs, snippet, createdAt string
+		if err := rows.Scan(&logID, &rawIDs, &snippet, &createdAt); err != nil {
+			return nil, "none", err
+		}
+		snip := strings.TrimSpace(domain.TruncateUTF8Bytes(strings.TrimSpace(snippet), 320))
+		for _, rid := range parseGuardrailIDs(rawIDs) {
+			a := aggByID[rid]
+			if a == nil {
+				a = &frictionAgg{
+					lastLogID:   logID,
+					lastBlocked: createdAt,
+					seenSnip:    make(map[string]bool),
+				}
+				aggByID[rid] = a
+			}
+			a.hitCount++
+			if snip != "" && len(a.snippets) < 4 && !a.seenSnip[snip] {
+				a.seenSnip[snip] = true
+				a.snippets = append(a.snippets, snip)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "none", err
+	}
+
+	engineLabel := "none"
+	if s.router != nil {
+		engineLabel = s.router.ProviderNameForTask(ctx, domain.TaskConsolidate)
+	}
+	if len(aggByID) == 0 {
+		return nil, engineLabel, nil
+	}
+
+	allIDs := make([]int64, 0, len(aggByID))
+	for id := range aggByID {
+		allIDs = append(allIDs, id)
+	}
+	recs, err := s.mem.GetRecordsByIDs(ctx, allIDs)
+	if err != nil {
+		return nil, engineLabel, err
+	}
+
+	type rankedFriction struct {
+		item      domain.GuardrailRuleFriction
+		lastLogID int64
+	}
+	var ranked []rankedFriction
+	for _, r := range recs {
+		if !r.Active || domain.CanModifyScope(ctx, r.Scope) != nil {
+			continue
+		}
+		a := aggByID[r.ID]
+		if a == nil || a.hitCount <= 0 {
+			continue
+		}
+		ranked = append(ranked, rankedFriction{
+			lastLogID: a.lastLogID,
+			item: domain.GuardrailRuleFriction{
+				Rule: domain.Fact{
+					ID:          r.ID,
+					Scope:       r.Scope,
+					Category:    r.Category,
+					SubCategory: r.SubCategory,
+					Content:     r.Content,
+					Pinned:      r.Pinned,
+				},
+				HitCount:    a.hitCount,
+				Snippets:    a.snippets,
+				LastBlocked: a.lastBlocked,
+			},
+		})
+	}
+	if len(ranked) == 0 {
+		return nil, engineLabel, nil
+	}
+	sort.Slice(ranked, func(i, j int) bool {
+		if ranked[i].item.HitCount != ranked[j].item.HitCount {
+			return ranked[i].item.HitCount > ranked[j].item.HitCount
+		}
+		return ranked[i].lastLogID > ranked[j].lastLogID
+	})
+	if len(ranked) > 12 {
+		ranked = ranked[:12]
+	}
+	frictions := make([]domain.GuardrailRuleFriction, len(ranked))
+	for i, rf := range ranked {
+		frictions[i] = rf.item
+	}
+
+	if s.router == nil {
+		return nil, "none", fmt.Errorf("no inference router configured")
+	}
+	ev := s.router.EvalForTask(ctx, domain.TaskConsolidate)
+	if ev == nil {
+		return nil, "none", fmt.Errorf("no active inference engine configured")
+	}
+	refiner, ok := ev.(domain.GuardrailRuleRefiner)
+	if !ok {
+		return nil, ev.Name(), fmt.Errorf("active engine (%s) does not support generative rule refinement", ev.Name())
+	}
+
+	scopeLabel := sc
+	if scopeLabel == "" {
+		scopeLabel = "all-scopes"
+	}
+	evalStart := time.Now()
+	suggested, evalErr := refiner.SuggestGuardrailRefinements(ctx, scopeLabel, frictions)
+	s.router.RecordTelemetry(ctx, domain.TaskConsolidate, ev, evalStart, len(frictions), evalErr)
+	if evalErr != nil {
+		return nil, ev.Name(), evalErr
+	}
+
+	out := make([]domain.GuardrailRuleRefinement, 0, len(suggested))
+	for _, it := range suggested {
+		if domain.CheckSecurityGuard(it.RefinedContent) != "" {
+			continue
+		}
+		out = append(out, it)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].HitCount != out[j].HitCount {
+			return out[i].HitCount > out[j].HitCount
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out, ev.Name(), nil
+}
+
+func (s *Service) ApplyRuleRefinements(ctx context.Context, items []domain.GuardrailRuleRefinement) (int, error) {
+	if s == nil || s.mem == nil {
+		return 0, fmt.Errorf("guardrail service unavailable")
+	}
+	updated := 0
+	for _, it := range items {
+		txt := strings.TrimSpace(it.RefinedContent)
+		if it.ID <= 0 || txt == "" {
+			continue
+		}
+		if err := s.mem.UpdateMemoryFull(ctx, it.ID, "", "", nil, txt, nil); err != nil {
+			return updated, err
+		}
+		updated++
+	}
+	return updated, nil
 }

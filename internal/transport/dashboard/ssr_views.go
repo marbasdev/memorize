@@ -205,6 +205,15 @@ type ssrVerifyResultsData struct {
 	GuardrailLogs ssrGuardrailLogsData
 }
 
+type ssrGuardrailRefineModalData struct {
+	Lang        string
+	Scope       string
+	Scopes      []string
+	SourceLabel string
+	Error       string
+	Items       []domain.GuardrailRuleRefinement
+}
+
 var ssrTemplateFiles = []string{
 	"templates/layout.html",
 	"templates/login.html",

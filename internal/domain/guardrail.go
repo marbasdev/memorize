@@ -61,3 +61,23 @@ type GuardrailLogPage struct {
 	PageSize      int                  `json:"page_size"`
 	TotalPages    int                  `json:"total_pages"`
 }
+
+type GuardrailRuleFriction struct {
+	Rule        Fact     `json:"rule"`
+	HitCount    int      `json:"hit_count"`
+	Snippets    []string `json:"snippets"`
+	LastBlocked string   `json:"last_blocked,omitempty"`
+}
+
+type GuardrailRuleRefinement struct {
+	ID              int64    `json:"id"`
+	Scope           string   `json:"scope"`
+	Category        string   `json:"category"`
+	SubCategory     string   `json:"sub_category,omitempty"`
+	Pinned          bool     `json:"pinned"`
+	HitCount        int      `json:"hit_count"`
+	OriginalContent string   `json:"original_content"`
+	RefinedContent  string   `json:"refined_content"`
+	Reason          string   `json:"reason"`
+	SampleSnippets  []string `json:"sample_snippets,omitempty"`
+}

@@ -420,4 +420,12 @@ var koTranslations = map[string]string{
 	"import_sum_inserted":        "신규 추가",
 	"import_sum_overwritten":     "충돌 대체",
 	"import_sum_skipped":         "제외됨",
+	"btn_gr_refine":              "규칙 다듬기",
+	"gr_refine_title":            "차단 이력 기반 규칙 다듬기",
+	"gr_refine_desc":             "반복 차단된 가드레일 스니펫을 온디맨드로 분석해 핵심 제약은 유지하면서 대안 행동·예외 경계가 불분명한 규칙만 보강 문안을 제안합니다.",
+	"gr_refine_empty":            "보강이 필요한 충돌 패턴이 없습니다 — 현재 활성 규칙 문구가 충분히 명확합니다.",
+	"gr_refine_orig_snippets":    "원본 규칙 · 차단 스니펫 보기",
+	"gr_refine_hits":             "회 차단",
+	"gr_refine_foot":             "선택한 항목만 원문 ID를 유지한 채 수정되며 활성 세션에 즉시 전달됩니다.",
+	"btn_apply_gr_refine":        "선택 다듬기 반영",
 }

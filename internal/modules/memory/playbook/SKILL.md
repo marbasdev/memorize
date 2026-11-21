@@ -11,7 +11,8 @@ description: >-
 ## 1. Golden Filter: Commit vs. Drop
 - **Commit Before Mutating (`commit_memory` / `manage_memory`):** Decompose user decisions, resolved contextual approvals, and architectural choices into atomic behavioral items (`1` behavior = `1` item in `candidate_facts`) in the user's current chat language. Update existing `#ID` rules directly via `manage_memory(action="update", id=<ID>, content="...")`.
 - **Evolve Stale Rules Explicitly:** Never silently bypass or self-revoke active rules, and never force a worse design just to satisfy an outdated rule; explain why `#ID` (or a Team Rule) limits a better approach, get explicit user approval, and update/forget it first.
-- **Never Commit:** Code-obvious structure, unverified WIP experiments, raw debug logs, or micromanaged one-off UI/doc layout details that would ossify future redesigns.
+- **Trial-and-Error Discovery (Consent-Gated):** When a command, build, or test fails due to an undocumented repo or environment constraint and you verify a working fix, briefly ask in 1 line at the end of your reply whether to save that `[cause -> fix]` lesson as a rule, and call `commit_memory` only after approval.
+- **Never Commit:** Ordinary typos/syntax errors, code-obvious structure, unverified WIP experiments, raw debug logs, or micromanaged one-off UI/doc layout details that would ossify future redesigns.
 
 ## 2. Cold-Start Project Onboarding (`[ONBOARDING AVAILABLE]`)
 - **Ask First:** When `[ONBOARDING AVAILABLE]` appears, ask the user whether to onboard initial rules; if declined, call `manage_memory(action="skip_onboarding")`.

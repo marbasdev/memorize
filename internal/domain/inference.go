@@ -66,6 +66,10 @@ type RulePackPlanner interface {
 	FindRedundantLocalMemories(ctx context.Context, scope string, teamRules []TeamRule, localFacts []Fact) ([]RuleDuplicateSuggestion, error)
 }
 
+type GuardrailRuleRefiner interface {
+	SuggestGuardrailRefinements(ctx context.Context, scope string, items []GuardrailRuleFriction) ([]GuardrailRuleRefinement, error)
+}
+
 type EvalTask string
 
 const (
@@ -185,7 +189,8 @@ func EvaluatorSupportsTask(ev Evaluator, task EvalTask) bool {
 		_, c1 := ev.(Consolidator)
 		_, c2 := ev.(ConsolidationPlanner)
 		_, c3 := ev.(RulePackPlanner)
-		return c1 || c2 || c3
+		_, c4 := ev.(GuardrailRuleRefiner)
+		return c1 || c2 || c3 || c4
 	case TaskProgress:
 		_, c1 := ev.(ProgressCommitCategorizer)
 		_, c2 := ev.(ProgressMilestoneSummarizer)

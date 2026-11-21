@@ -420,4 +420,12 @@ var enTranslations = map[string]string{
 	"import_sum_inserted":        "Insert",
 	"import_sum_overwritten":     "Overwrite",
 	"import_sum_skipped":         "Skip",
+	"btn_gr_refine":              "Refine Rules",
+	"gr_refine_title":            "Refine Rules from Guardrail Friction",
+	"gr_refine_desc":             "Analyzes repeated blocked guardrail_logs snippets on demand and suggests clearer alternatives or scope boundaries without weakening core invariants.",
+	"gr_refine_empty":            "No wording friction found in blocked logs — active rules already look clear and actionable.",
+	"gr_refine_orig_snippets":    "Original rule & blocked snippets",
+	"gr_refine_hits":             "blocked",
+	"gr_refine_foot":             "Checked items update the rule in place and notify active sessions.",
+	"btn_apply_gr_refine":        "Apply Refinements",
 }

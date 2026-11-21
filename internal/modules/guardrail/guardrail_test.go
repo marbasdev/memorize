@@ -1268,3 +1268,102 @@ func TestRemoteServerTeamRuleDocsPerAccountIsolation(t *testing.T) {
 		t.Fatalf("expected alice SkipOnboarding NOT to mark bob's turn mutated in ServerMode")
 	}
 }
+
+type refineSpyEval struct {
+	stubEval
+	calls     int
+	lastItems []domain.GuardrailRuleFriction
+}
+
+func (r *refineSpyEval) SuggestGuardrailRefinements(_ context.Context, _ string, items []domain.GuardrailRuleFriction) ([]domain.GuardrailRuleRefinement, error) {
+	r.calls++
+	r.lastItems = append([]domain.GuardrailRuleFriction(nil), items...)
+	var out []domain.GuardrailRuleRefinement
+	for _, it := range items {
+		out = append(out, domain.GuardrailRuleRefinement{
+			ID:              it.Rule.ID,
+			Scope:           it.Rule.Scope,
+			Category:        it.Rule.Category,
+			SubCategory:     it.Rule.SubCategory,
+			Pinned:          it.Rule.Pinned,
+			HitCount:        it.HitCount,
+			OriginalContent: it.Rule.Content,
+			RefinedContent:  it.Rule.Content + " (대신 표준 헬퍼 사용)",
+			Reason:          "대안 명시",
+			SampleSnippets:  it.Snippets,
+		})
+	}
+	return out, nil
+}
+
+func TestGuardrailRuleRefinementsAggregationIsolationAndApply(t *testing.T) {
+	ctx := context.Background()
+	eval := &refineSpyEval{
+		stubEval: stubEval{
+			dec: domain.MutationDecision{
+				Category:          "architecture",
+				Tier:              "invariant",
+				IsPermanent:       0.95,
+				IsGlobalInvariant: 0.95,
+				Action:            "INSERT",
+				Confidence:        0.95,
+			},
+		},
+	}
+	st := newTestStack(t, ":memory:", eval)
+
+	// Zero LLM calls when no blocked logs exist.
+	emptyItems, _, err := st.gr.SuggestRuleRefinements(ctx, "project:demo")
+	if err != nil || len(emptyItems) != 0 || eval.calls != 0 {
+		t.Fatalf("expected 0 items and 0 LLM calls with no blocked logs, got items=%+v calls=%d err=%v", emptyItems, eval.calls, err)
+	}
+
+	if _, err := st.mem.CommitMemory(ctx, "직접 fmt.Println 로깅을 금지한다", "convention", "project:demo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.mem.CommitMemory(ctx, "외부 호출 시 타임아웃을 누락하지 않는다", "architecture", "project:demo"); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, snip := range []string{"fmt.Println(a)", "fmt.Println(b)", "fmt.Println(a)"} {
+		_, _ = st.gr.RecordGuardrailLog(ctx, domain.GuardrailLogInput{
+			Scope:       "project:demo",
+			Source:      "claude-pretool",
+			ToolName:    "Bash",
+			Blocked:     true,
+			ViolatedIDs: []int64{1},
+			PlanSnippet: snip,
+		})
+	}
+	_, _ = st.gr.RecordGuardrailLog(ctx, domain.GuardrailLogInput{
+		Scope:       "project:demo",
+		Source:      "claude-stop",
+		Blocked:     true,
+		ViolatedIDs: []int64{2},
+		PlanSnippet: "http.Get(url)",
+	})
+
+	items, engineName, err := st.gr.SuggestRuleRefinements(ctx, "project:demo")
+	if err != nil || engineName != "stub" || len(items) != 2 || eval.calls != 1 {
+		t.Fatalf("unexpected SuggestRuleRefinements: engine=%q calls=%d err=%v items=%+v", engineName, eval.calls, err, items)
+	}
+	if items[0].ID != 1 || items[0].HitCount != 3 || len(items[0].SampleSnippets) != 2 || items[1].ID != 2 || items[1].HitCount != 1 {
+		t.Fatalf("expected deduplicated snippets & HitCount DESC ordering, got: %+v", items)
+	}
+
+	sessCtx := domain.WithSessionID(ctx, "sess-refine-delta")
+	_, _ = st.mem.QuerySessionMemory(sessCtx, "sess-refine-delta", "check logging", "", "project:demo", false)
+
+	applied, err := st.gr.ApplyRuleRefinements(ctx, items[:1])
+	if err != nil || applied != 1 {
+		t.Fatalf("ApplyRuleRefinements failed: applied=%d err=%v", applied, err)
+	}
+	recs, _ := st.mem.GetRecordsByIDs(ctx, []int64{1})
+	if len(recs) != 1 || !recs[0].Pinned || !strings.Contains(recs[0].Content, "대신 표준 헬퍼 사용") {
+		t.Fatalf("expected rule #1 updated in place preserving Pinned=true, got: %+v", recs)
+	}
+	deltaOut, _ := st.mem.QuerySessionMemory(sessCtx, "sess-refine-delta", "check logging", "", "project:demo", false)
+	if !strings.Contains(deltaOut, "Updated #1") {
+		t.Fatalf("expected active session to receive in-place Updated #1 delta, got:\n%s", deltaOut)
+	}
+}

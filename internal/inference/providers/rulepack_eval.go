@@ -225,3 +225,92 @@ func (e *schemaEvaluator) shortenTrimmedRule(ctx context.Context, text string) s
 func sanitizeSingleLineRuleField(s string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
 }
+
+func (e *schemaEvaluator) SuggestGuardrailRefinements(ctx context.Context, scope string, items []domain.GuardrailRuleFriction) ([]domain.GuardrailRuleRefinement, error) {
+	if len(items) == 0 {
+		return nil, nil
+	}
+
+	byID := make(map[int64]domain.GuardrailRuleFriction, len(items))
+	var sb strings.Builder
+	fmt.Fprintf(&sb, `Scope: %s
+Inspect the active rules below together with real blocked action snippets from guardrail_logs.
+Suggest a clearer "refined_content" ONLY for rules where wording friction is evident:
+1. Missing actionable alternative: if a rule only says "do not use X" and agents repeatedly hit it, add the concrete approved alternative ("instead use Y") if evident from the rule/project context.
+2. Overbroad boundary: if a rule's phrasing is ambiguously broad compared to its clear intent, tighten its scope/condition without weakening any security or architectural invariant.
+Rules:
+- OMIT rules whose current wording is already clear and actionable (when the blocked snippet was simply a genuine violation that should stay blocked).
+- Write "refined_content" and "reason" in the EXACT SAME LANGUAGE as the original rule (never translate).
+- Keep "refined_content" a single concise sentence (<= 220 chars, no newlines) and "reason" <= 60 chars.
+- Never weaken core security, isolation, or safety constraints.
+
+Rules & Blocked Snippets:
+`, scope)
+
+	for _, it := range items {
+		byID[it.Rule.ID] = it
+		cat := it.Rule.Category
+		if it.Rule.SubCategory != "" {
+			cat += "/" + it.Rule.SubCategory
+		}
+		fmt.Fprintf(&sb, "- [#%d] (%s · %s · blocked %dx) %s\n", it.Rule.ID, it.Rule.Scope, cat, it.HitCount, it.Rule.Content)
+		for sIdx, snip := range it.Snippets {
+			fmt.Fprintf(&sb, "  snippet %d: %s\n", sIdx+1, sanitizeSingleLineRuleField(snip))
+		}
+	}
+
+	d := e.tr.Dialect()
+	itemSchema := d.obj(map[string]any{
+		"id":              map[string]any{"type": d.t("integer")},
+		"refined_content": map[string]any{"type": d.t("string")},
+		"reason":          map[string]any{"type": d.t("string")},
+	}, []string{"id", "refined_content", "reason"})
+	schema := d.obj(map[string]any{
+		"items": map[string]any{"type": d.t("array"), "items": itemSchema},
+	}, []string{"items"})
+
+	var parsed struct {
+		Items []struct {
+			ID             int64  `json:"id"`
+			RefinedContent string `json:"refined_content"`
+			Reason         string `json:"reason"`
+		} `json:"items"`
+	}
+	if _, err := e.tr.CallJSON(ctx, sb.String(), schema, &parsed); err != nil {
+		return nil, err
+	}
+
+	seen := make(map[int64]bool, len(parsed.Items))
+	out := make([]domain.GuardrailRuleRefinement, 0, len(parsed.Items))
+	for _, it := range parsed.Items {
+		if seen[it.ID] {
+			continue
+		}
+		src, ok := byID[it.ID]
+		if !ok {
+			continue
+		}
+		refined := sanitizeSingleLineRuleField(it.RefinedContent)
+		orig := sanitizeSingleLineRuleField(src.Rule.Content)
+		if refined == "" || refined == orig {
+			continue
+		}
+		if runes := []rune(refined); len(runes) > 260 {
+			refined = strings.TrimSpace(string(runes[:260]))
+		}
+		seen[it.ID] = true
+		out = append(out, domain.GuardrailRuleRefinement{
+			ID:              src.Rule.ID,
+			Scope:           src.Rule.Scope,
+			Category:        src.Rule.Category,
+			SubCategory:     src.Rule.SubCategory,
+			Pinned:          src.Rule.Pinned,
+			HitCount:        src.HitCount,
+			OriginalContent: src.Rule.Content,
+			RefinedContent:  refined,
+			Reason:          sanitizeSingleLineRuleField(it.Reason),
+			SampleSnippets:  src.Snippets,
+		})
+	}
+	return out, nil
+}

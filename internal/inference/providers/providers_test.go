@@ -768,4 +768,33 @@ func TestGeminiSchemaDialectAndLogprobsFallbackRetry(t *testing.T) {
 	if atomic.LoadInt32(&calls) != 2 || len(scored) != 1 || scored[0].Score != 4.7 || scored[0].Confidence < 0.85 {
 		t.Fatalf("expected 2 calls (400 retry -> 200) and score 4.7, got calls=%d scored=%+v", atomic.LoadInt32(&calls), scored)
 	}
+
+	t.Run("SuggestGuardrailRefinements", func(t *testing.T) {
+		refSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"{\"items\":[{\"id\":11,\"refined_content\":\"Go 심볼 탐색 시 단순 grep 대신 $(go env GOPATH)/bin/gopls를 사용한다\",\"reason\":\"대체 실행 경로 명시\"},{\"id\":12,\"refined_content\":\"동일 문구\",\"reason\":\"무변경 제외\"},{\"id\":999,\"refined_content\":\"없는 ID\",\"reason\":\"무시\"}]}"}]}}]}`))
+		}))
+		defer refSrv.Close()
+		t.Setenv("GEMINI_API_BASE", refSrv.URL)
+		refEval := NewGeminiAdapterConfig("test-key", "gemini-3.5-flash-lite")
+
+		frictions := []domain.GuardrailRuleFriction{
+			{
+				Rule:     domain.Fact{ID: 11, Scope: "global", Category: "convention", SubCategory: "workflow", Pinned: true, Content: "Go 심볼 탐색 시 단순 grep을 쓰지 않는다"},
+				HitCount: 4,
+				Snippets: []string{"Tool: run_command\nCommandLine: grep -rn Foo internal/"},
+			},
+			{
+				Rule:     domain.Fact{ID: 12, Scope: "global", Category: "security", Content: "동일 문구"},
+				HitCount: 1,
+			},
+		}
+		got, err := refEval.SuggestGuardrailRefinements(context.Background(), "global", frictions)
+		if err != nil {
+			t.Fatalf("SuggestGuardrailRefinements error: %v", err)
+		}
+		if len(got) != 1 || got[0].ID != 11 || got[0].HitCount != 4 || !got[0].Pinned || !strings.Contains(got[0].RefinedContent, "gopls") {
+			t.Fatalf("unexpected refinements: %+v", got)
+		}
+	})
 }

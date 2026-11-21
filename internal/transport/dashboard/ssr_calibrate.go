@@ -400,4 +400,88 @@ func registerSSRCalibrateRoutes(mux *http.ServeMux, d Deps) {
 			GuardrailLogs: grLogs,
 		})
 	}))
+
+	mux.HandleFunc("/ui/modal/guardrail-refine", getHX(func(w http.ResponseWriter, r *http.Request) {
+		lang := requestLang(r)
+		ctx := r.Context()
+		q := r.URL.Query()
+		sc := strings.TrimSpace(domain.FirstNonEmpty(q.Get("refine_scope"), q.Get("gr_scope"), q.Get("scope")))
+		writeHTMLTemplate(w, "modal_guardrail_refine", ssrGuardrailRefineModalData{
+			Lang:   lang,
+			Scope:  sc,
+			Scopes: resolveKnownScopes(ctx, d, sc),
+		})
+	}))
+
+	mux.HandleFunc("/ui/guardrail-logs/refine/suggest", postHX(func(w http.ResponseWriter, r *http.Request) {
+		lang := requestLang(r)
+		ctx := domain.WithAdminBypass(r.Context())
+		sc := strings.TrimSpace(domain.FirstNonEmpty(r.FormValue("refine_scope"), r.FormValue("gr_scope")))
+		items, srcLabel, err := d.Guardrail.SuggestRuleRefinements(ctx, sc)
+		view := ssrGuardrailRefineModalData{
+			Lang:        lang,
+			Scope:       sc,
+			SourceLabel: srcLabel,
+			Items:       items,
+		}
+		if err != nil {
+			view.Error = err.Error()
+		}
+		writeHTMLTemplate(w, "guardrail_refine_plan", view)
+	}))
+
+	mux.HandleFunc("/ui/guardrail-logs/refine/apply", postHX(func(w http.ResponseWriter, r *http.Request) {
+		lang := requestLang(r)
+		ctx := domain.WithAdminBypass(r.Context())
+		var items []domain.GuardrailRuleRefinement
+		for _, idxStr := range r.Form["item_idx"] {
+			idxStr = strings.TrimSpace(idxStr)
+			if idxStr == "" {
+				continue
+			}
+			id, err := strconv.ParseInt(strings.TrimSpace(r.FormValue("item_"+idxStr+"_id")), 10, 64)
+			if err != nil || id <= 0 {
+				continue
+			}
+			txt := strings.TrimSpace(r.FormValue("item_" + idxStr + "_content"))
+			if txt == "" {
+				continue
+			}
+			items = append(items, domain.GuardrailRuleRefinement{
+				ID:             id,
+				RefinedContent: txt,
+			})
+		}
+		updated, err := d.Guardrail.ApplyRuleRefinements(ctx, items)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		toast := langText(lang,
+			fmt.Sprintf("Refined %d rule(s) from guardrail friction", updated),
+			fmt.Sprintf("차단 이력 분석 기반 규칙 %d건 다듬기 반영 완료", updated),
+		)
+		r.Form.Set("gr_page", "1")
+		grView, err := buildGuardrailLogsView(r.Context(), d, lang, r.Form, false)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		body, err := renderSSRTemplate("guardrail_logs_section", grView)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if memView, mErr := buildMemoriesView(r.Context(), d, lang, url.Values{}, true); mErr == nil {
+			if memBody, rErr := renderSSRTemplate("memories_section", memView); rErr == nil {
+				body = append(body, []byte("\n<div class=\"card\" id=\"memoriesSection\" hx-swap-oob=\"innerHTML\">")...)
+				body = append(body, memBody...)
+				body = append(body, []byte("</div>")...)
+			}
+		}
+		setHXTriggers(w, toast, true, false)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+		_, _ = w.Write(body)
+	}))
 }

@@ -975,4 +975,53 @@ func TestTelemetryDashboardGuardrailAndReset(t *testing.T) {
 	if resetResp.StatusCode != http.StatusOK || !strings.Contains(resetHTML, "7d: 0 calls") || strings.Contains(resetHTML, `id="btnResetTelemetry"`) {
 		t.Fatalf("expected reset HTML to show 7d: 0 calls and omit reset button (status=%d):\n%s", resetResp.StatusCode, resetHTML)
 	}
+
+	// Verify Guardrail Refine modal -> suggest -> apply HTMX workflow & EN/KO i18n key parity.
+	for k := range enTranslations {
+		if _, ok := koTranslations[k]; !ok {
+			t.Fatalf("missing key %q in koTranslations", k)
+		}
+	}
+	for k := range koTranslations {
+		if _, ok := enTranslations[k]; !ok {
+			t.Fatalf("missing key %q in enTranslations", k)
+		}
+	}
+
+	if _, err := deps.Memory.CommitMemory(ctx, "Never use raw SQL in transport", "architecture", "project:demo"); err != nil {
+		t.Fatal(err)
+	}
+	recsBefore, err := deps.Memory.QueryRecordsPage(ctx, domain.RecordQuery{Scope: "project:demo", State: "active", Page: 1, PageSize: 10})
+	if err != nil || len(recsBefore.Records) == 0 {
+		t.Fatalf("QueryRecordsPage project:demo failed: %v (%+v)", err, recsBefore)
+	}
+	targetRuleID := recsBefore.Records[0].ID
+	if _, err := deps.Guardrail.RecordGuardrailLog(ctx, domain.GuardrailLogInput{
+		Scope:       "project:demo",
+		Source:      "claude-pretool",
+		ToolName:    "Edit",
+		Blocked:     true,
+		ViolatedIDs: []int64{targetRuleID},
+		PlanSnippet: "db.Query(\"SELECT * FROM memories\")",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	modCode, modHTML := doHX(t, http.MethodGet, ts.URL+"/ui/modal/guardrail-refine?gr_scope=project:demo", nil)
+	if modCode != http.StatusOK || !strings.Contains(modHTML, `id="grRefineDialog"`) {
+		t.Fatalf("GET /ui/modal/guardrail-refine failed (%d):\n%s", modCode, modHTML)
+	}
+	sugCode, sugHTML := doHX(t, http.MethodPost, ts.URL+"/ui/guardrail-logs/refine/suggest", url.Values{"refine_scope": {"project:demo"}})
+	if sugCode != http.StatusOK || !strings.Contains(sugHTML, "refined via dashboard") {
+		t.Fatalf("POST /ui/guardrail-logs/refine/suggest failed (%d):\n%s", sugCode, sugHTML)
+	}
+	appCode, appHTML := doHX(t, http.MethodPost, ts.URL+"/ui/guardrail-logs/refine/apply", url.Values{
+		"gr_scope":       {"project:demo"},
+		"item_idx":       {"0"},
+		"item_0_id":      {fmt.Sprintf("%d", targetRuleID)},
+		"item_0_content": {"Never use raw SQL in transport; call owning module service methods instead"},
+	})
+	if appCode != http.StatusOK || !strings.Contains(appHTML, `id="guardrailLogsSection"`) || !strings.Contains(appHTML, "call owning module service methods instead") {
+		t.Fatalf("POST /ui/guardrail-logs/refine/apply failed (%d):\n%s", appCode, appHTML)
+	}
 }

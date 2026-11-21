@@ -404,3 +404,14 @@ func (b *BatchEvaluator) FindRedundantLocalMemories(ctx context.Context, scope s
 	}
 	return out, nil
 }
+
+func (b *BatchEvaluator) SuggestGuardrailRefinements(ctx context.Context, scope string, items []domain.GuardrailRuleFriction) ([]domain.GuardrailRuleRefinement, error) {
+	ref, ok := b.base.(domain.GuardrailRuleRefiner)
+	if !ok {
+		return nil, errors.New("active evaluator does not support guardrail rule refinement")
+	}
+	if len(items) == 0 {
+		return nil, nil
+	}
+	return ref.SuggestGuardrailRefinements(ctx, scope, items)
+}
