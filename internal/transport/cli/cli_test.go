@@ -951,19 +951,13 @@ func TestInstallAndUninstallCLI(t *testing.T) {
 	if err := os.MkdirAll(subDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	origWD, err := os.Getwd()
+	t.Chdir(subDir)
+
+	wdNow, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chdir(subDir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(origWD) })
-
-	realRepoRoot, _ := filepath.EvalSymlinks(repoDir)
-	if realRepoRoot == "" {
-		realRepoRoot = repoDir
-	}
+	realRepoRoot := filepath.Dir(filepath.Dir(wdNow))
 
 	t.Run("ClaudeDesktopOSPaths", func(t *testing.T) {
 		envMap := map[string]string{

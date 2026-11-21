@@ -1366,4 +1366,23 @@ func TestGuardrailRuleRefinementsAggregationIsolationAndApply(t *testing.T) {
 	if !strings.Contains(deltaOut, "Updated #1") {
 		t.Fatalf("expected active session to receive in-place Updated #1 delta, got:\n%s", deltaOut)
 	}
+
+	t.Run("CodeModeREPLAndWorkflowScriptExtraction", func(t *testing.T) {
+		replPlan := extractPlanFromEvent(decodeHookEvent("claude-pretool", []byte(`{
+			"session_id":"s-repl",
+			"tool_name":"REPL",
+			"tool_input":{"code":"await bash('git push --force origin main')"}
+		}`)))
+		if !strings.Contains(replPlan, "Tool: REPL") || !strings.Contains(replPlan, "code: await bash('git push --force origin main')") {
+			t.Fatalf("expected REPL code extracted cleanly, got:\n%s", replPlan)
+		}
+
+		wfPlan := extractPlanFromEvent(decodeHookEvent("antigravity-pretool", []byte(`{
+			"conversationId":"conv-wf",
+			"toolCall":{"name":"run_workflow","args":{"Script":"call_tool('run_command', {'CommandLine':'rm -rf /tmp/x'})"}}
+		}`)))
+		if !strings.Contains(wfPlan, "Tool: run_workflow") || !strings.Contains(wfPlan, "Script: call_tool(") {
+			t.Fatalf("expected run_workflow Script extracted cleanly, got:\n%s", wfPlan)
+		}
+	})
 }

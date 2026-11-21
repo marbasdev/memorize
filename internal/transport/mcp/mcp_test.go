@@ -193,7 +193,7 @@ func TestMCPToolHandlersRoundtrip(t *testing.T) {
 		"scope":           scope,
 		"category":        "architecture",
 		"sub_category":    "testing",
-		"candidate_fact":  "Always keep SSR HTML templates under 800 lines.",
+		"candidate_fact":  "Always validate loopback Origin headers on JSON mutations.",
 		"candidate_facts": []any{"Never expose internal credentials in public docs."},
 	}))
 	if err != nil || res.IsError {
@@ -230,8 +230,8 @@ func TestMCPToolHandlersRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify forbidden err: %v", err)
 	}
-	if !strings.Contains(mcpText(t, res), "VIOLAT") && !strings.Contains(strings.ToUpper(mcpText(t, res)), "WARN") {
-		t.Logf("verify forbidden output: %s", mcpText(t, res))
+	if !strings.Contains(strings.ToUpper(mcpText(t, res)), "VIOLAT") && !strings.Contains(strings.ToUpper(mcpText(t, res)), "WARN") {
+		t.Fatalf("expected violation output on forbidden plan, got: %s", mcpText(t, res))
 	}
 
 	res, err = manageFn(ctx, mcpReq(map[string]any{
@@ -261,7 +261,7 @@ func TestMCPToolHandlersRoundtrip(t *testing.T) {
 		"scope":    scope,
 		"category": "architecture/testing",
 		"ids":      []any{float64(firstID), float64(secondID)},
-		"content":  "Keep templates modular under 800 lines and keep credentials private.",
+		"content":  "Validate loopback Origin headers and keep internal credentials private.",
 		"pinned":   true,
 	}))
 	if err != nil || res.IsError {
@@ -270,7 +270,7 @@ func TestMCPToolHandlersRoundtrip(t *testing.T) {
 	afterPage, _ := deps.Memory.QueryRecordsPage(ctx, domain.RecordQuery{Scope: scope, State: "active", PageSize: 100})
 	var consID int64
 	for _, r := range afterPage.Records {
-		if r.Active && strings.Contains(r.Content, "Keep templates modular") {
+		if r.Active && strings.Contains(r.Content, "Validate loopback Origin headers") {
 			consID = r.ID
 		}
 	}
@@ -448,7 +448,7 @@ func TestMCPTeamRulesToolWorkflow(t *testing.T) {
 		"action":    "add",
 		"scope":     "project:teamrepo",
 		"repo_path": repoDir,
-		"content":   "Always keep UI templates below 800 lines",
+		"content":   "Always run static builds with CGO_ENABLED=0",
 		"category":  "architecture",
 	}))
 	if err != nil {
@@ -468,7 +468,7 @@ func TestMCPTeamRulesToolWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 	listOut := mcpText(t, listRes)
-	if !strings.Contains(listOut, "1. (architecture)") || !strings.Contains(listOut, "@Nick-Author") || !strings.Contains(listOut, "Always keep UI templates below 800 lines") ||
+	if !strings.Contains(listOut, "1. (architecture)") || !strings.Contains(listOut, "@Nick-Author") || !strings.Contains(listOut, "Always run static builds with CGO_ENABLED=0") ||
 		strings.Contains(listOut, "[invariant]") || strings.Contains(listOut, "[rule]") {
 		t.Fatalf("unexpected list output:\n%s", listOut)
 	}
@@ -479,7 +479,7 @@ func TestMCPTeamRulesToolWorkflow(t *testing.T) {
 		"repo_path":    repoDir,
 		"id":           float64(1),
 		"sub_category": "ui",
-		"content":      "Keep custom UI templates strictly below 800 lines",
+		"content":      "Keep static builds strictly CGO_ENABLED=0 across OS targets",
 	}))
 	if err != nil {
 		t.Fatal(err)

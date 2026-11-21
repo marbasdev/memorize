@@ -165,7 +165,7 @@ func extractPlanFromEvent(ev NormalizedHookEvent) string {
 	if tName != "" {
 		parts = append(parts, "Tool: "+tName)
 	}
-	for _, k := range []string{"file_path", "Path", "path", "command", "CommandLine", "content", "Content", "new_string", "Replacement", "description"} {
+	for _, k := range []string{"file_path", "Path", "path", "ScriptPath", "command", "CommandLine", "code", "script", "Script", "content", "Content", "new_source", "new_string", "Replacement", "description"} {
 		if v, ok := in[k]; ok {
 			if s, ok := v.(string); ok {
 				if k == "Replacement" {

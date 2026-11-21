@@ -106,7 +106,7 @@ _외부 DB나 Python · Node 런타임 없이 **단일 로컬 Go 실행 파일**
 </details>
 
 <details>
-<summary><strong>가드레일</strong> — 실행 전 명령·계획 검사 · PreToolUse/Stop/pre-commit 감사 로그</summary>
+<summary><strong>가드레일</strong> — 실행 전 명령·계획 검사 · 차단 이력 기반 AI 규칙 다듬기 · 감사 로그</summary>
 
 ![웹 콘솔 가드레일 탭 시뮬레이션](./assets/tab-guardrails.ko.svg)
 

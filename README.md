@@ -106,7 +106,7 @@ When you open an existing Git repository with `0` stored rules, `praxis` offers 
 </details>
 
 <details>
-<summary><strong>Guardrails</strong> — Pre-Execution Plan Verifier · PreToolUse / Stop / pre-commit Audit Log</summary>
+<summary><strong>Guardrails</strong> — Pre-Execution Plan Verifier · AI Friction Rule Refiner · Audit Log</summary>
 
 ![Web Console Guardrails Tab Simulation](./assets/tab-guardrails.svg)
 

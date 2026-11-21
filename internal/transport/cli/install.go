@@ -246,13 +246,11 @@ func writeJSONObjectAtomically(path string, root map[string]any, perm os.FileMod
 		_ = tmp.Close()
 		return err
 	}
-	if err := tmp.Chmod(perm); err != nil {
-		_ = tmp.Close()
-		return err
-	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
+	// Close before os.Chmod: (*os.File).Chmod calls syscall.Fchmod which returns EWINDOWS on Windows.
+	_ = os.Chmod(tmpName, perm)
 	if err := os.Rename(tmpName, path); err != nil {
 		return err
 	}

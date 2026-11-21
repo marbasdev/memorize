@@ -17,7 +17,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "run_command|edit_file|write_file|write_to_file|multi_replace_file_content|replace_file_content|Bash|Edit|Write",
+        "matcher": "run_command|run_workflow|edit_file|write_file|write_to_file|multi_replace_file_content|replace_file_content|Bash|Edit|MultiEdit|NotebookEdit|Write|REPL",
         "hooks": [
           {
             "type": "command",
