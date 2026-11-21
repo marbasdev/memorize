@@ -58,7 +58,9 @@
         {{.ProviderName}}{{if gt .CustomRouteCount 0}} · {{if eq .Lang "ko"}}개별 {{.CustomRouteCount}}건{{else}}+{{.CustomRouteCount}} custom{{end}}{{end}}
       </span>
     </div>
-    <button type="submit" form="activeEngineForm" class="btn btn-primary btn-sm" id="btnApplyEngine">{{t .Lang "btn_apply_engine"}}</button>
+    {{if and (eq .ViewedProvider "gguf") (ne .EffectiveProvider "gguf") .LocalModels.Supported (or .LocalModels.ServerRunning (gt (len .LocalModels.Installed) 0))}}
+      <button type="submit" form="activeEngineForm" class="btn btn-primary btn-sm" id="btnApplyEngine">{{t .Lang "btn_apply_engine"}}</button>
+    {{end}}
   </div>
 
   {{template "engine_telemetry_panel" .}}
@@ -211,7 +213,7 @@
           <div class="adv-body">
             <div style="display:flex;gap:0.4rem;align-items:center;">
               <input name="gguf_endpoint" class="input" style="flex:1;font-family:var(--mono);font-size:0.76rem;" value="{{index .Config "gguf_endpoint"}}" aria-label="GGUF Endpoint">
-              <button type="submit" class="btn btn-sm">{{t .Lang "btn_save"}}</button>
+              <button type="submit" class="btn btn-sm">{{t .Lang "btn_save_engine"}}</button>
             </div>
           </div>
         </details>
@@ -307,7 +309,7 @@
       <button type="button" class="btn"
         hx-post="/ui/engines/discover-gemini" hx-include="#activeEngineForm" hx-vals='{"tier":"{{.GeminiTier}}"}'
         hx-target="#enginesSection" hx-swap="innerHTML">{{t .Lang "btn_fetch_models"}}</button>
-      <button type="submit" class="btn btn-primary">{{t .Lang "btn_save"}}</button>
+      <button type="submit" class="btn btn-primary">{{t .Lang "btn_save_engine"}}</button>
     </form>
 
     <div class="pills" id="geminiTierTabs">
@@ -378,7 +380,7 @@
       <button type="button" class="btn"
         hx-post="/ui/engines/discover-jev" hx-include="#activeEngineForm"
         hx-target="#enginesSection" hx-swap="innerHTML">{{t .Lang "btn_probe_models"}}</button>
-      <button type="submit" class="btn btn-primary">{{t .Lang "btn_save"}}</button>
+      <button type="submit" class="btn btn-primary">{{t .Lang "btn_save_engine"}}</button>
     </form>
 
     <div class="model-list" id="jevCatalog">
@@ -432,13 +434,14 @@
       <input name="local_model_url" class="input" style="flex:1;min-width:240px;font-family:var(--mono);font-size:0.79rem;" value="{{index .Config "local_model_url"}}" aria-label="OpenAI-Compatible Base URL">
       <input name="local_model_name" class="input" style="width:180px;font-family:var(--mono);font-size:0.79rem;" value="{{index .Config "local_model_name"}}" placeholder="Model (e.g. qwen3:4b)" aria-label="Model Name">
       <input name="local_api_key" type="password" class="input" style="width:210px;" placeholder="{{t .Lang "ph_local_key"}}" aria-label="Optional API Key">
-      <button type="submit" class="btn btn-primary">{{t .Lang "btn_save"}}</button>
+      <button type="submit" class="btn btn-primary">{{t .Lang "btn_save_engine"}}</button>
     </form>
   </div>
   {{end}}
 
   <!-- ==================== PER-FEATURE vs BULK MODEL ROUTING ==================== -->
-  <div id="taskRoutingSection" class="sub-panel" style="margin-top:0.95rem;" x-data='{ genProv: {{jsonAttr .GenProviderVal}} }'>
+  <div id="taskRoutingSection" class="sub-panel" style="margin-top:0.95rem;"
+    x-data='{ genProv: {{jsonAttr .GenProviderVal}}, genMod: {{jsonAttr .GenModelVal}}, genMap: {{jsonAttr .GenModelsByProv}} }'>
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
       <div style="display:flex;align-items:center;gap:0.45rem;flex-wrap:wrap;">
         <h3>{{t .Lang "route_title"}}</h3>
@@ -454,13 +457,6 @@
     </div>
     <div style="font-size:0.77rem;color:var(--muted);line-height:1.48;">{{t .Lang "route_desc"}}</div>
 
-    <datalist id="genModelSuggestions">
-      {{range .KnownGenModels}}<option value="{{.}}">{{end}}
-    </datalist>
-    <datalist id="allModelSuggestions">
-      {{range .KnownAllModels}}<option value="{{.}}">{{end}}
-    </datalist>
-
     <form id="taskRoutingForm" hx-post="/ui/engines/routing" hx-target="#enginesSection" hx-swap="innerHTML" style="display:flex;flex-direction:column;gap:0.65rem;">
       <input type="hidden" name="view" value="{{.ViewedProvider}}">
       <input type="hidden" name="tw" value="{{.TelemetryViz.Window}}">
@@ -473,15 +469,25 @@
         </div>
         <div style="font-size:0.74rem;color:var(--muted);">{{t .Lang "gen_fallback_desc"}}</div>
         <div style="display:flex;gap:0.45rem;flex-wrap:wrap;align-items:center;">
-          <select name="gen_provider" class="select" style="min-width:210px;" x-model="genProv" aria-label="Generative Companion Provider">
+          <select name="gen_provider" class="select" style="min-width:210px;" x-model="genProv" @change="genMod = ''" aria-label="Generative Companion Provider">
             {{range .GenProviderOptions}}
               <option value="{{.ID}}" {{if eq $.GenProviderVal .ID}}selected{{end}}>{{.Label}}</option>
             {{end}}
           </select>
-          <input name="gen_model" class="input" list="genModelSuggestions" style="flex:1;min-width:200px;font-family:var(--mono);font-size:0.77rem;"
-            value="{{.GenModelVal}}" :disabled="genProv === ''"
-            placeholder="{{if eq .Lang "ko"}}모델명 (비우면 선택 엔진의 기본 생성 모델){{else}}Model override (blank = provider default generative model){{end}}"
-            aria-label="Generative Companion Model">
+          <div class="combo-box" style="flex:1;min-width:200px;" x-data="{ open: false }" @click.outside="open = false">
+            <input name="gen_model" class="input" autocomplete="off" style="font-family:var(--mono);font-size:0.77rem;"
+              x-model="genMod" @focus="if (genProv !== '') open = true" @click="if (genProv !== '') open = true"
+              @keydown.escape="open = false" @keydown.tab="open = false" :disabled="genProv === ''"
+              placeholder="{{if eq .Lang "ko"}}모델명 (비우면 선택 엔진의 기본 생성 모델){{else}}Model override (blank = provider default generative model){{end}}"
+              aria-label="Generative Companion Model">
+            <button type="button" class="combo-btn" @click.stop="if (genProv !== '') open = !open" :disabled="genProv === ''" tabindex="-1">▾</button>
+            <div class="combo-menu" :class="{ 'open': open && genProv !== '' && (genMod.trim().length > 0 || providerModelsFor(genMap, genProv, genMod).length > 0) }">
+              <div class="combo-item" x-show="genMod.trim().length > 0" @click="genMod = ''; open = false;" style="color:var(--muted);font-style:italic;">— Clear</div>
+              <template x-for="item in providerModelsFor(genMap, genProv, genMod)" :key="item">
+                <div class="combo-item" :class="{ 'active': item === genMod }" @click="genMod = item; open = false;"><span x-text="item" style="font-family:var(--mono);font-size:0.75rem;"></span></div>
+              </template>
+            </div>
+          </div>
         </div>
       </div>
       {{end}}
@@ -520,7 +526,7 @@
 {{end}}
 
 {{define "engine_task_route_row"}}
-<div class="model-row" x-data='{ rp: {{jsonAttr .RouteProvider}} }'>
+<div class="model-row" x-data='{ rp: {{jsonAttr .RouteProvider}}, rm: {{jsonAttr .RouteModel}}, rmMap: {{jsonAttr .ModelsByProv}} }'>
   <div style="flex:1.2;min-width:210px;">
     <div style="display:flex;align-items:center;gap:0.35rem;flex-wrap:wrap;">
       <strong style="font-size:0.81rem;">{{.Label}}</strong>
@@ -550,17 +556,26 @@
     {{end}}
   </div>
   <div style="display:flex;gap:0.35rem;flex-wrap:wrap;align-items:center;flex:1.4;min-width:270px;justify-content:flex-end;">
-    <select name="task_{{.Task}}_provider" class="select" style="min-width:165px;font-size:0.77rem;" x-model="rp" aria-label="{{.Label}} Provider">
+    <select name="task_{{.Task}}_provider" class="select" style="min-width:165px;font-size:0.77rem;" x-model="rp" @change="rm = ''" aria-label="{{.Label}} Provider">
       {{range .ProviderOptions}}
         <option value="{{.ID}}" {{if eq .ID $.RouteProvider}}selected{{end}}>{{.Label}}</option>
       {{end}}
     </select>
-    <input name="task_{{.Task}}_model" class="input"
-      list="{{if .RequiresGenerative}}genModelSuggestions{{else}}allModelSuggestions{{end}}"
-      style="width:175px;font-family:var(--mono);font-size:0.75rem;"
-      value="{{.RouteModel}}" :disabled="rp === ''"
-      placeholder="{{if eq .Lang "ko"}}기본 모델{{else}}provider default{{end}}"
-      aria-label="{{.Label}} Model">
+    <div class="combo-box" style="width:185px;" x-data="{ open: false }" @click.outside="open = false">
+      <input name="task_{{.Task}}_model" class="input" autocomplete="off"
+        style="font-family:var(--mono);font-size:0.75rem;"
+        x-model="rm" @focus="if (rp !== '') open = true" @click="if (rp !== '') open = true"
+        @keydown.escape="open = false" @keydown.tab="open = false" :disabled="rp === ''"
+        placeholder="{{if eq .Lang "ko"}}기본 모델{{else}}provider default{{end}}"
+        aria-label="{{.Label}} Model">
+      <button type="button" class="combo-btn" @click.stop="if (rp !== '') open = !open" :disabled="rp === ''" tabindex="-1">▾</button>
+      <div class="combo-menu" :class="{ 'open': open && rp !== '' && (rm.trim().length > 0 || providerModelsFor(rmMap, rp, rm).length > 0) }">
+        <div class="combo-item" x-show="rm.trim().length > 0" @click="rm = ''; open = false;" style="color:var(--muted);font-style:italic;">— Clear</div>
+        <template x-for="item in providerModelsFor(rmMap, rp, rm)" :key="item">
+          <div class="combo-item" :class="{ 'active': item === rm }" @click="rm = item; open = false;"><span x-text="item" style="font-family:var(--mono);font-size:0.74rem;"></span></div>
+        </template>
+      </div>
+    </div>
     <span class="badge {{if .IsHeuristic}}b-warn{{else if ne .RouteProvider ""}}b-accent{{else}}b-ok{{end}}"
       style="font-family:var(--mono);font-size:0.69rem;min-width:120px;text-align:center;" title="{{t .Lang "route_lbl_effective"}}">{{.EffectiveEngine}}</span>
   </div>

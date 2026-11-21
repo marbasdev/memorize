@@ -7,7 +7,7 @@
     <div class="dlg-head">
       <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
         <strong id="teamPubTitle">{{t .Lang "team_modal_title"}}</strong>
-        {{if gt .LocalMemoryID 0}}<span class="badge b-accent">from #{{.LocalMemoryID}}</span>{{end}}
+        {{if gt .LocalMemoryID 0}}<span class="badge b-accent">{{t .Lang "team_from_mem"}}{{.LocalMemoryID}}</span>{{end}}
         {{if .Proposal.AddedBy}}<span class="badge b-muted" style="font-family:var(--mono);">{{.Proposal.AddedBy}}</span>{{end}}
       </div>
       <button type="button" class="btn btn-sm" @click="$el.closest('dialog').close()">{{t .Lang "btn_close"}}</button>
@@ -17,7 +17,7 @@
       <div style="font-size:0.76rem;color:var(--muted);">{{t .Lang "team_modal_desc"}}</div>
       {{if .LocalContent}}
         <div class="sub-panel" style="padding:0.5rem 0.65rem;font-size:0.77rem;">
-          <strong style="color:var(--muted);">Source #{{.LocalMemoryID}}:</strong> {{.LocalContent}}
+          <strong style="color:var(--muted);">{{t .Lang "team_source_mem"}}{{.LocalMemoryID}}:</strong> {{.LocalContent}}
         </div>
       {{end}}
 
@@ -89,7 +89,7 @@
     </div>
 
     <div class="dlg-foot">
-      <button type="button" class="btn btn-sm" @click="$el.closest('dialog').close()">{{t .Lang "btn_close"}}</button>
+      <button type="button" class="btn btn-sm" @click="$el.closest('dialog').close()">{{t .Lang "btn_cancel"}}</button>
       <button type="submit" class="btn btn-primary btn-sm">{{t .Lang "team_btn_publish"}}</button>
     </div>
   </form>
@@ -148,7 +148,7 @@
     </div>
 
     <div class="dlg-foot">
-      <button type="button" class="btn btn-sm" @click="$el.closest('dialog').close()">{{t .Lang "btn_close"}}</button>
+      <button type="button" class="btn btn-sm" @click="$el.closest('dialog').close()">{{t .Lang "btn_cancel"}}</button>
       <button type="submit" class="btn btn-primary btn-sm">{{t .Lang "team_btn_save"}}</button>
     </div>
   </form>
@@ -191,13 +191,13 @@
                 <input type="hidden" name="action_{{.LocalMemoryID}}" value="trim">
               {{end}}
             </div>
-            <div style="font-size:0.78rem;"><strong>Local:</strong> {{.LocalContent}}</div>
+            <div style="font-size:0.78rem;"><strong>{{t $.Lang "team_dupes_local_lbl"}}</strong> {{.LocalContent}}</div>
             <div style="font-size:0.75rem;color:var(--muted);">
-              <strong>Team Rule:</strong> {{.TeamRuleTitle}}{{if .Reason}} — {{.Reason}}{{end}}
+              <strong>{{t $.Lang "team_dupes_rule_lbl"}}</strong> {{.TeamRuleTitle}}{{if .Reason}} — {{.Reason}}{{end}}
             </div>
             {{if eq .Kind "partial_overlap"}}
               <div class="field-col">
-                <label style="font-size:0.72rem;">Trimmed Local Content (&lt;= 180 chars)</label>
+                <label style="font-size:0.72rem;">{{t $.Lang "team_dupes_trim_lbl"}}</label>
                 <textarea name="trimmed_{{.LocalMemoryID}}" rows="2" maxlength="180">{{.TrimmedContent}}</textarea>
               </div>
             {{end}}
@@ -207,7 +207,7 @@
     </div>
 
     <div class="dlg-foot">
-      <button type="button" class="btn btn-sm" @click="$el.closest('dialog').close()">{{t .Lang "btn_close"}}</button>
+      <button type="button" class="btn btn-sm" @click="$el.closest('dialog').close()">{{t .Lang "btn_cancel"}}</button>
       {{if .Suggestions}}
         <button type="submit" class="btn btn-primary btn-sm">{{t .Lang "team_btn_apply_dupes"}}</button>
       {{end}}

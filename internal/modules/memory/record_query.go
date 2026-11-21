@@ -168,6 +168,7 @@ func scanMemoryRecordRows(rows *sql.Rows) ([]domain.MemoryRecord, error) {
 		r.Tags = parseTagStr(tagStr)
 		r.Pinned = pin == 1
 		r.Active = act == 1
+		r.CanUndo = !r.Active
 		if sup.Valid {
 			v := sup.Int64
 			r.SupersededBy = &v
@@ -209,6 +210,9 @@ func (s *Service) attachRecordReplaces(ctx context.Context, out []domain.MemoryR
 		}
 	}
 	for i := range out {
+		if len(childByParent[out[i].ID]) > 0 {
+			out[i].CanUndo = true
+		}
 		seen := make(map[string]bool, len(out[i].Replaces))
 		for _, ex := range out[i].Replaces {
 			seen[ex] = true

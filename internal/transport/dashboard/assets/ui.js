@@ -430,20 +430,24 @@
     },
 
     exportMemories(selectedOnly) {
-      const params = new URLSearchParams();
-      if (selectedOnly && this.selectedIDs.length > 0) {
-        params.set('ids', this.selectedIDs.join(','));
-      } else {
-        const form = document.getElementById('memoryFilterForm');
-        if (form) {
-          for (const [k, v] of new FormData(form).entries()) {
-            if (v && k !== 'page' && k !== 'page_size') params.set(k, String(v));
-          }
-        }
-      }
-      window.location.href = '/ui/memories/export?' + params.toString();
+      window.exportPraxisMemories(selectedOnly, this.selectedIDs);
     }
   });
+
+  window.exportPraxisMemories = (selectedOnly, selectedIDs) => {
+    const params = new URLSearchParams();
+    if (selectedOnly && Array.isArray(selectedIDs) && selectedIDs.length > 0) {
+      params.set('ids', selectedIDs.join(','));
+    } else {
+      const form = document.getElementById('memoryFilterForm');
+      if (form) {
+        for (const [k, v] of new FormData(form).entries()) {
+          if (v && k !== 'page' && k !== 'page_size') params.set(k, String(v));
+        }
+      }
+    }
+    window.location.href = '/ui/memories/export?' + params.toString();
+  };
 
   window.comboBox = (items, initialVal, disabled) => ({
     items: Array.isArray(items) ? items : [],
@@ -455,6 +459,13 @@
       this.open = false;
     }
   });
+
+  window.providerModelsFor = (modelMap, prov, val) => {
+    const list = (modelMap && prov && Array.isArray(modelMap[prov])) ? modelMap[prov] : [];
+    const q = String(val || '').trim().toLowerCase();
+    if (!q || list.some(x => String(x).toLowerCase() === q)) return list;
+    return list.filter(x => String(x).toLowerCase().includes(q));
+  };
 
   window.catPresetsModal = initialMap => ({
     rows: Object.entries(initialMap || {})

@@ -52,8 +52,7 @@ type ssrEnginesData struct {
 	GenProviderVal       string
 	GenModelVal          string
 	GenEffective         string
-	KnownGenModels       []string
-	KnownAllModels       []string
+	GenModelsByProv      map[string][]string
 	GenProviderOptions   []ssrTabOption
 	TaskRoutes           []ssrTaskRouteRow
 	Telemetry            domain.EvalTelemetryReport
@@ -71,6 +70,7 @@ type ssrTaskRouteRow struct {
 	EffectiveEngine    string
 	IsHeuristic        bool
 	ProviderOptions    []ssrTabOption
+	ModelsByProv       map[string][]string
 	Stats              domain.EvalTaskStats
 }
 
@@ -367,6 +367,16 @@ func buildEnginesView(ctx context.Context, d Deps, lang string, q url.Values, ov
 		detectedLocal = discovery.ProbeLocalInferenceServers(ctx)
 	}
 
+	genModelsByProv := buildProviderModelMap(gemModels, jev.models, lm, detectedLocal, cfg, true)
+	allModelsByProv := buildProviderModelMap(gemModels, jev.models, lm, detectedLocal, cfg, false)
+	for i := range taskRows {
+		if taskRows[i].RequiresGenerative {
+			taskRows[i].ModelsByProv = genModelsByProv
+		} else {
+			taskRows[i].ModelsByProv = allModelsByProv
+		}
+	}
+
 	return ssrEnginesData{
 		Lang:                 lang,
 		EngineSetupWarning:   setupWarn,
@@ -409,8 +419,7 @@ func buildEnginesView(ctx context.Context, d Deps, lang string, q url.Values, ov
 		GenProviderVal:     cfg["gen_provider"],
 		GenModelVal:        cfg["gen_model"],
 		GenEffective:       genEff,
-		KnownGenModels:     buildKnownModelSuggestions(gemModels, lm, cfg, true),
-		KnownAllModels:     buildKnownModelSuggestions(gemModels, lm, cfg, false),
+		GenModelsByProv:    genModelsByProv,
 		GenProviderOptions: genOnlyOpts,
 		TaskRoutes:         taskRows,
 		Telemetry:          evalTelemetry,
@@ -418,37 +427,64 @@ func buildEnginesView(ctx context.Context, d Deps, lang string, q url.Values, ov
 	}
 }
 
-func buildKnownModelSuggestions(gemModels []discovery.GeminiModelOption, lm localmodel.StatusSnapshot, cfg map[string]string, generativeOnly bool) []string {
-	seen := map[string]bool{}
-	var out []string
-	add := func(id string) {
+func buildProviderModelMap(
+	gemModels []discovery.GeminiModelOption,
+	jevModels []discovery.SystemOneModelOption,
+	lm localmodel.StatusSnapshot,
+	detectedLocal []discovery.DetectedLocalServer,
+	cfg map[string]string,
+	generativeOnly bool,
+) map[string][]string {
+	out := map[string][]string{}
+	seen := map[string]map[string]bool{}
+	add := func(prov, id string) {
 		id = strings.TrimSpace(id)
-		if id == "" || seen[id] {
+		if prov == "" || id == "" {
 			return
 		}
-		if generativeOnly && domain.IsDecisionOnlySpec("", id) {
+		if generativeOnly && domain.IsDecisionOnlySpec(prov, id) {
 			return
 		}
-		seen[id] = true
-		out = append(out, id)
+		if seen[prov] == nil {
+			seen[prov] = map[string]bool{}
+		}
+		if seen[prov][id] {
+			return
+		}
+		seen[prov][id] = true
+		out[prov] = append(out[prov], id)
 	}
 	for _, m := range gemModels {
 		if generativeOnly && m.DecisionOnly {
 			continue
 		}
-		add(m.ID)
+		add("gemini", m.ID)
 	}
-	add(cfg["gemini_model"])
-	add(cfg["gen_model"])
-	for _, inst := range lm.Installed {
-		add(inst.FileName)
-	}
-	add(cfg[config.CfgGGUFModel])
-	add(cfg["local_model_name"])
+	add("gemini", cfg["gemini_model"])
 	if !generativeOnly {
-		add("gemini-decision-1")
-		add("jev-latest")
-		add(cfg["jev_model"])
+		add("gemini", "gemini-decision-1")
+	}
+	for _, inst := range lm.Installed {
+		add("gguf", inst.FileName)
+	}
+	add("gguf", cfg[config.CfgGGUFModel])
+	add("local", cfg["local_model_name"])
+	for _, srv := range detectedLocal {
+		if srv.Provider == "local" {
+			for _, m := range srv.Models {
+				add("local", m)
+			}
+		}
+	}
+	if gp := strings.TrimSpace(cfg["gen_provider"]); gp != "" {
+		add(gp, cfg["gen_model"])
+	}
+	if !generativeOnly {
+		for _, m := range jevModels {
+			add("jev", m.ID)
+		}
+		add("jev", "jev-latest")
+		add("jev", cfg["jev_model"])
 	}
 	return out
 }

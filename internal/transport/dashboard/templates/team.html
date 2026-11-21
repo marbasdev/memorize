@@ -5,12 +5,12 @@
       <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
         <h2 style="margin:0;font-size:1.02rem;">{{t .Lang "tab_team"}}</h2>
         {{if gt .PendingConflicts 0}}
-          <span class="badge b-danger">{{.PendingConflicts}} conflict(s)</span>
+          <span class="badge b-danger">{{.PendingConflicts}}{{if ne .Lang "ko"}} {{end}}{{t .Lang "team_conflicts_cnt"}}</span>
         {{end}}
         {{if .ShortHash}}
           <span class="badge b-muted" style="font-family:var(--mono);" title="{{.FileHash}}">#{{.ShortHash}}</span>
         {{end}}
-        <span class="badge b-accent">{{.TotalRules}} rules</span>
+        <span class="badge b-accent">{{.TotalRules}}{{if ne .Lang "ko"}} {{end}}{{t .Lang "team_rules_cnt"}}</span>
         {{if and .Author .CanAdmin}}
           <button type="button" class="badge b-muted" style="font-family:var(--mono);cursor:pointer;border:1px solid var(--border);"
             @click="editAuthor = !editAuthor" title="{{t .Lang "team_author_tip"}}">{{.Author}}</button>
@@ -119,11 +119,11 @@
             </div>
             <div class="grid-2" style="gap:0.6rem;margin:0.45rem 0;">
               <div class="sub-panel" style="padding:0.55rem 0.65rem;">
-                <div style="font-size:0.7rem;color:var(--accent);font-weight:700;margin-bottom:0.2rem;">TEAM RULE ({{.TeamRule.AddedBy}} · {{.TeamRule.AddedAt}})</div>
+                <div style="font-size:0.7rem;color:var(--accent);font-weight:700;margin-bottom:0.2rem;">{{t $.Lang "team_lbl_rule_card"}} ({{.TeamRule.AddedBy}} · {{.TeamRule.AddedAt}})</div>
                 <div style="font-size:0.81rem;font-weight:600;">{{.TeamRule.Title}}</div>
               </div>
               <div class="sub-panel" style="padding:0.55rem 0.65rem;">
-                <div style="font-size:0.7rem;color:var(--warn);font-weight:700;margin-bottom:0.2rem;">LOCAL MEMORY #{{.LocalMemoryID}}</div>
+                <div style="font-size:0.7rem;color:var(--warn);font-weight:700;margin-bottom:0.2rem;">{{t $.Lang "team_lbl_local_card"}} #{{.LocalMemoryID}}</div>
                 <div style="font-size:0.81rem;">{{.LocalContent}}</div>
               </div>
             </div>
@@ -166,8 +166,8 @@
                   <div class="team-rule-head">
                     <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
                       {{if .SubCategory}}<span class="tag-chip">{{.SubCategory}}</span>{{end}}
-                      {{if and (not $.ServerMode) (eq .Resolution "local_override")}}<span class="badge b-danger">local_override</span>{{end}}
-                      {{if eq .Resolution "conflict_pending"}}<span class="badge b-danger">conflict</span>{{end}}
+                      {{if and (not $.ServerMode) (eq .Resolution "local_override")}}<span class="badge b-danger">{{t $.Lang "team_override_badge"}}</span>{{end}}
+                      {{if eq .Resolution "conflict_pending"}}<span class="badge b-danger">{{t $.Lang "team_conflict_badge"}}</span>{{end}}
                     </div>
                     <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
                       <span class="team-added">{{.AddedBy}} · {{.AddedAt}}</span>

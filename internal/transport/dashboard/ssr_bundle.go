@@ -16,6 +16,7 @@ type ssrImportModalData struct {
 	Scopes      []string
 	TargetScope string
 	Mode        string
+	ExportCount int
 	BundleJSON  string
 	Preview     *domain.BundleImportResult
 	Error       string
@@ -53,11 +54,24 @@ func registerSSRBundleRoutes(mux *http.ServeMux, d Deps) {
 		if len(scopes) == 0 {
 			scopes = []string{"global", "personal"}
 		}
+		q := r.URL.Query()
+		rq := parseRecordQuery(q)
+		switch strings.ToLower(strings.TrimSpace(rq.State)) {
+		case "pinned", "general", "unpinned":
+		default:
+			rq.State = "active"
+		}
+		var exportCnt int
+		if d.Memory != nil {
+			ids, _ := d.Memory.QueryMatchingActiveIDs(r.Context(), rq, 5000)
+			exportCnt = len(ids)
+		}
 		writeHTMLTemplate(w, "modal_import", ssrImportModalData{
 			Lang:        lang,
 			Scopes:      scopes,
-			TargetScope: strings.TrimSpace(r.URL.Query().Get("scope")),
+			TargetScope: strings.TrimSpace(q.Get("scope")),
 			Mode:        "merge",
+			ExportCount: exportCnt,
 		})
 	}))
 

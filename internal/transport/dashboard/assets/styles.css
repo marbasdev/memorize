@@ -151,6 +151,7 @@
     border-radius: var(--radius-sm); padding: 0.42rem 0.65rem; font-size: 0.82rem; font-family: inherit;
   }
   .input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  .input:disabled, select:disabled, textarea:disabled { opacity: 0.55; cursor: not-allowed; }
 
   .combo-box { position: relative; display: flex; align-items: center; }
   .combo-box > .input { width: 100%; padding-right: 1.75rem; }
@@ -161,6 +162,7 @@
     border-radius: 4px;
   }
   .combo-btn:hover { color: var(--text); background: var(--elevated); }
+  .combo-btn:disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
   .combo-menu {
     position: absolute; top: calc(100% + 3px); left: 0; right: 0; z-index: 120;
     max-height: 210px; overflow-y: auto; background: var(--elevated);

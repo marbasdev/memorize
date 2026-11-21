@@ -100,9 +100,11 @@
             hx-post="/ui/memories/forget" hx-include="#memoryFilterForm" hx-vals='{"id":"{{.Record.ID}}"}'
             hx-target="#memoriesSection" hx-swap="innerHTML">{{t .Lang "btn_forget"}}</button>
         {{end}}
-        <button type="button" class="btn btn-warn btn-sm"
-          hx-post="/ui/memories/undo" hx-include="#memoryFilterForm" hx-vals='{"id":"{{.Record.ID}}"}'
-          hx-target="#memoriesSection" hx-swap="innerHTML">{{t .Lang "btn_undo"}}</button>
+        {{if .Record.CanUndo}}
+          <button type="button" class="btn btn-warn btn-sm"
+            hx-post="/ui/memories/undo" hx-include="#memoryFilterForm" hx-vals='{"id":"{{.Record.ID}}"}'
+            hx-target="#memoriesSection" hx-swap="innerHTML">{{t .Lang "btn_undo"}}</button>
+        {{end}}
       </div>
       <div style="display:flex;gap:0.4rem;">
         {{if and .Record.Active (not .ServerMode)}}
@@ -555,6 +557,17 @@
     </div>
 
     <div class="dlg-body" style="gap:0.75rem;">
+      <div class="sub-panel" style="flex-direction:row;justify-content:space-between;align-items:center;gap:0.65rem;flex-wrap:wrap;padding:0.65rem 0.8rem;">
+        <div style="flex:1;min-width:210px;">
+          <div style="display:flex;align-items:center;gap:0.35rem;flex-wrap:wrap;">
+            <strong style="font-size:0.81rem;">{{t .Lang "import_export_lbl"}}</strong>
+            <span class="badge {{if gt .ExportCount 0}}b-accent{{else}}b-muted{{end}}">{{.ExportCount}}</span>
+          </div>
+          <div style="font-size:0.75rem;color:var(--muted);margin-top:0.12rem;">{{t .Lang "import_export_desc"}}</div>
+        </div>
+        <button type="button" class="btn btn-sm" id="btnExportBundle" {{if eq .ExportCount 0}}disabled{{end}} @click="window.exportPraxisMemories(false)">{{t .Lang "btn_export"}}</button>
+      </div>
+
       <div style="font-size:0.8rem;color:var(--muted);">{{t .Lang "import_desc"}}</div>
 
       <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0.65rem;">

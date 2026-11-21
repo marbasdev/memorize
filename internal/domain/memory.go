@@ -143,6 +143,7 @@ type MemoryRecord struct {
 	Confidence   float64  `json:"confidence"`
 	Pinned       bool     `json:"pinned"`
 	Active       bool     `json:"active"`
+	CanUndo      bool     `json:"can_undo,omitempty"`
 	SupersededBy *int64   `json:"superseded_by"`
 	Replaces     []string `json:"replaces,omitempty"`
 	CreatedAt    string   `json:"created_at"`
