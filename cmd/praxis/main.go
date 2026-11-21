@@ -7,7 +7,7 @@ import (
 	"praxis/internal/transport/cli"
 )
 
-var version = "1.3.4"
+var version = "1.3.5"
 
 func main() {
 	os.Exit(cli.Execute(version, localdaemon.Hooks(version)))

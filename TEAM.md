@@ -37,7 +37,7 @@ praxis user add alice --role member      # Also supports list | rotate | disable
 
 ### Connect Clients & Switch Accounts
 ```bash
-# Connect to a team server (also configurable via Web Console 'Remote Servers' modal)
+# Connect to a team server (also configurable via Web Console 'Team Server' modal)
 praxis connect --global --url https://praxis.company.com --token prx_...
 praxis connect --url https://praxis.company.com --token prx_... --repo .   # Current repo only
 praxis disconnect --global                                                 # Detach (or --repo .)
@@ -57,7 +57,7 @@ praxis push --scope project:app --mode merge               # exact (default 1:1)
 praxis export --scope global -o global-rules.json          # Export portable JSON bundle
 praxis import global-rules.json --mode merge --dry-run     # Preview & import bundle
 ```
-*(Also available in the Web Console `Memories` tab via **`Export`** and **`Import / Merge...`**.)*
+*(Also available in the Web Console `Memories` tab via **`Backup / Import`**.)*
 
 ### 4-Tier Priority & Per-Account Privacy
 

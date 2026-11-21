@@ -17,7 +17,7 @@
 
 > [!IMPORTANT]
 > **`.praxis/TEAM_RULES.md` 파일을 직접 손으로 편집하지 마세요.**
-> 반드시 **웹 콘솔(`팀 규칙` 탭 / `팀 규칙으로 승격...`)** 또는 **MCP `team_rules`** 도구로만 변경해야 임시 `git worktree`에서 해당 파일만 단독 커밋·푸시되어 작업 중인 브랜치 코드와 섞이지 않습니다.
+> 반드시 **웹 콘솔(`팀 규칙` 탭 / `팀 규칙으로 승격`)** 또는 **MCP `team_rules`** 도구로만 변경해야 임시 `git worktree`에서 해당 파일만 단독 커밋·푸시되어 작업 중인 브랜치 코드와 섞이지 않습니다.
 
 - **웹 콘솔**: `기억` 탭에서 로컬 항목을 1줄 팀 규칙으로 **`승격(Promote)`**하거나, **`팀 규칙`** 탭에서 추가·수정·`원격 동기화`·중복 정리·충돌 해결을 수행합니다.
 - **MCP 도구 (`team_rules`)**: `list` · `sync` · `add` · `promote` · `update` · `remove` · `resolve_conflict` · `duplicates` · `clean_duplicates` · `set_config`
@@ -31,13 +31,13 @@
 ### 서버 기동 및 계정 발급
 ```bash
 praxis serve --addr 0.0.0.0:18095        # 최초 실행 시 초기 admin 토큰 1회 출력
-praxis user add alice --role member      # 팀원 발급 (list | rotate | disable 지원, 웹 콘솔 'Accounts' 모달 동일)
+praxis user add alice --role member      # 팀원 발급 (list | rotate | disable 지원, 웹 콘솔 '계정 관리' 모달 동일)
 ```
 > **외부 망 노출 시**: 사설망 또는 리버스 프록시(Caddy · Nginx · Traefik) 뒤에서 HTTPS(TLS)를 적용해 Bearer 토큰과 세션 쿠키를 보호하세요.
 
 ### 클라이언트 연결 및 계정 전환
 ```bash
-# 팀 서버 연결 (웹 콘솔 상단 'Remote Servers' 모달에서도 설정 가능)
+# 팀 서버 연결 (웹 콘솔 상단 '팀 서버 연결' 모달에서도 설정 가능)
 praxis connect --global --url https://praxis.company.com --token prx_...
 praxis connect --url https://praxis.company.com --token prx_... --repo .   # 현재 저장소만 연결
 praxis disconnect --global                                                 # 연결 해제 (또는 --repo .)
@@ -57,7 +57,7 @@ praxis push --scope project:app --mode merge               # exact(기본 1:1) �
 praxis export --scope global -o global-rules.json          # 포터블 JSON 번들 내보내기
 praxis import global-rules.json --mode merge --dry-run     # 번들 병합 미리보기 및 가져오기
 ```
-*(웹 콘솔 `기억` 탭의 **`JSON 내보내기`** · **`가져오기 · 병합...`** 모달에서도 동일하게 지원합니다.)*
+*(웹 콘솔 `기억` 탭의 **`백업 · 가져오기`** 모달에서도 동일하게 지원합니다.)*
 
 ### 4계층 우선순위 및 계정별 프라이버시 격리
 
