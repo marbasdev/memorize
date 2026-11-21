@@ -12,11 +12,11 @@ func ElapsedMsSince(start time.Time) float64 {
 	if start.IsZero() {
 		return 0
 	}
-	ms := float64(time.Since(start).Microseconds()) / 1000.0
-	if ms < 0 {
-		return 0
+	ns := time.Since(start).Nanoseconds()
+	if ns <= 0 {
+		return 0.001
 	}
-	return ms
+	return float64(ns) / 1e6
 }
 
 func DefaultProvider() string {

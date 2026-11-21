@@ -92,7 +92,13 @@ func runDaemonControlCLI(action string, posArgs []string, addr, dbPath, modelsDi
 		oldSt, targetAddr, ok := thttp.DiscoverLiveDaemonStatus(addr, dbPath)
 		if ok && oldSt != nil && oldSt.Running {
 			thttp.PostDaemonRestart(targetAddr)
-			time.Sleep(220 * time.Millisecond)
+			for range 40 {
+				time.Sleep(40 * time.Millisecond)
+				curSt, err := thttp.QueryDaemonStatus(targetAddr)
+				if err != nil || curSt == nil || !curSt.Running || curSt.PID != oldSt.PID {
+					break
+				}
+			}
 		}
 		newSt, ok := hooks.EnsureDaemonRunning(addr, dbPath, modelsDir)
 		if !ok || newSt == nil {
