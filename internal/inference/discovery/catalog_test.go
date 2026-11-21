@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"praxis/internal/domain"
@@ -164,9 +165,14 @@ func TestDiscoveryConfigRoutingLocalProbeAndSystemOneSSRF(t *testing.T) {
 	})
 
 	t.Run("systemone_ssrf_and_local_probe", func(t *testing.T) {
-		var savedHostAuth, foreignHostAuth string
+		var (
+			authMu                         sync.Mutex
+			savedHostAuth, foreignHostAuth string
+		)
 		savedSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			authMu.Lock()
 			savedHostAuth = r.Header.Get("Authorization")
+			authMu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
 			switch r.URL.Path {
 			case "/health":
@@ -180,7 +186,9 @@ func TestDiscoveryConfigRoutingLocalProbeAndSystemOneSSRF(t *testing.T) {
 		defer savedSrv.Close()
 
 		foreignSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			authMu.Lock()
 			foreignHostAuth = r.Header.Get("Authorization")
+			authMu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"ok"}`))
 		}))
@@ -191,16 +199,22 @@ func TestDiscoveryConfigRoutingLocalProbeAndSystemOneSSRF(t *testing.T) {
 			"typesafe_api_key": "secret-ts-key",
 		}
 		resSaved := discovery.DiscoverSystemOneEndpoint(context.Background(), cfg, savedSrv.URL, "")
-		if resSaved.Source != "live_flide" || savedHostAuth != "Bearer secret-ts-key" {
-			t.Fatalf("expected saved host to receive key and discover live_flide, got %+v auth=%q", resSaved, savedHostAuth)
+		authMu.Lock()
+		gotSavedAuth := savedHostAuth
+		authMu.Unlock()
+		if resSaved.Source != "live_flide" || gotSavedAuth != "Bearer secret-ts-key" {
+			t.Fatalf("expected saved host to receive key and discover live_flide, got %+v auth=%q", resSaved, gotSavedAuth)
 		}
 		// Different port on loopback has same Hostname() ("127.0.0.1"), so test an unreachable non-matching hostname to confirm SSRF guard without leaking key.
 		_ = discovery.DiscoverSystemOneEndpoint(context.Background(), map[string]string{
 			"jev_api_url":      "https://saved.example.invalid",
 			"typesafe_api_key": "secret-ts-key",
 		}, foreignSrv.URL, "")
-		if foreignHostAuth != "" {
-			t.Fatalf("SSRF guard leaked saved API key to foreign host: %q", foreignHostAuth)
+		authMu.Lock()
+		gotForeignAuth := foreignHostAuth
+		authMu.Unlock()
+		if gotForeignAuth != "" {
+			t.Fatalf("SSRF guard leaked saved API key to foreign host: %q", gotForeignAuth)
 		}
 
 		resCloud := discovery.DiscoverSystemOneEndpoint(context.Background(), map[string]string{}, "https://api.typesafe.ai/v1/systemone", "")
