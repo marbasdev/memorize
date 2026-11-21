@@ -364,7 +364,7 @@ func ssrFuncMap() template.FuncMap {
 			switch verdict {
 			case domain.GuardrailVerdictRuleViolation:
 				return "b-danger"
-			case domain.GuardrailVerdictPreMutateGate, domain.GuardrailVerdictPlanViolation, domain.GuardrailVerdictPartial, domain.GuardrailVerdictError:
+			case domain.GuardrailVerdictAskConfirm, domain.GuardrailVerdictPreMutateGate, domain.GuardrailVerdictPlanViolation, domain.GuardrailVerdictPartial, domain.GuardrailVerdictError:
 				return "b-warn"
 			default:
 				return "b-ok"

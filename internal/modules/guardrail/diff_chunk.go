@@ -380,7 +380,10 @@ func (s *Service) evaluateGuardrailPlanChunks(
 			chunkRules := make([]domain.Fact, 0, len(blocking))
 			for _, b := range blocking {
 				chunkRules = append(chunkRules, b.Fact)
-				if prev, ok := flaggedByID[b.ID]; !ok || b.Probability > prev.Probability {
+				if prev, ok := flaggedByID[b.ID]; !ok || b.Probability > prev.Probability || (prev.RequiresConfirm && !b.RequiresConfirm) {
+					if ok && !prev.RequiresConfirm {
+						b.RequiresConfirm = false
+					}
 					flaggedByID[b.ID] = b
 				}
 			}
@@ -395,7 +398,11 @@ func (s *Service) evaluateGuardrailPlanChunks(
 
 	var ovCtx memory.TurnOverrideContext
 	if s.mem != nil {
-		ovCtx = s.mem.ActiveTurnOverride(ctx, ev.SessionID, scA, ev.TurnPrompt)
+		clientTail := ""
+		if ev.ClientCtx != nil {
+			clientTail = ev.ClientCtx.TranscriptAssistantTail
+		}
+		ovCtx = s.mem.ActiveTurnOverride(ctx, ev.SessionID, scA, ev.TurnPrompt, ev.Transcript, clientTail)
 	}
 	if ovCtx.PromptContext != "" {
 		if dl, ok := ctx.Deadline(); !ok || time.Until(dl) >= 1200*time.Millisecond {
@@ -426,7 +433,7 @@ func (s *Service) evaluateGuardrailPlanChunks(
 					ovAllOK = false
 					break
 				}
-				overridePlan := chunks[idx].Plan + "\nTurn Context (User Prompt - check ONLY whether this instruction explicitly overrides the flagged rules): " + ovCtx.PromptContext
+				overridePlan := chunks[idx].Plan + "\nTurn Context (Check whether the User Reply—interpreted together with any Prior Assistant Proposal—explicitly confirms, authorizes, or overrides the flagged rules; if confirmed or overridden, do NOT flag as a violation):\n" + ovCtx.PromptContext
 				ovStart := time.Now()
 				ovViols, ovErr := eval.VerifyPlan(ctx, overridePlan, eligible)
 				s.router.RecordTelemetry(ctx, domain.TaskVerify, eval, ovStart, len(eligible), ovErr)
@@ -435,7 +442,13 @@ func (s *Service) evaluateGuardrailPlanChunks(
 					break
 				}
 				for _, b := range filterAndSortViolations(ovViols, minProb) {
-					if prev, ok := ovByID[b.ID]; !ok || b.Probability > prev.Probability {
+					if orig, ok := flaggedByID[b.ID]; ok {
+						b.RequiresConfirm = orig.RequiresConfirm
+					}
+					if prev, ok := ovByID[b.ID]; !ok || b.Probability > prev.Probability || (prev.RequiresConfirm && !b.RequiresConfirm) {
+						if ok && !prev.RequiresConfirm {
+							b.RequiresConfirm = false
+						}
 						ovByID[b.ID] = b
 					}
 				}

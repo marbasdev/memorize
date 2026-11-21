@@ -118,6 +118,28 @@ func (s *Service) runGuardrailHook(ctx context.Context, ev NormalizedHookEvent, 
 	} else {
 		candidateCount, blocking, verifyErr = s.evaluateGuardrailViolations(ctx, plan, ev, scope, 0.80)
 	}
+	if verifyErr == nil && ev.Phase == domain.HookPhasePreTool && allViolationsRequireConfirmOnly(blocking) {
+		vIDs, vDetails := formatViolationDetails(blocking)
+		_, _ = s.RecordGuardrailLog(ctx, domain.GuardrailLogInput{
+			Scope:       scope,
+			IsPrivate:   hasPrivateViolation(ctx, blocking),
+			Source:      ev.Mode,
+			ToolName:    toolName,
+			Verdict:     domain.GuardrailVerdictAskConfirm,
+			Blocked:     false,
+			RuleCount:   candidateCount,
+			ViolatedIDs: vIDs,
+			PlanSnippet: logSnippet,
+			Details:     vDetails,
+			ElapsedMs:   domain.ElapsedMsSince(hookStart),
+		})
+		var sb strings.Builder
+		sb.WriteString("[PRAXIS CONFIRMATION REQUIRED] Action requires user confirmation under active rules:\n")
+		for _, v := range blocking {
+			fmt.Fprintf(&sb, "- [%s / %s %s] %s\n", v.Scope, v.Category, formatViolationRef(v.Fact), v.Content)
+		}
+		return codec.FormatAskPreTool(strings.TrimSpace(sb.String()))
+	}
 	if blocked := s.recordVerifyOutcomeLog(ctx, scope, ev.Mode, toolName, candidateCount, logSnippet, blocking, verifyErr, domain.ElapsedMsSince(hookStart)); !blocked {
 		return codec.FormatAllowPreTool()
 	}
@@ -133,6 +155,18 @@ func (s *Service) runGuardrailHook(ctx context.Context, ev NormalizedHookEvent, 
 	}
 	sb.WriteString("Adjust the action to comply, or—if superseding this rule is genuinely better—ask the user for explicit approval before updating/forgetting the rule (never self-revoke without consent).")
 	return codec.FormatDenyPreTool(strings.TrimSpace(sb.String()))
+}
+
+func allViolationsRequireConfirmOnly(violations []domain.PlanViolation) bool {
+	if len(violations) == 0 {
+		return false
+	}
+	for _, v := range violations {
+		if !v.RequiresConfirm {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Service) recordVerifyOutcomeLog(ctx context.Context, scope, source, toolName string, ruleCount int, planSnippet string, blocking []domain.PlanViolation, verifyErr error, elapsedMs float64) bool {

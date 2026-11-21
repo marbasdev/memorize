@@ -424,6 +424,7 @@ type hookInputPeek struct {
 	Scope          string
 	ToolName       string
 	TargetPath     string
+	TranscriptPath string
 }
 
 func peekHookInput(rawStdin []byte) hookInputPeek {
@@ -435,6 +436,8 @@ func peekHookInput(rawStdin []byte) hookInputPeek {
 		SessionID           string         `json:"session_id"`
 		ConversationID      string         `json:"conversation_id"`
 		ConversationIDCamel string         `json:"conversationId"`
+		TranscriptPath      string         `json:"transcript_path"`
+		TranscriptPathCamel string         `json:"transcriptPath"`
 		Cwd                 string         `json:"cwd"`
 		Workspace           string         `json:"workspace"`
 		WorkspacePaths      []string       `json:"workspacePaths"`
@@ -473,6 +476,7 @@ func peekHookInput(rawStdin []byte) hookInputPeek {
 		Scope:          strings.TrimSpace(p.Scope),
 		ToolName:       toolName,
 		TargetPath:     domain.ExtractTargetFilePath(toolIn),
+		TranscriptPath: domain.FirstNonEmpty(p.TranscriptPath, p.TranscriptPathCamel),
 	}
 }
 
@@ -711,10 +715,15 @@ func buildClientHookContext(ctx context.Context, remote domain.RemoteTargetConfi
 			dispPath := clientHookDisplayPath(targetAbs, cc.TargetRelPath)
 			config.RecordClientTurnBaseline(dataDir, effSID, targetScope, targetAbs, dispPath)
 			cc.RemoteManagedEdit = true
+		} else if !domain.IsFileEditTool(peek.ToolName) {
+			cc.TranscriptAssistantTail = config.ReadTranscriptAssistantTail(peek.TranscriptPath)
 		}
 	case domain.HookPhaseStop:
 		cc.DiffSections = config.ConsumeClientTurnDiffs(dataDir, effSID, false)
 		cc.RemoteManagedEdit = len(cc.DiffSections) > 0
+		if cc.RemoteManagedEdit {
+			cc.TranscriptAssistantTail = config.ReadTranscriptAssistantTail(peek.TranscriptPath)
+		}
 	case domain.HookPhasePreCommit:
 		if targetRepo != "" {
 			if staged, err := git.StagedDiffFiles(ctx, targetRepo); err == nil {

@@ -225,4 +225,29 @@ func TestAuthScopeSecurityAndDiffDomain(t *testing.T) {
 			t.Fatalf("expected decision-only model allowed for verify task: %v", err)
 		}
 	})
+
+	t.Run("transcript_assistant_tail_extraction", func(t *testing.T) {
+		agyJSONL := strings.Join([]string{
+			`{"type":"USER_INPUT","source":"USER_EXPLICIT","content":"1,2번 간결하게"}`,
+			`{"type":"PLANNER_RESPONSE","source":"MODEL","content":"문서 반영을 마쳤습니다. 토큰 prx_0123456789abcdef0123456789abcdef 확인.\n원격 origin/main에도 바로 푸시해 둘까요?"}`,
+			`{"type":"USER_INPUT","source":"USER_EXPLICIT","content":"네"}`,
+			`{"type":"USER_INPUT","source":"SYSTEM","content":"background task completed"}`,
+			`{"type":"PLANNER_RESPONSE","source":"MODEL","content":"푸시를 실행합니다."}`,
+		}, "\n") + "\n"
+		gotAgy := ParseTranscriptAssistantTail([]byte(agyJSONL), false)
+		if !strings.Contains(gotAgy, "원격 origin/main에도 바로 푸시해 둘까요?") || strings.Contains(gotAgy, "푸시를 실행합니다") || strings.Contains(gotAgy, "prx_0123456789abcdef") {
+			t.Fatalf("unexpected Antigravity transcript tail: %q", gotAgy)
+		}
+
+		claudeJSONL := strings.Join([]string{
+			`{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","text":"internal"},{"type":"text","text":"강제 푸시(--force)를 진행할까요?"}]}}`,
+			`{"type":"user","message":{"role":"user","content":"진행"}}`,
+			`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"도구를 호출합니다."},{"type":"tool_use","name":"Bash"}]}}`,
+			`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}`,
+		}, "\n") + "\n"
+		gotClaude := ParseTranscriptAssistantTail([]byte(claudeJSONL), false)
+		if gotClaude != "강제 푸시(--force)를 진행할까요?" {
+			t.Fatalf("expected Claude assistant proposal before human turn (ignoring tool_result), got %q", gotClaude)
+		}
+	})
 }

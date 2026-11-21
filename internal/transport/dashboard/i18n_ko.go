@@ -205,6 +205,7 @@ var koTranslations = map[string]string{
 	"gr_src_git":                 "Git Pre-Commit",
 	"gr_src_verify":              "계획 검증 (MCP · 콘솔)",
 	"gr_src_ui":                  "콘솔 시뮬레이터",
+	"gr_verdict_ask_confirm":     "사용자 확인 위임",
 	"gr_verdict_rule_violation":  "규칙 위반 차단",
 	"gr_verdict_pre_mutate_gate": "선반영 게이트 차단",
 	"gr_verdict_plan_violation":  "계획 위반 감지",

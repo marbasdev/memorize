@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"praxis/internal/domain"
+	"praxis/internal/infra/config"
 )
 
 type matchedItem struct {
@@ -403,10 +404,9 @@ func (s *Service) RecordTurnState(ctx context.Context, sessionID, rawScope, user
 	var baseID int64
 	_ = s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM memories`).Scan(&baseID)
 	_, _ = s.db.ExecContext(ctx, `
-		INSERT INTO turn_state (session_id, scope, prev_input, last_input, turn_base_id, mutated_ids, mutated, gate_checked, stop_retry, updated_at)
-		VALUES (?, ?, '', ?, ?, '', 0, 0, 0, ?)
+		INSERT INTO turn_state (session_id, scope, last_input, turn_base_id, mutated_ids, mutated, gate_checked, stop_retry, updated_at)
+		VALUES (?, ?, ?, ?, '', 0, 0, 0, ?)
 		ON CONFLICT(session_id, scope) DO UPDATE SET
-			prev_input = CASE WHEN turn_state.last_input = excluded.last_input OR turn_state.last_input = '' THEN turn_state.prev_input ELSE turn_state.last_input END,
 			turn_base_id = CASE WHEN turn_state.last_input = excluded.last_input THEN turn_state.turn_base_id ELSE excluded.turn_base_id END,
 			mutated_ids = CASE WHEN turn_state.last_input = excluded.last_input THEN turn_state.mutated_ids ELSE '' END,
 			mutated = CASE WHEN turn_state.last_input = excluded.last_input THEN turn_state.mutated ELSE 0 END,
@@ -578,49 +578,49 @@ func (o TurnOverrideContext) IsRuleMutatedInTurn(f domain.Fact) bool {
 	return o.HasTurnBase && f.ID > o.TurnBaseID
 }
 
-func formatTwoTurnOverridePrompt(prevInput, lastInput string) string {
-	prev := strings.TrimSpace(prevInput)
-	last := strings.TrimSpace(lastInput)
-	if last == "" {
+func formatTurnDialogueContext(assistantTail, userInput string) string {
+	user := strings.TrimSpace(userInput)
+	if user == "" || len(user) > 1200 {
 		return ""
 	}
-	if prev == "" || prev == last {
-		if len(last) > 1200 {
-			return ""
-		}
-		return last
+	asst := strings.TrimSpace(assistantTail)
+	if asst == "" {
+		return "User Reply: " + user
 	}
-	if len(last) > 1050 {
-		return domain.TruncateUTF8Bytes(last, 1200)
-	}
-	maxPrev := 1150 - len(last)
-	if maxPrev < 80 {
-		return last
-	}
-	return "Prior User Turn: " + domain.TruncateUTF8Bytes(prev, maxPrev) + "\nCurrent User Turn: " + last
+	return "Prior Assistant Proposal: " + domain.TruncateUTF8Bytes(asst, 600) + "\nUser Reply: " + user
 }
 
-func (s *Service) ActiveTurnOverride(ctx context.Context, sessionID, rawScope, fallbackPrompt string) TurnOverrideContext {
+func (s *Service) ActiveTurnOverride(ctx context.Context, sessionID, rawScope, fallbackPrompt, transcriptPath, clientAssistantTail string) TurnOverrideContext {
 	var out TurnOverrideContext
+	resolveAsstTail := func() string {
+		if t := strings.TrimSpace(clientAssistantTail); t != "" {
+			return domain.RedactSecrets(t)
+		}
+		if domain.IsServerMode(ctx) {
+			return ""
+		}
+		return config.ReadTranscriptAssistantTail(transcriptPath)
+	}
+
 	sid := domain.ScopedSessionID(ctx, sessionID)
 	if sid == "" {
 		fb := strings.TrimSpace(fallbackPrompt)
-		if len(fb) <= 1200 {
-			out.PromptContext = fb
+		if fb != "" && len(fb) <= 1200 {
+			out.PromptContext = formatTurnDialogueContext(resolveAsstTail(), fb)
 		}
 		return out
 	}
 	sc := domain.NormalizeScope(rawScope)
 	cutoff := time.Now().Add(-domain.TurnInputTTL).Unix()
-	var prevInput, lastInput, rawMutIDs string
+	var lastInput, rawMutIDs string
 	var baseID int64
 	err := s.db.QueryRowContext(ctx,
-		`SELECT prev_input, last_input, turn_base_id, mutated_ids FROM turn_state WHERE session_id = ? AND scope = ? AND updated_at >= ?`,
-		sid, sc, cutoff).Scan(&prevInput, &lastInput, &baseID, &rawMutIDs)
+		`SELECT last_input, turn_base_id, mutated_ids FROM turn_state WHERE session_id = ? AND scope = ? AND updated_at >= ?`,
+		sid, sc, cutoff).Scan(&lastInput, &baseID, &rawMutIDs)
 	if err != nil {
 		fb := strings.TrimSpace(fallbackPrompt)
-		if len(fb) <= 1200 {
-			out.PromptContext = fb
+		if fb != "" && len(fb) <= 1200 {
+			out.PromptContext = formatTurnDialogueContext(resolveAsstTail(), fb)
 		}
 		return out
 	}
@@ -635,7 +635,9 @@ func (s *Service) ActiveTurnOverride(ctx context.Context, sessionID, rawScope, f
 		}
 	}
 	effLast := domain.FirstNonEmpty(strings.TrimSpace(lastInput), strings.TrimSpace(fallbackPrompt))
-	out.PromptContext = formatTwoTurnOverridePrompt(prevInput, effLast)
+	if effLast != "" && len(effLast) <= 1200 {
+		out.PromptContext = formatTurnDialogueContext(resolveAsstTail(), effLast)
+	}
 	return out
 }
 

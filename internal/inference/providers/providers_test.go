@@ -359,6 +359,11 @@ func TestGeminiDecisionsAdapterWireProtocolAndTasks(t *testing.T) {
 			t.Fatalf("expected %s to yield 0 violations, got %+v (err=%v)", nonViol, got, err)
 		}
 	}
+	verifyOutcome = "CONFIRM"
+	gotConfirm, err := ev.VerifyPlan(context.Background(), "git push --force origin main", facts)
+	if err != nil || len(gotConfirm) != 1 || !gotConfirm[0].RequiresConfirm {
+		t.Fatalf("expected CONFIRM choice to set RequiresConfirm=true, got %+v (err=%v)", gotConfirm, err)
+	}
 
 	cal, err := ev.CalibrateConfidence(context.Background(), "project:app", facts)
 	if err != nil || cal[10] != 0.92 {

@@ -98,8 +98,9 @@ func ApplyDecisionSemantics(dec *MutationDecision) {
 
 type PlanViolation struct {
 	Fact
-	Probability float64 `json:"probability"` // 0.0 ~ 1.0
-	Confidence  float64 `json:"confidence"`  // 0.0 ~ 1.0
+	Probability     float64 `json:"probability"`                // 0.0 ~ 1.0
+	Confidence      float64 `json:"confidence"`                 // 0.0 ~ 1.0
+	RequiresConfirm bool    `json:"requires_confirm,omitempty"` // True when rule gates action on prior user confirmation
 }
 
 type ConsolidationProposal struct {

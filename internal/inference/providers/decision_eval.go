@@ -340,8 +340,9 @@ func (d *decisionEvaluator) EvaluateMutations(ctx context.Context, scope string,
 }
 
 var verifyPlanCriteria = map[string]string{
-	"ALLOW":     "Proposed Action/Diff is compatible with or unrelated to this rule (e.g., an internal source-code implementation rule evaluated against a shell command), executes a partial/preparatory step of a broader workflow, follows Turn Context overrides, or only reflects Turn Context prose.",
-	"VIOLATION": "Proposed Action/Diff clearly and directly introduces prohibited behavior or values contradicting this rule.",
+	"ALLOW":     "Proposed Action/Diff is compatible with or unrelated to this rule (e.g., an internal source-code implementation rule evaluated against a shell command), executes a partial/preparatory step of a broader workflow, only reflects Turn Context prose, or Turn Context already shows explicit user confirmation/override for this action.",
+	"CONFIRM":   "Proposed Action/Diff matches an action that this rule explicitly gates on prior user confirmation/approval (e.g., 'ask user before X', 'do not X without user confirmation'), and Turn Context does not yet show user approval.",
+	"VIOLATION": "Proposed Action/Diff clearly and directly introduces unconditionally prohibited behavior or values contradicting this rule (hard invariant, not a user-confirmation gate).",
 }
 
 func (d *decisionEvaluator) VerifyPlan(ctx context.Context, proposedPlan string, rules []domain.Fact) ([]domain.PlanViolation, error) {
@@ -368,11 +369,16 @@ func (d *decisionEvaluator) VerifyPlan(ctx context.Context, proposedPlan string,
 	var out []domain.PlanViolation
 	for _, r := range rules {
 		a := ans[fmt.Sprintf("v_%d", r.ID)]
-		if a.Choice != "VIOLATION" {
+		if a.Choice != "VIOLATION" && a.Choice != "CONFIRM" {
 			continue
 		}
 		if p := a.conf(); p >= 0.5 {
-			out = append(out, domain.PlanViolation{Fact: r, Probability: p, Confidence: p})
+			out = append(out, domain.PlanViolation{
+				Fact:            r,
+				Probability:     p,
+				Confidence:      p,
+				RequiresConfirm: a.Choice == "CONFIRM",
+			})
 		}
 	}
 	return out, nil

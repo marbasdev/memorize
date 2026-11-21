@@ -123,6 +123,7 @@ type AgentCodec interface {
 	FormatEmpty() (string, int, error)
 	FormatContext(body string) (string, int, error)
 	FormatAllowPreTool() (string, int, error)
+	FormatAskPreTool(reason string) (string, int, error)
 	FormatDenyPreTool(reason string) (string, int, error)
 	FormatStopContinue(reason string) (string, int, error)
 }
@@ -166,6 +167,16 @@ func (claudeAgentCodec) FormatContext(body string) (string, int, error) {
 	return body, 0, nil
 }
 func (claudeAgentCodec) FormatAllowPreTool() (string, int, error) { return "{}", 0, nil }
+func (claudeAgentCodec) FormatAskPreTool(reason string) (string, int, error) {
+	b, _ := json.Marshal(map[string]any{
+		"hookSpecificOutput": map[string]any{
+			"hookEventName":            "PreToolUse",
+			"permissionDecision":       "ask",
+			"permissionDecisionReason": reason,
+		},
+	})
+	return string(b), 0, nil
+}
 func (claudeAgentCodec) FormatDenyPreTool(reason string) (string, int, error) {
 	b, _ := json.Marshal(map[string]any{"decision": "block", "reason": reason})
 	return string(b), 2, nil
@@ -189,6 +200,10 @@ func (antigravityAgentCodec) FormatContext(body string) (string, int, error) {
 func (antigravityAgentCodec) FormatAllowPreTool() (string, int, error) {
 	return `{"decision":"allow"}`, 0, nil
 }
+func (antigravityAgentCodec) FormatAskPreTool(reason string) (string, int, error) {
+	b, _ := json.Marshal(map[string]any{"decision": "force_ask", "reason": reason})
+	return string(b), 0, nil
+}
 func (antigravityAgentCodec) FormatDenyPreTool(reason string) (string, int, error) {
 	b, _ := json.Marshal(map[string]any{"decision": "deny", "reason": reason})
 	return string(b), 0, nil
@@ -203,6 +218,7 @@ type gitAgentCodec struct{}
 func (gitAgentCodec) FormatEmpty() (string, int, error)                     { return "", 0, nil }
 func (gitAgentCodec) FormatContext(body string) (string, int, error)        { return body, 0, nil }
 func (gitAgentCodec) FormatAllowPreTool() (string, int, error)              { return "PASS", 0, nil }
+func (gitAgentCodec) FormatAskPreTool(reason string) (string, int, error)   { return reason, 1, nil }
 func (gitAgentCodec) FormatDenyPreTool(reason string) (string, int, error)  { return reason, 1, nil }
 func (gitAgentCodec) FormatStopContinue(reason string) (string, int, error) { return reason, 1, nil }
 

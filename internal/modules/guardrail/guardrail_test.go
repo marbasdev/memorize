@@ -533,6 +533,8 @@ type lazyOverrideVerifyEval struct {
 	capturedPlans        []string
 	capturedCounts       []int
 	violateRuleSubstring string
+	confirmOnly          bool
+	mixedHardAndConfirm  bool
 }
 
 func (e *lazyOverrideVerifyEval) VerifyPlan(_ context.Context, plan string, rules []domain.Fact) ([]domain.PlanViolation, error) {
@@ -541,15 +543,21 @@ func (e *lazyOverrideVerifyEval) VerifyPlan(_ context.Context, plan string, rule
 	if strings.Contains(plan, "Turn Context") && strings.Contains(plan, "allow explicit exception") {
 		return nil, nil
 	}
+	if e.mixedHardAndConfirm && len(rules) >= 2 {
+		return []domain.PlanViolation{
+			{Fact: rules[0], Probability: 0.94, Confidence: 0.90, RequiresConfirm: rules[0].ID == 1},
+			{Fact: rules[1], Probability: 0.96, Confidence: 0.92, RequiresConfirm: rules[1].ID == 1},
+		}, nil
+	}
 	if e.violateRuleSubstring != "" {
 		for _, r := range rules {
 			if strings.Contains(r.Content, e.violateRuleSubstring) {
-				return []domain.PlanViolation{{Fact: r, Probability: 0.94, Confidence: 0.90}}, nil
+				return []domain.PlanViolation{{Fact: r, Probability: 0.94, Confidence: 0.90, RequiresConfirm: e.confirmOnly}}, nil
 			}
 		}
 	}
 	if len(rules) > 0 {
-		return []domain.PlanViolation{{Fact: rules[0], Probability: 0.94, Confidence: 0.90}}, nil
+		return []domain.PlanViolation{{Fact: rules[0], Probability: 0.94, Confidence: 0.90, RequiresConfirm: e.confirmOnly}}, nil
 	}
 	return nil, nil
 }
@@ -706,24 +714,99 @@ func TestGuardrailLazyOverrideAllowsExplicitExceptionAcrossFlaggedRulesOnly(t *t
 		}
 	})
 
-	t.Run("TwoTurnApprovalPreservesPriorTurnContext", func(t *testing.T) {
-		approvePayload, _ := json.Marshal(map[string]any{
-			"session_id": sessID,
-			"cwd":        repo,
-			"prompt":     "네",
-		})
-		_, _, _ = st.gr.ExecuteHook(ctx, "antigravity-turn", approvePayload, repo)
+	t.Run("TranscriptProposalAndShortReplyPairAllowsConfirmedAction", func(t *testing.T) {
+		transcriptFile := filepath.Join(t.TempDir(), "transcript.jsonl")
+		jsonl := strings.Join([]string{
+			`{"type":"USER_INPUT","source":"USER_EXPLICIT","content":"문서 정리해줘"}`,
+			`{"type":"PLANNER_RESPONSE","source":"MODEL","content":"완료했습니다. Should I allow explicit exception to run tool once?"}`,
+			`{"type":"USER_INPUT","source":"USER_EXPLICIT","content":"네"}`,
+			`{"type":"USER_INPUT","source":"SYSTEM","content":"timer fired"}`,
+			`{"type":"PLANNER_RESPONSE","source":"MODEL","content":"실행하겠습니다."}`,
+		}, "\n") + "\n"
+		if err := os.WriteFile(transcriptFile, []byte(jsonl), 0o600); err != nil {
+			t.Fatalf("write transcript: %v", err)
+		}
 
+		approveTurnPayload, _ := json.Marshal(map[string]any{
+			"session_id":     sessID,
+			"cwd":            repo,
+			"prompt":         "네",
+			"transcriptPath": transcriptFile,
+		})
+		_, _, _ = st.gr.ExecuteHook(ctx, "antigravity-turn", approveTurnPayload, repo)
+
+		pretoolWithTranscript, _ := json.Marshal(map[string]any{
+			"session_id":     sessID,
+			"cwd":            repo,
+			"transcriptPath": transcriptFile,
+			"tool_name":      "run_command",
+			"tool_input":     map[string]any{"command": "echo-via-custom-runner"},
+		})
 		eval.capturedPlans = nil
 		eval.capturedCounts = nil
-		out, code, err := st.gr.ExecuteHook(ctx, "antigravity-pretool", cmdPayload, repo)
+		out, code, err := st.gr.ExecuteHook(ctx, "antigravity-pretool", pretoolWithTranscript, repo)
 		if err != nil || code != 0 || !strings.Contains(out, `"decision":"allow"`) {
-			t.Fatalf("expected 2-turn approval ('네') to retain prior turn context and allow, got code=%d err=%v out=%s", code, err, out)
+			t.Fatalf("expected transcript proposal + '네' reply pair to allow, got code=%d err=%v out=%s", code, err, out)
 		}
 		if len(eval.capturedPlans) != 2 ||
-			!strings.Contains(eval.capturedPlans[1], "Prior User Turn: Please allow explicit exception to run tool once") ||
-			!strings.Contains(eval.capturedPlans[1], "Current User Turn: 네") {
-			t.Fatalf("expected Phase 2 plan to include both Prior and Current User Turn, got:\n%+v", eval.capturedPlans)
+			!strings.Contains(eval.capturedPlans[1], "Prior Assistant Proposal: 완료했습니다. Should I allow explicit exception to run tool once?") ||
+			!strings.Contains(eval.capturedPlans[1], "User Reply: 네") {
+			t.Fatalf("expected Phase 2 plan to pair Prior Assistant Proposal with User Reply, got:\n%+v", eval.capturedPlans)
+		}
+	})
+
+	t.Run("UnconfirmedGateRuleDelegatesToNativeAskUIWhileHardViolationDenies", func(t *testing.T) {
+		eval.confirmOnly = true
+		defer func() {
+			eval.confirmOnly = false
+			eval.mixedHardAndConfirm = false
+		}()
+
+		unconfirmedTurn, _ := json.Marshal(map[string]any{
+			"session_id": sessID,
+			"cwd":        repo,
+			"prompt":     "작업 마무리해줘",
+		})
+		_, _, _ = st.gr.ExecuteHook(ctx, "antigravity-turn", unconfirmedTurn, repo)
+
+		agyOut, agyCode, agyErr := st.gr.ExecuteHook(ctx, "antigravity-pretool", cmdPayload, repo)
+		if agyErr != nil || agyCode != 0 || !strings.Contains(agyOut, `"decision":"force_ask"`) || !strings.Contains(agyOut, "[PRAXIS CONFIRMATION REQUIRED]") {
+			t.Fatalf("expected Antigravity PreToolUse to return force_ask on confirmation-gated rule, got code=%d err=%v out=%s", agyCode, agyErr, agyOut)
+		}
+
+		claudeOut, claudeCode, claudeErr := st.gr.ExecuteHook(ctx, "claude-pretool", cmdPayload, repo)
+		if claudeErr != nil || claudeCode != 0 || !strings.Contains(claudeOut, `"permissionDecision":"ask"`) {
+			t.Fatalf("expected Claude PreToolUse to return permissionDecision=ask (exit 0), got code=%d err=%v out=%s", claudeCode, claudeErr, claudeOut)
+		}
+
+		gitPayload, _ := json.Marshal(map[string]any{
+			"cwd":           repo,
+			"proposed_plan": "git commit -m test",
+		})
+		_, gitCode, _ := st.gr.ExecuteHook(ctx, "git-precommit", gitPayload, repo)
+		if gitCode == 0 {
+			t.Fatalf("expected non-interactive git-precommit to block unconfirmed CONFIRM rule (exit != 0)")
+		}
+
+		logs, lerr := st.gr.QueryGuardrailLogsPage(ctx, domain.GuardrailLogQuery{Scope: scope, Page: 1, PageSize: 10})
+		if lerr != nil || len(logs.Records) == 0 {
+			t.Fatalf("QueryGuardrailLogsPage failed: %v", lerr)
+		}
+		foundAskLog := false
+		for _, rec := range logs.Records {
+			if rec.Verdict == domain.GuardrailVerdictAskConfirm && !rec.Blocked {
+				foundAskLog = true
+				break
+			}
+		}
+		if !foundAskLog {
+			t.Fatalf("expected ask_confirm audit log with Blocked=false, got %+v", logs.Records)
+		}
+
+		eval.mixedHardAndConfirm = true
+		mixOut, mixCode, mixErr := st.gr.ExecuteHook(ctx, "antigravity-pretool", cmdPayload, repo)
+		if mixErr != nil || mixCode != 0 || !strings.Contains(mixOut, `"decision":"deny"`) {
+			t.Fatalf("expected mixed hard + confirm violations to hard-deny, got code=%d err=%v out=%s", mixCode, mixErr, mixOut)
 		}
 	})
 }

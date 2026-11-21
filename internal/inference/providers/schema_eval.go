@@ -329,9 +329,10 @@ func (e *schemaEvaluator) VerifyPlan(ctx context.Context, proposedPlan string, r
 	}
 	var sb strings.Builder
 	sb.WriteString(`Verify whether the concrete Proposed Action/Diff directly executes behavior forbidden by any Rule below (never infer violations from keyword similarity or unrelated Turn Context prose).
-- First write "a_verdict": inspect the specific command/diff against the Rules and state "COMPLIES: <why allowed/unrelated>" unless an unambiguous direct contradiction exists ("VIOLATES #<id>: <exact conflict>").
+- First write "a_verdict": inspect the specific command/diff against the Rules and state "COMPLIES: <why allowed/unrelated/confirmed>" unless an unambiguous direct conflict exists ("VIOLATES #<id>: <exact conflict>").
 - Match rule scope to action type: for shell commands (e.g. Bash/run_command), only flag rules governing shell, git, or workflow execution—never apply internal source-code structure or package implementation rules unless the Proposed Plan is a code edit/diff.
-- If "a_verdict" starts with "COMPLIES", or if the action is compatible, unrelated, partial/preparatory, uncertain, or authorized by Turn Context overrides, return an EMPTY "violations" array; otherwise include only directly violated rules with honest "probability" (0.00-1.00; >= 0.80 only for clear direct contradiction) and "confidence" (0.00-1.00).
+- Distinguish hard prohibitions from confirmation gates: set "requires_confirm": true ONLY when the rule explicitly gates the action upon prior user confirmation/approval (e.g. "do not merge/push/delete without user confirmation") AND Turn Context does not yet show the user instructing or approving that action; set "requires_confirm": false for unconditional rule violations.
+- If "a_verdict" starts with "COMPLIES", or if the action is compatible, unrelated, partial/preparatory, uncertain, or already instructed/confirmed/overridden by the user in Turn Context, return an EMPTY "violations" array; otherwise include only directly triggered rules with honest "probability" (0.00-1.00; >= 0.80 only for clear direct match) and "confidence" (0.00-1.00).
 Rules:
 `)
 	ruleMap := make(map[int64]domain.Fact, len(rules))
@@ -342,10 +343,11 @@ Rules:
 	fmt.Fprintf(&sb, "\nProposed Plan:\n%s\n", proposedPlan)
 	d := e.tr.Dialect()
 	itemSchema := d.obj(map[string]any{
-		"id":          map[string]any{"type": d.t("integer")},
-		"probability": map[string]any{"type": d.t("number")},
-		"confidence":  map[string]any{"type": d.t("number")},
-	}, []string{"id", "probability", "confidence"})
+		"id":               map[string]any{"type": d.t("integer")},
+		"probability":      map[string]any{"type": d.t("number")},
+		"confidence":       map[string]any{"type": d.t("number")},
+		"requires_confirm": map[string]any{"type": d.t("boolean")},
+	}, []string{"id", "probability", "confidence", "requires_confirm"})
 	schema := d.obj(map[string]any{
 		"a_verdict":  map[string]any{"type": d.t("string")},
 		"violations": map[string]any{"type": d.t("array"), "items": itemSchema},
@@ -354,9 +356,10 @@ Rules:
 	var parsed struct {
 		Verdict    string `json:"a_verdict"`
 		Violations []struct {
-			ID          int64   `json:"id"`
-			Probability float64 `json:"probability"`
-			Confidence  float64 `json:"confidence"`
+			ID              int64   `json:"id"`
+			Probability     float64 `json:"probability"`
+			Confidence      float64 `json:"confidence"`
+			RequiresConfirm bool    `json:"requires_confirm"`
 		} `json:"violations"`
 	}
 	conf, err := e.tr.CallJSON(ctx, sb.String(), schema, &parsed)
@@ -370,7 +373,12 @@ Rules:
 			if v.Confidence > 0 {
 				vConf = clampProb(v.Confidence)
 			}
-			out = append(out, domain.PlanViolation{Fact: r, Probability: v.Probability, Confidence: vConf})
+			out = append(out, domain.PlanViolation{
+				Fact:            r,
+				Probability:     v.Probability,
+				Confidence:      vConf,
+				RequiresConfirm: v.RequiresConfirm,
+			})
 		}
 	}
 	return out, nil

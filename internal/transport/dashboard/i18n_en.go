@@ -264,6 +264,7 @@ var enTranslations = map[string]string{
 	"gr_src_git":                 "Git Pre-Commit",
 	"gr_src_verify":              "Plan Verify (MCP · UI)",
 	"gr_src_ui":                  "Console Simulator",
+	"gr_verdict_ask_confirm":     "Confirmation Prompted",
 	"gr_verdict_rule_violation":  "Rule Violation Blocked",
 	"gr_verdict_pre_mutate_gate": "Pre-Mutate Gate Blocked",
 	"gr_verdict_plan_violation":  "Plan Violation Detected",

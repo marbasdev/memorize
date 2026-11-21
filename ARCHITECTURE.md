@@ -23,7 +23,7 @@ flowchart LR
 
 ### Hybrid Guardrail Flow (`PreToolUse` · `Stop` · `git pre-commit`)
 1. **Read-Only Bypass & Pre-Mutate Gate (`PreToolUse`)**: Read-only tools pass with `0` inference calls; if the current prompt introduced an unsaved rule change, mutations pause until memory is updated first.
-2. **Upfront Shell & Batch-Code Block (`PreToolUse`)**: Irreversible shell commands, batch code (`REPL` · `run_workflow`), and plan checks are verified upfront against local and team rules, checking the last 2 user turns for explicit conditional overrides.
+2. **Upfront Shell & Batch-Code Gate (`PreToolUse`)**: Irreversible shell commands, batch code (`REPL` · `run_workflow`), and plan checks are verified upfront—hard invariants block (`Deny`) immediately, while confirmation-gated rules check the transcript `(Assistant Proposal ↔ User Reply)` pair and delegate unconfirmed actions to native host approval prompts (`force_ask` · `ask`).
 3. **Zero-Stall Edit Snapshots (`PreToolUse`)**: Interactive file edits proceed without per-edit inference latency, snapshotting each touched file's baseline once in `turn_pending_edits`.
 4. **Turn-End Auto-Fix (`Stop`), Commit Gate & Rule Refinement**: Cumulative diffs are verified once per scope at turn end for self-correction (backed by `git-precommit`), and `guardrail_logs` friction can refine active rules on demand in the Web Console.
 

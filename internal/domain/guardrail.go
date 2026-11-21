@@ -2,6 +2,7 @@ package domain
 
 const (
 	GuardrailVerdictPass          = "pass"
+	GuardrailVerdictAskConfirm    = "ask_confirm"
 	GuardrailVerdictRuleViolation = "rule_violation"
 	GuardrailVerdictPreMutateGate = "pre_mutate_gate"
 	GuardrailVerdictPlanViolation = "plan_violation"

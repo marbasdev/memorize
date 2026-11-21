@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -315,4 +316,37 @@ func PickAvailableLoopbackPort(host string, desiredPort int, excludePorts ...int
 		}
 	}
 	return 0, false, errors.New("no available loopback port found")
+}
+
+const maxTranscriptTailScanBytes = 64 * 1024
+
+func ReadTranscriptAssistantTail(transcriptPath string) string {
+	p := strings.TrimSpace(transcriptPath)
+	if p == "" {
+		return ""
+	}
+	info, err := os.Stat(p)
+	if err != nil || info.IsDir() || info.Size() == 0 {
+		return ""
+	}
+	f, err := os.Open(p)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	startOff := int64(0)
+	snapped := false
+	if info.Size() > maxTranscriptTailScanBytes {
+		startOff = info.Size() - maxTranscriptTailScanBytes
+		snapped = true
+		if _, err := f.Seek(startOff, io.SeekStart); err != nil {
+			return ""
+		}
+	}
+	chunk, err := io.ReadAll(io.LimitReader(f, maxTranscriptTailScanBytes+1024))
+	if err != nil {
+		return ""
+	}
+	return domain.ParseTranscriptAssistantTail(chunk, snapped)
 }

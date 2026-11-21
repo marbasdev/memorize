@@ -174,15 +174,16 @@ type HookDiffSection struct {
 // ClientHookContext carries client-resolved repository metadata, diffs, and local docs so remote servers
 // never need filesystem access to the client's machine.
 type ClientHookContext struct {
-	CanonicalScopes   []string                    `json:"canonical_scopes,omitempty"`
-	TargetScope       string                      `json:"target_scope,omitempty"`
-	TargetRelPath     string                      `json:"target_rel_path,omitempty"`
-	RemoteManagedEdit bool                        `json:"remote_managed_edit,omitempty"`
-	DiffSections      []HookDiffSection           `json:"diff_sections,omitempty"`
-	StagedDiffs       []HookDiffSection           `json:"staged_diffs,omitempty"`
-	GitHeadByScope    map[string]string           `json:"git_head_by_scope,omitempty"`
-	GitCommitsByScope map[string][]GitCommitBrief `json:"git_commits_by_scope,omitempty"`
-	TeamRuleDocs      map[string]string           `json:"team_rule_docs,omitempty"`
+	CanonicalScopes         []string                    `json:"canonical_scopes,omitempty"`
+	TargetScope             string                      `json:"target_scope,omitempty"`
+	TargetRelPath           string                      `json:"target_rel_path,omitempty"`
+	RemoteManagedEdit       bool                        `json:"remote_managed_edit,omitempty"`
+	TranscriptAssistantTail string                      `json:"transcript_assistant_tail,omitempty"`
+	DiffSections            []HookDiffSection           `json:"diff_sections,omitempty"`
+	StagedDiffs             []HookDiffSection           `json:"staged_diffs,omitempty"`
+	GitHeadByScope          map[string]string           `json:"git_head_by_scope,omitempty"`
+	GitCommitsByScope       map[string][]GitCommitBrief `json:"git_commits_by_scope,omitempty"`
+	TeamRuleDocs            map[string]string           `json:"team_rule_docs,omitempty"`
 }
 
 type clientHookCtxKey struct{}
